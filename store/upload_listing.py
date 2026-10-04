@@ -67,8 +67,15 @@ def main():
         # age rating: nothing objectionable (an office suite)
         st, ar = api("GET", f"/v1/appInfos/{info['id']}/ageRatingDeclaration")
         if st == 200:
-            a = {k: ("NONE" if isinstance(v, str) else False if isinstance(v, bool) else v) for k, v in ar["data"]["attributes"].items()
-                 if k not in ("kidsAgeBand", "ageRatingOverride", "koreaAgeRatingOverride", "ageRatingOverrideV2", "developerAgeRatingInfoUrl")}
+            # a new app's answers start empty (null): answer every question explicitly - an office suite: NONE / No
+            freq = ["alcoholTobaccoOrDrugUseOrReferences", "contests", "gamblingSimulated", "gunsOrOtherWeapons", "medicalOrTreatmentInformation",
+                    "profanityOrCrudeHumor", "sexualContentGraphicAndNudity", "sexualContentOrNudity", "horrorOrFearThemes", "matureOrSuggestiveThemes",
+                    "violenceCartoonOrFantasy", "violenceRealisticProlongedGraphicOrSadistic", "violenceRealistic"]
+            flags = ["advertising", "gambling", "healthOrWellnessTopics", "lootBox", "messagingAndChat", "parentalControls", "ageAssurance",
+                     "socialMedia", "unrestrictedWebAccess", "userGeneratedContent"]
+            have = ar["data"]["attributes"]
+            a = {k: "NONE" for k in freq if k in have}
+            a.update({k: False for k in flags if k in have})
             st2, r2 = api("PATCH", f"/v1/ageRatingDeclarations/{ar['data']['id']}", {"data": {"type": "ageRatingDeclarations", "id": ar["data"]["id"], "attributes": a}})
             print("age rating", st2 if st2 == 200 else ("needs a manual look: %s %s" % (st2, r2)))
 
