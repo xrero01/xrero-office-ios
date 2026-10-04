@@ -99,6 +99,18 @@
 			</array>
 		</dict>
 	</array>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<!-- used only by the CI test build (AutotestScreen); the App Store build ignores it -->
+			<key>CFBundleURLName</key>
+			<string>com.xrero.office.autotest</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>xrero-autotest</string>
+			</array>
+		</dict>
+	</array>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Xrero Office inserts the photos you choose into your document.</string>
 </dict>

@@ -38,6 +38,10 @@ struct AutotestScreen: View {
             }
             .opacity(0.02)
         }
+        // test-only trigger that needs no tapping: XCUIApplication.open(URL("xrero-autotest://save"))
+        .onOpenURL { url in
+            if url.scheme == "xrero-autotest" && url.host == "save" { controller.save() }
+        }
     }
 
     private func handle(_ cmd: String, _ param: String) {

@@ -64,8 +64,29 @@ struct EditorWebView: UIViewRepresentable {
 
         init(_ parent: EditorWebView) { self.parent = parent }
 
-        func load() {
+        private var ready = false
+        private var reloads = 0
+        private var watchdog: DispatchWorkItem?
+
+        /// The web editors occasionally lose a script-loading race in WebKit and never start (seen on Slides).
+        /// Nothing is open at that point, so reload (twice at most) when "ready" has not arrived in time.
+        private func armWatchdog() {
+            watchdog?.cancel()
+            let item = DispatchWorkItem { [weak self] in
+                guard let self, !self.ready, self.reloads < 2 else { return }
+                self.reloads += 1
+                self.parent.onCommand("log", "editor not ready after 40 s - reloading (\(self.reloads))")
+                self.load(keepReloadCount: true)
+            }
+            watchdog = item
+            DispatchQueue.main.asyncAfter(deadline: .now() + 40, execute: item)
+        }
+
+        func load(keepReloadCount: Bool = false) {
             guard let web else { return }
+            if !keepReloadCount { reloads = 0 }
+            ready = false
+            armWatchdog()
             loadedLang = parent.lang
             resources.media.removeAll()
             web.configuration.userContentController.removeAllUserScripts()
@@ -141,7 +162,9 @@ struct EditorWebView: UIViewRepresentable {
                 presentPhotoPicker()
             case "ui":
                 replyHandler(nil, nil)
-                parent.onCommand(body["c"] as? String ?? "", body["p"] as? String ?? "")
+                let c = body["c"] as? String ?? ""
+                if c == "ready" { ready = true; watchdog?.cancel() }
+                parent.onCommand(c, body["p"] as? String ?? "")
             case "log":
                 replyHandler(nil, nil)
                 #if DEBUG

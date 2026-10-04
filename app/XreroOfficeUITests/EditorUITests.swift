@@ -39,19 +39,21 @@ final class EditorUITests: XCTestCase {
 
     /// Save the way a user does: the editor's own Save button; then Cmd+S; then the test hook.
     private func save(_ app: XCUIApplication) -> String {
+        let labels = app.webViews.buttons.allElementsBoundByIndex.prefix(25).map { $0.label }
+        print("XR web buttons:", labels)
         let button = app.webViews.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] 'Save' OR label BEGINSWITH 'حفظ'")).firstMatch
         if button.exists && button.isHittable {
             button.tap()
             let s = waitState(app, prefix: "saved", timeout: 30)
-            if s.hasPrefix("saved") { return s + " (Save button)" }
+            if s.hasPrefix("saved") { print("XR save path: Save button"); return s }
         }
         app.typeKey("s", modifierFlags: .command)
         let s2 = waitState(app, prefix: "saved", timeout: 20)
-        if s2.hasPrefix("saved") { return s2 + " (Cmd+S)" }
-        let hook = app.buttons["xr-save"]
-        if hook.exists { hook.tap() }
+        if s2.hasPrefix("saved") { print("XR save path: Cmd+S"); return s2 }
+        app.open(URL(string: "xrero-autotest://save")!)          // no tapping involved
         let s3 = waitState(app, prefix: "saved", timeout: 30)
-        return s3.hasPrefix("saved") ? s3 + " (test hook)" : s3
+        if s3.hasPrefix("saved") { print("XR save path: test URL") }
+        return s3
     }
 
     /// New Word document -> type English + Arabic -> save.
