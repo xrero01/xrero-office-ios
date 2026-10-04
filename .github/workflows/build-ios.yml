@@ -31,7 +31,7 @@ jobs:
         run: |
           set -e
           gh release download "${{ inputs.editors }}" -R "$GITHUB_REPOSITORY" -p "*.zip" -p "*.sha256"
-          shasum -a 256 -c ios-editors-*.zip.sha256
+          tr -d '' < ios-editors-*.zip.sha256 | shasum -a 256 -c -
           bash scripts/assemble_web.sh ios-editors-*.zip app/build/web
 
       - name: Generate Xcode project
@@ -75,7 +75,7 @@ jobs:
       - name: Publish evidence (release, private repo)
         if: ${{ always() }}
         run: |
-          rm -rf out/*.xcresult
+          mkdir -p out; rm -rf out/*.xcresult
           ditto -c -k --keepParent out "ios-evidence.zip"
           gh release create "ios-test-r${GITHUB_RUN_NUMBER}" --prerelease --title "iOS test build ${GITHUB_RUN_NUMBER}" \
             --notes "Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" -R "$GITHUB_REPOSITORY" ios-evidence.zip
