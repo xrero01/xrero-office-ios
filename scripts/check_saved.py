@@ -32,5 +32,7 @@ for dev in sorted(os.listdir(root)) if os.path.isdir(root) else []:
         ok &= kept
     else:
         print("ar_letter.docx: MISSING"); ok = False
+if not (os.path.isdir(root) and os.listdir(root)):
+    print("no saved files from any simulator"); ok = False
 print("RESULT", "PASS" if ok else "FAIL")
 sys.exit(0 if ok else 1)

@@ -47,8 +47,9 @@ jobs:
         run: |
           set +e
           mkdir -p out/shots out/saved
-          IPHONE=$(xcrun simctl list devices available | grep -E "^\s+iPhone 1[6-9]( Pro)? \(" | head -1 | sed -E 's/^\s+(.*) \(([0-9A-F-]+)\).*/\2/')
-          IPAD=$(xcrun simctl list devices available | grep -E "^\s+iPad Pro" | head -1 | sed -E 's/^\s+(.*) \(([0-9A-F-]+)\).*/\2/')
+          xcrun simctl list devices available -j > devices.json
+          IPHONE=$(python3 scripts/pick_sim.py devices.json iPhone)
+          IPAD=$(python3 scripts/pick_sim.py devices.json "iPad Pro")
           echo "iPhone $IPHONE  iPad $IPAD"
           export TEST_RUNNER_XR_SAMPLE_NAME=ar_letter.docx
           export TEST_RUNNER_XR_SAMPLE_B64=$(base64 -i tests/ar_letter.docx | tr -d '\n')
