@@ -130,6 +130,21 @@
         api.asc_registerCallback('asc_onDocumentContentReady', function () {
           if (Math.min(window.innerWidth, screen.width) < 700) {
             try { api.zoomFitToWidth ? api.zoomFitToWidth() : api['zoomFitToWidth'] && api['zoomFitToWidth'](); } catch (e) { log('fit width', e); }
+            // presentations: the slide strip would take half the phone; start with the slide at full width
+            // (through the UI's own toggle so its button stays in sync, then let the layout re-measure)
+            // (the UI wires its controllers a moment after the engine reports ready: wait for that)
+            if (/presentationeditor/.test(location.pathname)) {
+              var tries = 0, t = setInterval(function () {
+                var lm = window.PE && PE.getController && PE.getController('LeftMenu');
+                if (!(lm && lm.api && lm.leftMenu && lm.leftMenu.btnThumbs)) { if (++tries > 40) clearInterval(t); return; }
+                clearInterval(t);
+                try {
+                  lm.leftMenu.btnThumbs.toggle(false);
+                  if (window.Common && Common.NotificationCenter) Common.NotificationCenter.trigger('layout:changed', 'leftmenu');
+                  window.dispatchEvent(new Event('resize'));
+                } catch (e) { log('thumbnails', e); }
+              }, 250);
+            }
           }
           H.command && H.command('ready', '');
         });

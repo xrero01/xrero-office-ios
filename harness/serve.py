@@ -9,6 +9,8 @@
 Open: http://127.0.0.1:<port>/editors/web-apps/apps/api/documents/index.html?doctype=word&title=ar_letter.docx&filetype=docx&lang=en
 """
 import http.server, os, re, sys, urllib.parse, json
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'scripts'))
+from patch_amd_deps import patch_source
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 V20 = os.path.abspath(os.path.join(HERE, "..", ".."))
@@ -47,6 +49,10 @@ class H(http.server.BaseHTTPRequestHandler):
         if not os.path.isfile(path):
             return self.send(404, b"not found")
         body = open(path, "rb").read()
+        if path.endswith(".js") and "web-apps" in path.replace("\\", "/") and b"define(" in body:
+            fixed = patch_source(body.decode("utf-8", "surrogateescape"))
+            if fixed is not None:
+                body = fixed.encode("utf-8", "surrogateescape")
         if inject:
             body = re.sub(rb"<head[^>]*>", lambda m: m.group(0) + INJECT, body, count=1)
         self.send(200, body, TYPES.get(os.path.splitext(path)[1].lower(), "application/octet-stream"))

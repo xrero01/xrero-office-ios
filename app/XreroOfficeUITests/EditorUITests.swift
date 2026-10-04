@@ -98,11 +98,11 @@ final class EditorUITests: XCTestCase {
         XCTAssertTrue(saved.hasPrefix("saved"), "sample save failed: \(saved)")
     }
 
-    /// App Store screenshots: each sample from XR_STORE_SET ("name|lang|base64;...") opened in that UI language.
-    /// iPad in landscape (an office app's natural orientation there).
+    /// App Store screenshots: each sample from XR_STORE_SET ("name|lang|base64;...") opened in that UI language
+    /// (portrait: XCUITest's landscape screenshots come out rotated/cropped on the iPad simulator).
     func testStoreScreenshots() throws {
         guard let set = ProcessInfo.processInfo.environment["XR_STORE_SET"], !set.isEmpty else { throw XCTSkip("no store set") }
-        if UIDevice.current.userInterfaceIdiom == .pad { XCUIDevice.shared.orientation = .landscapeLeft }
+        XCUIDevice.shared.orientation = .portrait
         for item in set.split(separator: ";") {
             let p = item.split(separator: "|", maxSplits: 2).map(String.init)
             guard p.count == 3 else { continue }

@@ -48,7 +48,8 @@
           hideRulers: phone,
           hideRightMenu: phone,
           // phones: the page gets the whole width (side icon columns hidden; their features stay in the tabs)
-          layout: phone ? { leftMenu: false, rightMenu: false } : {},
+          // (Slides keep the left menu: its button reopens the slide strip, which starts collapsed on phones)
+          layout: phone ? { leftMenu: (q.doctype === 'slide'), rightMenu: false } : {},
           feedback: false,
           help: false,
           plugins: false,

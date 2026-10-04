@@ -7,7 +7,6 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Pt, RGBColor, Cm
 from openpyxl import Workbook
-from openpyxl.chart import BarChart, Reference
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from pptx import Presentation
 from pptx.dml.color import RGBColor as PRGB
@@ -129,12 +128,16 @@ def sales(lang):
         cell.font = Font(name=font, bold=True); cell.alignment = Alignment(horizontal="center"); cell.border = Border(top=thin)
     ws.column_dimensions["A"].width = 14
     for c in "BCDEFGH": ws.column_dimensions[c].width = 10
-    ch = BarChart(); ch.type = "col"; ch.grouping = "clustered"
-    ch.title = "المبيعات الشهرية" if ar else "Monthly sales"
-    ch.add_data(Reference(ws, min_col=1, max_col=7, min_row=4, max_row=6), from_rows=True, titles_from_data=True)
-    ch.set_categories(Reference(ws, min_col=2, max_col=7, min_row=3))
-    ch.height, ch.width = 7.5, 15
-    ws.add_chart(ch, "A9")
+    # growth column: first month -> last month, a real formula with percentage format and colour
+    g = ws.cell(row=3, column=9, value="النمو" if ar else "Growth")
+    g.font = Font(name=font, bold=True, color="FFFFFF"); g.fill = PatternFill("solid", fgColor="1F7A8C"); g.alignment = Alignment(horizontal="center")
+    for r in range(4, 8):
+        c = ws.cell(row=r, column=9, value="=(G%d-B%d)/B%d" % (r, r, r))
+        c.number_format = "0%"; c.font = Font(name=font, bold=True, color="1B8A4B"); c.alignment = Alignment(horizontal="center")
+        if r % 2 == 1 and r < 7: c.fill = PatternFill("solid", fgColor="EEF6F8")
+    ws.column_dimensions["I"].width = 10
+    note = ws.cell(row=9, column=1, value="أعلى نمو: الشارقة" if ar else "Fastest growth: Sharjah")
+    note.font = Font(name=font, size=12, bold=True, color="C88A12")
     wb.save(os.path.join(OUT, "sales_%s.xlsx" % lang))
 
 # ------------------------------------------------------------------ PowerPoint

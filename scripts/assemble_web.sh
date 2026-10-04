@@ -12,6 +12,7 @@ cp "$ROOT/web/xr-editor.html" "$OUT/editors/web-apps/apps/api/documents/xr-edito
 mkdir -p "$OUT/x2t"
 cp "$ROOT/web/x2t-worker.js" "$ROOT/vendor/x2t-wasm/x2t.js" "$ROOT/vendor/x2t-wasm/x2t.wasm" "$OUT/x2t/"
 cp -R "$ROOT/fonts-gen" "$OUT/fonts-gen"
+python3 "$ROOT/scripts/patch_amd_deps.py" "$OUT/editors/web-apps"
 rm -f "$OUT/editors/sdkjs/common/AllFonts.js"          # the app serves fonts-gen/AllFonts.js in its place
 cp "$ROOT/fonts-src/LICENSES.md" "$OUT/fonts-gen/LICENSES.md"
 test -f "$OUT/editors/web-apps/apps/documenteditor/main/index.html"
