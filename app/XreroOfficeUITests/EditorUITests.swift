@@ -50,7 +50,7 @@ final class EditorUITests: XCTestCase {
         app.typeKey("s", modifierFlags: .command)
         let s2 = waitState(app, prefix: "saved", timeout: 20)
         if s2.hasPrefix("saved") { print("XR save path: Cmd+S"); return s2 }
-        app.open(URL(string: "xrero-autotest://save")!)          // no tapping involved
+        XCUIDevice.shared.system.open(URL(string: "xrero-autotest://save")!)   // routed to the running app, no tapping
         let s3 = waitState(app, prefix: "saved", timeout: 30)
         if s3.hasPrefix("saved") { print("XR save path: test URL") }
         return s3
@@ -89,9 +89,11 @@ final class EditorUITests: XCTestCase {
         sleep(3)
         shot(app, "10-sample-opened")
         XCTAssertEqual(ready, "ready", "sample did not open")
-        app.webViews.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-        sleep(1)
+        app.webViews.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()   // inside the letter's text
+        sleep(2)
         typeSlowly(app, " \u{062A}\u{0645}")     // " تم"
+        sleep(1)
+        shot(app, "10b-sample-typed")
         sleep(1)
         let saved = save(app)
         shot(app, "11-sample-saved")
