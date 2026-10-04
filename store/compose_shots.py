@@ -1,6 +1,6 @@
 """compose_shots.py - App Store screenshots: the real app screenshots (store/raw/<iphone|ipad>-<lang>-<doc>.png,
 from the store-shots workflow) framed with a caption, rendered by headless Chrome at Apple's exact sizes:
-iPhone 6.9" 1320x2868 (portrait), iPad 13" 2752x2064 (landscape). Output: store/final/<lang>/<device>-NN.png"""
+iPhone 6.9" 1320x2868, iPad 13" 2064x2752 (portrait). Output: store/final/<lang>/<device>-NN.png"""
 import json, os, pathlib, struct, subprocess, sys
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -11,15 +11,15 @@ PROFILE = pathlib.Path(os.environ.get("TEMP", ".")) / "xrero-store-chrome"
 
 SCREENS = {   # (raw doc, caption, subcaption) per listing language
     "en": [("en-report", "Your documents, beautifully edited", "Open, edit and save .docx files - fully offline"),
-           ("en-sales", "Spreadsheets with real formulas", "Totals, formatting and charts in .xlsx"),
+           ("en-sales", "Spreadsheets with real formulas", "Totals, percentages and formatting in .xlsx"),
            ("en-deck", "Presentations that stand out", "Edit .pptx slides wherever you are"),
            ("ar-report", "Arabic-first, right to left", "Cairo, Amiri and more Arabic fonts built in")],
     "ar": [("ar-report", "مستنداتك بتنسيق احترافي", "افتح ملفات docx وعدّلها واحفظها دون إنترنت"),
-           ("ar-sales", "جداول بمعادلات ورسوم بيانية", "الإجماليات والتنسيق والرسوم في ملفات xlsx"),
+           ("ar-sales", "جداول بمعادلات حقيقية", "الإجماليات والنسب والتنسيق في ملفات xlsx"),
            ("ar-deck", "عروض تقديمية مميزة", "عدّل شرائح pptx أينما كنت"),
            ("en-report", "بالعربية والإنجليزية", "بدّل لغة الواجهة بلمسة واحدة - وملفاتك لا تغادر جهازك")],
 }
-SIZES = {"iphone": (1320, 2868), "ipad": (2752, 2064)}
+SIZES = {"iphone": (1320, 2868), "ipad": (2064, 2752)}
 
 def png_size(p):
     w, h = struct.unpack(">II", open(p, "rb").read()[16:24])
@@ -31,7 +31,7 @@ def page(device, lang, raw, cap, sub):
     if device == "iphone":            # device runs off the bottom edge (modern store style)
         dev_w = 1150; cap_size, sub_size, top = 96, 52, 500
     else:
-        dev_w = 2240; cap_size, sub_size, top = 104, 56, 400
+        dev_w = 1720; cap_size, sub_size, top = 112, 60, 520
     bezel = 26 if device == "iphone" else 30
     radius = 92 if device == "iphone" else 54
     shot_w = dev_w - 2 * bezel
@@ -44,7 +44,7 @@ def page(device, lang, raw, cap, sub):
 html,body{{margin:0;width:{W}px;height:{H}px;overflow:hidden}}
 body{{background:radial-gradient(1400px 900px at {"80%" if rtl else "20%"} 0%,#3fb3c4 0%,rgba(63,179,196,0) 60%),
       linear-gradient(180deg,#1f7a8c 0%,#145566 55%,#0d3b47 100%);font-family:Cairo,sans-serif;color:#fff;position:relative}}
-.cap{{position:absolute;left:90px;right:90px;top:{150 if device=='iphone' else 80}px;text-align:center}}
+.cap{{position:absolute;left:90px;right:90px;top:{150 if device=='iphone' else 170}px;text-align:center}}
 .cap h1{{font-size:{cap_size}px;line-height:1.12;margin:0;font-weight:700;letter-spacing:{0 if rtl else -1}px}}
 .cap p{{font-size:{sub_size}px;line-height:1.3;margin:22px 0 0;color:#d4eef3;font-weight:400}}
 .dev{{position:absolute;left:{(W-dev_w)//2}px;top:{top}px;width:{dev_w}px;padding:{bezel}px;box-sizing:border-box;

@@ -42,7 +42,8 @@
         user: { id: 'xr-ios', name: lang === 'ar' ? 'أنا' : 'Me' },
         customization: {
           uiTheme: dark ? 'theme-dark' : 'theme-light',
-          zoom: phone ? -1 : 100,                 // -1 = fit to page width
+          // -1 = fit to page width, -2 = fit the whole page/slide: slides always fit (portrait iPad cut them at 100%)
+          zoom: (q.doctype === 'slide') ? (phone ? -1 : -2) : (phone ? -1 : 100),
           compactToolbar: phone,
           compactHeader: phone,
           hideRulers: phone,
