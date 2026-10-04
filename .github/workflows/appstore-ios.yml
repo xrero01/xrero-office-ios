@@ -1,0 +1,104 @@
+name: appstore-ios
+# Builds the App Store version (Release, signed with Xrero's Apple Distribution certificate) and uploads it to
+# App Store Connect -> TestFlight. Needs the repo secrets set by Moustafa's set-ios-secrets.ps1 and the app record
+# "Xrero Office" (com.xrero.office) in App Store Connect.
+on:
+  workflow_dispatch:
+    inputs:
+      editors:
+        description: release tag holding ios-editors-<version>.zip
+        default: "ios-editors-20.0.9"
+      upload:
+        description: upload to App Store Connect (TestFlight)
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  appstore:
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Xcode + tools
+        run: |
+          X=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1); echo "using $X"
+          sudo xcode-select -s "$X/Contents/Developer"
+          xcodebuild -version
+          brew install xcodegen >/dev/null
+
+      - name: Editors + app web folder
+        run: |
+          set -e
+          gh release download "${{ inputs.editors }}" -R "$GITHUB_REPOSITORY" -p "*.zip" -p "*.sha256"
+          tr -d '\r' < ios-editors-*.zip.sha256 | shasum -a 256 -c -
+          bash scripts/assemble_web.sh ios-editors-*.zip app/build/web
+          cd app && xcodegen generate
+
+      - name: Signing (Apple Distribution + App Store profile) and API key
+        env:
+          P12: ${{ secrets.IOS_DIST_P12_B64 }}
+          P12_PW: ${{ secrets.IOS_DIST_P12_PASSWORD }}
+          PROFILE: ${{ secrets.IOS_PROFILE_B64 }}
+          P8: ${{ secrets.ASC_KEY_P8 }}
+          KEY_ID: ${{ secrets.ASC_KEY_ID }}
+        run: |
+          set -e
+          test -n "$P12" && test -n "$PROFILE" && test -n "$P8" || { echo "signing secrets missing (run set-ios-secrets.ps1)"; exit 1; }
+          KC="$RUNNER_TEMP/ios-sign.keychain-db"; KCPW="$(uuidgen)"
+          security create-keychain -p "$KCPW" "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p "$KCPW" "$KC"
+          echo "$P12" | base64 --decode > "$RUNNER_TEMP/dist.p12"
+          curl -fsSL -o "$RUNNER_TEMP/AppleWWDRCAG3.cer" https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer
+          security import "$RUNNER_TEMP/AppleWWDRCAG3.cer" -k "$KC" -A || true
+          security import "$RUNNER_TEMP/dist.p12" -k "$KC" -P "$P12_PW" -A -t cert -f pkcs12
+          rm -f "$RUNNER_TEMP/dist.p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KCPW" "$KC" >/dev/null
+          security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
+          security find-identity -v -p codesigning "$KC"
+          for d in "$HOME/Library/MobileDevice/Provisioning Profiles" "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"; do
+            mkdir -p "$d"; echo "$PROFILE" | base64 --decode > "$d/xrero-office-appstore.mobileprovision"
+          done
+          mkdir -p "$HOME/.appstoreconnect/private_keys"
+          printf '%s\n' "$P8" > "$HOME/.appstoreconnect/private_keys/AuthKey_$KEY_ID.p8"
+
+      - name: Archive (Release, build number = run number)
+        run: |
+          set -o pipefail
+          cd app
+          xcodebuild archive -project XreroOffice.xcodeproj -scheme XreroOffice -configuration Release \
+            -destination "generic/platform=iOS" -archivePath ../out/XreroOffice.xcarchive \
+            CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=Y5U46S55X5 CODE_SIGN_IDENTITY="Apple Distribution" \
+            PROVISIONING_PROFILE_SPECIFIER="Xrero Office App Store" CURRENT_PROJECT_VERSION=${GITHUB_RUN_NUMBER} | tail -30
+
+      - name: Export the .ipa
+        run: |
+          set -o pipefail
+          xcodebuild -exportArchive -archivePath out/XreroOffice.xcarchive -exportOptionsPlist scripts/ExportOptions.plist \
+            -exportPath out/export | tail -20
+          ls -la out/export
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" -c "Print :CFBundleVersion" \
+            out/XreroOffice.xcarchive/Products/Applications/XreroOffice.app/Info.plist
+
+      - name: Validate + upload to App Store Connect (TestFlight)
+        if: ${{ inputs.upload }}
+        env:
+          KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ISSUER: ${{ secrets.ASC_ISSUER }}
+        run: |
+          IPA=$(ls out/export/*.ipa)
+          xcrun altool --validate-app -f "$IPA" -t ios --apiKey "$KEY_ID" --apiIssuer "$ISSUER" --output-format normal
+          xcrun altool --upload-app -f "$IPA" -t ios --apiKey "$KEY_ID" --apiIssuer "$ISSUER" --output-format normal
+
+      - name: Keep the .ipa (release, private repo)
+        if: ${{ always() }}
+        run: |
+          ls out/export/*.ipa >/dev/null 2>&1 || exit 0
+          gh release create "appstore-r${GITHUB_RUN_NUMBER}" --prerelease --title "App Store build ${GITHUB_RUN_NUMBER}" \
+            --notes "Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" -R "$GITHUB_REPOSITORY" out/export/*.ipa
