@@ -50,6 +50,43 @@
     document.addEventListener('DOMContentLoaded', add);
   })();
 
+  // ONLYOFFICE "New: Paste options / Multipage view / ..." tips: never in Xrero. The editors show a tip unless
+  // localStorage holds its "<de|sse|pe>-help-tip-<name>" key -> report every such key as already seen.
+  (function noFeatureTips() {
+    var re = /-help-tip-/;
+    try {
+      var gi = Storage.prototype.getItem;
+      Storage.prototype.getItem = function (k) { return re.test(String(k)) ? '1' : gi.apply(this, arguments); };
+    } catch (e) {}
+    var n = 0, t = setInterval(function () {               // also the editors' in-memory store (no localStorage case)
+      var ls = window.Common && Common.localStorage;
+      if (ls && ls.getItem && !ls.getItem.__xr) {
+        var g = ls.getItem;
+        ls.getItem = function (k) { return re.test(String(k)) ? '1' : g.apply(this, arguments); };
+        ls.getItem.__xr = true;
+      }
+      if (++n > 1200) clearInterval(t);
+    }, 25);
+  })();
+
+  // Touch devices: when the keyboard opens, WebKit scrolls the page to reveal the editors' hidden input field and
+  // the whole editor slides sideways. Pin that field to the corner and keep the page itself from scrolling.
+  (function pinForTouch() {
+    if (!(navigator.maxTouchPoints > 0)) return;
+    var css = 'html,body{overflow:hidden!important;overscroll-behavior:none}' +
+              '#area_id_parent{position:fixed!important;left:0!important;top:0!important}';
+    var add = function () {
+      if (document.getElementById('xr-touch-css')) return;
+      var s = document.createElement('style'); s.id = 'xr-touch-css'; s.textContent = css;
+      (document.head || document.documentElement).appendChild(s);
+    };
+    if (document.documentElement) add();
+    document.addEventListener('DOMContentLoaded', add);
+    var reset = function () { if (window.scrollX || window.scrollY) window.scrollTo(0, 0); };
+    window.addEventListener('scroll', reset, { passive: true });
+    if (window.visualViewport) window.visualViewport.addEventListener('scroll', reset, { passive: true });
+  })();
+
   function editor() { return (window.Asc && window.Asc.editor) || window.editor; }
   function ext(name) { var m = /\.([A-Za-z0-9]+)$/.exec(name || ''); return m ? m[1].toLowerCase() : 'docx'; }
 

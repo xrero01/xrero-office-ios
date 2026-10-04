@@ -3,7 +3,7 @@ import SwiftUI
 #if XR_AUTOTEST
 /// CI only (build configuration "Autotest"). Opens one document straight in the editor so XCUITest can type into
 /// it with the real keyboard path. Environment: XR_KIND=word|cell|slide, or XR_DOC_NAME + XR_DOC_B64 (a sample).
-/// Writes Documents/<name> on every save and Documents/xr-log.txt (editor log) for the workflow to inspect.
+/// Writes Documents/<name> on every save and Documents/xr-log-<name>.txt (editor log) for the workflow.
 struct AutotestScreen: View {
     @State private var document: OfficeDocument
     @State private var state = "loading"
@@ -24,7 +24,7 @@ struct AutotestScreen: View {
             _document = State(initialValue: OfficeDocument(kind: kind))
             name = "xr-test." + kind.fileExtension
         }
-        try? FileManager.default.removeItem(at: docs.appendingPathComponent("xr-log.txt"))
+        try? FileManager.default.removeItem(at: docs.appendingPathComponent("xr-log-" + name + ".txt"))
     }
 
     var body: some View {
@@ -47,7 +47,7 @@ struct AutotestScreen: View {
             state = "saved:" + param
         case "log":
             let line = (param + "\n").data(using: .utf8)!
-            let url = docs.appendingPathComponent("xr-log.txt")
+            let url = docs.appendingPathComponent("xr-log-" + name + ".txt")      // one log per test document
             if let h = try? FileHandle(forWritingTo: url) { h.seekToEndOfFile(); h.write(line); try? h.close() }
             else { try? line.write(to: url) }
             if param.hasPrefix("open failed") || param.hasPrefix("engine error") { state = "error: " + param }

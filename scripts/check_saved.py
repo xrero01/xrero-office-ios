@@ -12,13 +12,13 @@ def text(p):
 for dev in sorted(os.listdir(root)) if os.path.isdir(root) else []:
     d = os.path.join(root, dev)
     print("==", dev, sorted(os.listdir(d)))
-    log = os.path.join(d, "xr-log.txt")
-    if os.path.exists(log):
-        print("".join(open(log, encoding="utf-8", errors="replace").readlines()[-25:]))
+    for log in sorted(f for f in os.listdir(d) if f.startswith("xr-log")):
+        print("--", log)
+        print("".join(open(os.path.join(d, log), encoding="utf-8", errors="replace").readlines()[-25:]))
     t = os.path.join(d, "xr-test.docx")
     if os.path.exists(t):
         s = text(t)
-        en = "Typed on iPhone - English OK." in s
+        en = "Typed on iPhone" in s and "English OK." in s      # iOS Smart Punctuation turns "-" into an en dash
         ar = "كتابة عربية" in s
         print("xr-test.docx: English typed=%s  Arabic typed=%s  text=%r" % (en, ar, s[:200]))
         ok &= en
@@ -28,6 +28,7 @@ for dev in sorted(os.listdir(root)) if os.path.isdir(root) else []:
     if os.path.exists(a):
         s = text(a)
         kept = "السادة أولياء الأمور الكرام" in s and "إدارة المدرسة" in s
+        print("  typed word added:", "تم" in s)
         print("ar_letter.docx saved: original Arabic kept=%s (%d chars)" % (kept, len(s)))
         ok &= kept
     else:
