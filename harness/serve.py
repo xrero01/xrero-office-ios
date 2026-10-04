@@ -1,8 +1,8 @@
 """serve.py [port] - browser harness for the iOS editor host (no document server, no converter).
 
   /editors/...           the Xrero web editors (v20 staging payload); editor pages get xr-host.js injected
-  /editors/sdkjs/common/AllFonts.js   font list (harness: the installed Windows app's generated list)
-  /__font?id=<path>      a font file named by the font list (only inside the listed font folders)
+  /editors/sdkjs/common/AllFonts.js   font list (the iOS app's font set, ios/fonts-gen)
+  /__font?id=<id>        a font file of that set
   /__doc/<name>          a test document (release-20.0.9/qa/inputs)
   /__save/<name>  POST   saved bytes -> harness/out/<name>
   /xr/...                ios/web + harness scripts
@@ -18,17 +18,10 @@ X2T = os.path.join(V20, "ios", "vendor", "x2t-wasm")
 MEDIA = {}
 DOCS = os.path.join(V20, "release-20.0.9", "qa", "inputs")
 OUT = os.path.join(HERE, "out")
-FONTS_JS = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Xrero", "XreroOffice", "data", "fonts", "AllFonts.js")
+# the iOS app's own font set (open-licensed only; ios/fonts-gen = allfontsgen output, files stored plain)
+FONTS = os.path.join(V20, "ios", "fonts-gen")
+FONTS_JS = os.path.join(FONTS, "AllFonts.js")
 os.makedirs(OUT, exist_ok=True)
-
-font_files = set()
-try:
-    s = open(FONTS_JS, encoding="utf-8-sig").read()
-    m = re.search(r'window\["__fonts_files"\]\s*=\s*\[(.*?)\];', s, re.S)
-    font_files = {os.path.normcase(os.path.abspath(p)) for p in json.loads("[" + m.group(1) + "]")}
-except Exception as e:
-    print("font list:", e)
-print("fonts listed:", len(font_files))
 
 INJECT = b'<script src="/xr/harness-host.js"></script><script src="/xr/xr-host.js"></script>'
 EDITOR_PAGE = re.compile(r"^/editors/web-apps/apps/(api/documents|[a-z]+editor/main)/index\.html$")
@@ -69,13 +62,11 @@ class H(http.server.BaseHTTPRequestHandler):
                 return self.send(403)
             return self.file(local, inject=bool(EDITOR_PAGE.match(p)))
         if p == "/__font":
-            fid = urllib.parse.parse_qs(u.query).get("id", [""])[0]
-            f = os.path.normcase(os.path.abspath(fid))
-            if f not in font_files:
-                return self.send(404, b"font not in list")
-            return self.file(f)
+            fid = os.path.basename(urllib.parse.parse_qs(u.query).get("id", [""])[0])
+            return self.file(os.path.join(FONTS, "fonts", fid))
         if p == "/__fontsprite":
-            return self.file(os.path.join(os.path.dirname(FONTS_JS), "fonts_thumbnail.png"))
+            scale = os.path.basename(urllib.parse.parse_qs(u.query).get("s", [""])[0])
+            return self.file(os.path.join(FONTS, "images", "fonts_thumbnail%s.png" % scale))
         if p.startswith("/__media/"):
             d = MEDIA.get(os.path.basename(p[9:]))
             if d is None:

@@ -1,0 +1,21 @@
+# Fonts bundled with Xrero Office for iPhone / iPad / Mac
+
+Only fonts whose licence allows redistribution. Every file's embedded name table was checked when the set was
+assembled (2026-10-04); `ios/fonts-gen` is generated from this folder with ONLYOFFICE allfontsgen
+(`--use-system=false`) and its font files are stored de-obfuscated.
+
+| Family | Source | Licence |
+|---|---|---|
+| Amiri | google/fonts `ofl/amiri` | SIL Open Font License 1.1 (OFL-Amiri.txt) |
+| Cairo (static Regular/Bold instanced from the variable font with fontTools) | google/fonts `ofl/cairo` | SIL OFL 1.1 (OFL-Cairo.txt) |
+| Tajawal | google/fonts `ofl/tajawal` | SIL OFL 1.1 |
+| Caladea (metric-compatible with Cambria) | google/fonts `ofl/caladea` | SIL OFL 1.1 |
+| Carlito (metric-compatible with Calibri) | ONLYOFFICE core-fonts | SIL OFL 1.1 |
+| Liberation Sans / Serif / Mono / Sans Narrow (metric-compatible with Arial / Times New Roman / Courier New / Arial Narrow) | ONLYOFFICE core-fonts | SIL OFL 1.1 (Liberation 2.x) |
+| DejaVu Sans / Serif / Mono | ONLYOFFICE core-fonts | Bitstream Vera licence + public-domain changes (DejaVu licence) |
+| Noto Naskh Arabic (+ UI) | ONLYOFFICE core-fonts | SIL OFL 1.1 |
+| Open Sans, Roboto, Montserrat | ONLYOFFICE core-fonts | Apache 2.0 / SIL OFL 1.1 |
+| ASCW3 | ONLYOFFICE (editor symbol font) | AGPL-3.0 with the ONLYOFFICE editors |
+
+Full licence texts: https://openfontlicense.org (OFL 1.1), https://www.apache.org/licenses/LICENSE-2.0,
+https://dejavu-fonts.github.io/License.html. Shipped with the app under Settings > Licences.
