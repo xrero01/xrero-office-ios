@@ -8,3 +8,5 @@ harness/__pycache__/
 app/build/
 app/*.xcodeproj/
 runs/
+store/frames-tmp/
+store/raw/
