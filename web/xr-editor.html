@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<!-- xr-editor.html - Xrero Office (iPhone / iPad / Mac) editor launcher. Lives next to api.js in
+     editors/web-apps/apps/api/documents/. Query: doctype=word|cell|slide, title=<file name>, lang=en|ar,
+     theme=light|dark. The document itself comes from the app through xr-host.js (desktop "local file" mode). -->
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Xrero Office</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <style>
+    html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; background: #f3f3f3; }
+    @media (prefers-color-scheme: dark) { html, body { background: #2a2a2a; } }
+    #wrap { position: absolute; left: env(safe-area-inset-left); right: env(safe-area-inset-right); top: 0; bottom: 0; }
+  </style>
+</head>
+<body>
+  <div id="wrap"><div id="placeholder"></div></div>
+  <script src="api.js"></script>
+  <script>
+  (function () {
+    var q = {};
+    location.search.replace(/^\?/, '').split('&').forEach(function (kv) {
+      var p = kv.split('='); if (p[0]) q[decodeURIComponent(p[0])] = decodeURIComponent((p[1] || '').replace(/\+/g, ' '));
+    });
+    var phone = Math.min(screen.width, screen.height) < 600;
+    var lang = q.lang === 'ar' ? 'ar' : 'en';
+    var dark = q.theme ? q.theme === 'dark' : (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches);
+    var ext = (/\.([a-z0-9]+)$/i.exec(q.title || '') || [0, 'docx'])[1].toLowerCase();
+    var key = 'xr' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    window.docEditor = new DocsAPI.DocEditor('placeholder', {
+      type: 'desktop',
+      width: '100%', height: '100%',
+      documentType: q.doctype || 'word',
+      document: {
+        key: key, url: '_offline_', title: q.title || 'Document', fileType: ext,
+        permissions: { edit: true, download: true, print: false, review: true, comment: true }
+      },
+      editorConfig: {
+        mode: 'edit',
+        lang: lang,
+        region: lang === 'ar' ? 'ar-AE' : 'en-US',
+        user: { id: 'xr-ios', name: lang === 'ar' ? 'أنا' : 'Me' },
+        customization: {
+          uiTheme: dark ? 'theme-dark' : 'theme-light',
+          zoom: phone ? -1 : 100,                 // -1 = fit to page width
+          compactToolbar: phone,
+          compactHeader: phone,
+          hideRulers: phone,
+          hideRightMenu: phone,
+          feedback: false,
+          help: false,
+          plugins: false,
+          macros: false,
+          about: false,
+          goback: false
+        }
+      },
+      events: {
+        onRequestClose: function () { window.XreroHost && XreroHost.command('close', ''); return 0; }
+      }
+    });
+  })();
+  </script>
+</body>
+</html>

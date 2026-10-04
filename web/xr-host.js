@@ -37,6 +37,19 @@
     rtl: H.lang === 'ar'
   };
 
+  // Xrero header controls that need the Windows shell (account, PDF->Word converter, Designs): not on this platform.
+  // EN/AR and Share stay: the app handles 'xrero:lang:<code>' and 'xrero:share'.
+  (function hideDesktopOnly() {
+    var css = '#xr-b-ctx,#xr-b-acct,#xr-acct-menu,#xr-designs-launch,#xr-design-ov{display:none!important}';
+    var add = function () {
+      if (document.getElementById('xr-host-css')) return;
+      var s = document.createElement('style'); s.id = 'xr-host-css'; s.textContent = css;
+      (document.head || document.documentElement).appendChild(s);
+    };
+    if (document.documentElement) add();
+    document.addEventListener('DOMContentLoaded', add);
+  })();
+
   function editor() { return (window.Asc && window.Asc.editor) || window.editor; }
   function ext(name) { var m = /\.([A-Za-z0-9]+)$/.exec(name || ''); return m ? m[1].toLowerCase() : 'docx'; }
 
@@ -75,6 +88,15 @@
     CheckUserId: function () { return 'xr-ios'; },
     CreateEditorApi: function (api) {
       window.__xrApi = api;
+      // phones: show the whole page width instead of 100% zoom running off the screen
+      try {
+        api.asc_registerCallback('asc_onDocumentContentReady', function () {
+          if (Math.min(window.innerWidth, screen.width) < 700) {
+            try { api.zoomFitToWidth ? api.zoomFitToWidth() : api['zoomFitToWidth'] && api['zoomFitToWidth'](); } catch (e) { log('fit width', e); }
+          }
+          H.command && H.command('ready', '');
+        });
+      } catch (e) { log('ready hook', e); }
       var send = api.sendEvent;           // report engine errors to the host log (with where they came from)
       api.sendEvent = function (name) {
         if (name === 'asc_onError') log('engine error id=' + arguments[1] + ' level=' + arguments[2] + ' @ ' + (new Error().stack || '').split('\n').slice(2, 6).join(' <- ').replace(/https?:\/\/[^ )]*\//g, ''));

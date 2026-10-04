@@ -56,6 +56,8 @@ class H(http.server.BaseHTTPRequestHandler):
         p = urllib.parse.unquote(u.path)
         if p == "/editors/sdkjs/common/AllFonts.js":
             return self.file(FONTS_JS)
+        if p == "/editors/web-apps/apps/api/documents/xr-editor.html":     # the app's own launcher (ios/web)
+            return self.file(os.path.join(WEB, "xr-editor.html"), inject=True)
         if p.startswith("/editors/"):
             local = os.path.normpath(os.path.join(EDITORS, p[len("/editors/"):]))
             if not local.startswith(EDITORS):
