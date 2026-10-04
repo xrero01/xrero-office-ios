@@ -110,13 +110,14 @@
 
     // ---- open: host bytes -> x2t -> Editor.bin (+ pictures) -> engine, the way the desktop does it
     LocalStartOpen: function () {
-      var name;
+      var name, t0 = Date.now();
       H.openFile().then(function (f) {
         name = f.name;
         log('open', name, f.data.byteLength, 'bytes');
         return x2t(name, f.data, 'Editor.bin');
       }).then(function (r) {
-        log('converted to Editor.bin', r.data.byteLength, 'bytes,', r.media.length, 'pictures,', r.ms, 'ms');
+        log('converted to Editor.bin', r.data.byteLength, 'bytes,', r.media.length, 'pictures,', r.ms, 'ms convert,',
+            Date.now() - t0, 'ms since open (incl. first x2t load)');
         opened = { name: name, ext: ext(name), bin: r.data };
         return Promise.all(r.media.map(function (m) { media[m.name] = m.data; return H.putMedia(m.name, m.data); }));
       }).then(function () {
@@ -147,6 +148,7 @@
       var ed = editor();
       var done = function (err) { try { window.DesktopOfflineAppDocumentEndSave(err, '', ''); } catch (e) { log('endsave', e); } };
       if (!ed || !opened) { log('save: nothing open'); return done(2); }
+      log('save start', opened.name);
       var t0 = Date.now(), bin;
       try {
         // the engine's Editor.bin; in a web page it comes base64-encoded and already carries its "DOCY;v10;0;" header

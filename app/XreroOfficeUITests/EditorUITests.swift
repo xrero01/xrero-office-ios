@@ -24,6 +24,11 @@ final class EditorUITests: XCTestCase {
         return last
     }
 
+    /// Human pace: one character at a time (a burst from XCUITest is far faster than any person types).
+    private func typeSlowly(_ app: XCUIApplication, _ text: String) {
+        for ch in text { app.typeText(String(ch)); usleep(150_000) }
+    }
+
     private func shot(_ app: XCUIApplication, _ name: String) {
         let a = XCTAttachment(screenshot: app.screenshot())
         a.name = name
@@ -42,9 +47,9 @@ final class EditorUITests: XCTestCase {
         XCTAssertTrue(web.waitForExistence(timeout: 10))
         web.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).tap()
         sleep(2)
-        app.typeText("Typed on iPhone - English OK. ")
+        typeSlowly(app, "Typed on iPhone - English OK.")
         app.typeText("\n")
-        app.typeText("\u{0643}\u{062A}\u{0627}\u{0628}\u{0629} \u{0639}\u{0631}\u{0628}\u{064A}\u{0629}")   // كتابة عربية
+        typeSlowly(app, "\u{0643}\u{062A}\u{0627}\u{0628}\u{0629} \u{0639}\u{0631}\u{0628}\u{064A}\u{0629}")   // كتابة عربية
         sleep(2)
         shot(app, "02-word-typed")
 

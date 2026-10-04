@@ -29,7 +29,13 @@ struct EditorWebView: UIViewRepresentable {
         web.backgroundColor = .systemBackground
         web.scrollView.contentInsetAdjustmentBehavior = .never
         web.scrollView.bounces = false
+        web.scrollView.isScrollEnabled = false        // the editors scroll their own canvas
         web.allowsLinkPreview = false
+        // When the keyboard opens, WebKit scrolls the page to reveal the editor's hidden input field, which slides
+        // the whole editor sideways on a phone. The page itself never needs to scroll: keep it at the origin.
+        c.offsetLock = web.scrollView.observe(\.contentOffset, options: [.new]) { sv, _ in
+            if sv.contentOffset != .zero { sv.contentOffset = .zero }
+        }
         c.web = web
         controller.coordinator = c
         c.load()
@@ -51,6 +57,7 @@ struct EditorWebView: UIViewRepresentable {
         var parent: EditorWebView
         let resources = WebResources()
         weak var web: WKWebView?
+        var offsetLock: NSKeyValueObservation?
         var loadedLang = ""
         private var pickReply: ((Any?, String?) -> Void)?
         var onSaved: (() -> Void)?
@@ -147,11 +154,20 @@ struct EditorWebView: UIViewRepresentable {
         }
 
         /// Runs the editor's own Save (the same as Ctrl+S): engine -> x2t -> "save" message above.
+        /// Saves the document as it is now, changed or not (the desktop's own save entry point: engine -> x2t ->
+        /// the "save" message). Used for the app going to the background, Share and the EN/AR switch.
         func requestSave(then done: (() -> Void)? = nil) {
             onSaved = done
-            let js = "(function(){var f=document.querySelector('iframe');var w=f&&f.contentWindow;if(w&&w.AscDesktopEditor_Save){w.AscDesktopEditor_Save();return true;}return false;})()"
-            web?.evaluateJavaScript(js) { [weak self] result, _ in
-                if (result as? Bool) != true { self?.onSaved?(); self?.onSaved = nil }
+            let js = """
+            (function(){var f=document.querySelector('iframe');var w=f&&f.contentWindow;if(!w)return 'no editor frame';
+             try{ if(w.DesktopOfflineAppDocumentStartSave){w.DesktopOfflineAppDocumentStartSave(false);return 'ok';}
+                  if(w.AscDesktopEditor_Save){w.AscDesktopEditor_Save();return 'ok';} return 'no save entry'; }
+             catch(e){ return 'error: '+e; }})()
+            """
+            web?.evaluateJavaScript(js) { [weak self] result, error in
+                let r = (result as? String) ?? (error.map { "js error: \($0.localizedDescription)" } ?? "?")
+                self?.parent.onCommand("log", "native save request: " + r)
+                if r != "ok" { self?.onSaved?(); self?.onSaved = nil }
             }
         }
 

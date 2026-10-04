@@ -7,3 +7,4 @@ dist/
 harness/__pycache__/
 app/build/
 app/*.xcodeproj/
+runs/

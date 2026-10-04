@@ -30,7 +30,7 @@ struct AutotestScreen: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             EditorWebView(document: $document, title: name, lang: AppLanguage.current, onCommand: handle, controller: controller)
-                .ignoresSafeArea()
+                .ignoresSafeArea(.container, edges: [.bottom])      // same as the real editor screen
             VStack(alignment: .leading, spacing: 2) {
                 Text(state).font(.system(size: 6)).accessibilityIdentifier("xr-state")
                 Button("save") { controller.save() }.font(.system(size: 6)).accessibilityIdentifier("xr-save")
