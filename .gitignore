@@ -1,0 +1,5 @@
+harness/out/
+vendor/x2t-wasm/x2t.zip
+*.p8
+*.p12
+*.mobileprovision
