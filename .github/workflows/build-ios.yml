@@ -31,7 +31,7 @@ jobs:
         run: |
           set -e
           gh release download "${{ inputs.editors }}" -R "$GITHUB_REPOSITORY" -p "*.zip" -p "*.sha256"
-          tr -d '' < ios-editors-*.zip.sha256 | shasum -a 256 -c -
+          tr -d '\r' < ios-editors-*.zip.sha256 | shasum -a 256 -c -
           bash scripts/assemble_web.sh ios-editors-*.zip app/build/web
 
       - name: Generate Xcode project
