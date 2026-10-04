@@ -47,6 +47,8 @@
           compactHeader: phone,
           hideRulers: phone,
           hideRightMenu: phone,
+          // phones: the page gets the whole width (side icon columns hidden; their features stay in the tabs)
+          layout: phone ? { leftMenu: false, rightMenu: false } : {},
           feedback: false,
           help: false,
           plugins: false,
