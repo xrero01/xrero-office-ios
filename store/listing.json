@@ -33,5 +33,5 @@
       "whatsNew": "مرحباً بك في أوفيس Xrero للآيفون والآيباد والماك.\n- عدّل المستندات والجداول والعروض دون إنترنت\n- العربية أولاً: تحرير من اليمين لليسار وخطوط وواجهة عربية\n- افتح الملفات وشاركها عبر تطبيق الملفات"
     }
   },
-  "reviewNotes": "No account or sign-in is needed. To review: create a new document with the + button, or open any .docx, .xlsx or .pptx from the Files app. Type, format, then tap Save in the editor's top bar. All editing and file conversion happen on the device (no server). The EN/AR switch in the editor header changes the interface language. The app is free and open-source (AGPL-3.0), based on ONLYOFFICE Docs; source: https://xrero.com/office."
+  "reviewNotes": "No account or sign-in is needed. To review: create a new document with the + button, or open any .docx, .xlsx or .pptx from the Files app. Type, format, then tap Save in the editor's top bar. All editing and file conversion happen on the device (no server). The EN/AR switch in the editor header changes the interface language. The app is free and open-source (AGPL-3.0), based on ONLYOFFICE Docs; source code: https://github.com/xrero01/xrero-office-ios."
 }
