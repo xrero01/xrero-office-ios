@@ -75,7 +75,11 @@ class H(http.server.BaseHTTPRequestHandler):
                 return self.send(404, b"no media")
             return self.send(200, d, TYPES.get(os.path.splitext(p)[1].lower(), "application/octet-stream"))
         if p.startswith("/__doc/"):
-            return self.file(os.path.join(DOCS, os.path.basename(p[7:])))
+            name = os.path.basename(p[7:])
+            for d in (DOCS, os.path.join(V20, "ios", "store", "samples")):
+                if os.path.isfile(os.path.join(d, name)):
+                    return self.file(os.path.join(d, name))
+            return self.send(404)
         if p.startswith("/xr/"):
             name = os.path.basename(p[4:])
             for d in (WEB, HERE, X2T):

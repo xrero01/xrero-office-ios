@@ -1,0 +1,96 @@
+name: store-shots
+# App Store screenshots: the store samples (store/samples) opened in the real app on a 6.9" iPhone and a 13" iPad
+# simulator, Arabic and English interface, clean status bar. Raw shots go to a release; framing/captions are added
+# by store/compose_shots.py.
+on:
+  workflow_dispatch:
+    inputs:
+      editors:
+        description: release tag holding ios-editors-<version>.zip
+        default: "ios-editors-20.0.9"
+
+permissions:
+  contents: write
+
+jobs:
+  shots:
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Xcode + tools
+        run: |
+          X=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1); echo "using $X"
+          sudo xcode-select -s "$X/Contents/Developer"
+          brew install xcodegen >/dev/null
+
+      - name: Editors + app web folder + project
+        run: |
+          set -e
+          gh release download "${{ inputs.editors }}" -R "$GITHUB_REPOSITORY" -p "*.zip" -p "*.sha256"
+          tr -d '\r' < ios-editors-*.zip.sha256 | shasum -a 256 -c -
+          bash scripts/assemble_web.sh ios-editors-*.zip app/build/web
+          cd app && xcodegen generate
+
+      - name: Build (Autotest configuration)
+        run: |
+          cd app
+          xcodebuild build-for-testing -project XreroOffice.xcodeproj -scheme XreroOffice -configuration Autotest \
+            -destination "generic/platform=iOS Simulator" -derivedDataPath ../dd CODE_SIGNING_ALLOWED=NO | tail -5
+
+      - name: Screenshots (6.9" iPhone + 13" iPad)
+        run: |
+          set +e
+          mkdir -p out
+          xcrun simctl list devices available -j > devices.json
+          IPHONE=$(python3 scripts/pick_sim.py devices.json "iPhone 17 Pro Max" || python3 scripts/pick_sim.py devices.json "iPhone 16 Pro Max")
+          IPAD=$(python3 scripts/pick_sim.py devices.json "iPad Pro 13")
+          echo "iPhone $IPHONE  iPad $IPAD"
+          export TEST_RUNNER_XR_STORE_SET=$(python3 - <<'EOF'
+          import base64, os
+          order = ["report_ar.docx|ar", "sales_ar.xlsx|ar", "deck_ar.pptx|ar", "report_en.docx|en", "sales_en.xlsx|en", "deck_en.pptx|en"]
+          out = []
+          for o in order:
+              n, lang = o.split("|")
+              out.append("%s|%s|%s" % (n, lang, base64.b64encode(open(os.path.join("store", "samples", n), "rb").read()).decode()))
+          print(";".join(out))
+          EOF
+          )
+          for DEV in $IPHONE $IPAD; do
+            xcrun simctl boot $DEV 2>/dev/null; xcrun simctl bootstatus $DEV -b >/dev/null
+            xcrun simctl status_bar $DEV override --time "9:41" --dataNetwork wifi --wifiMode active --wifiBars 3 \
+              --cellularMode active --cellularBars 4 --batteryState charged --batteryLevel 100
+            xcodebuild test-without-building -project app/XreroOffice.xcodeproj -scheme XreroOffice -configuration Autotest \
+              -destination "id=$DEV" -derivedDataPath dd -resultBundlePath "out/store-$DEV.xcresult" \
+              -only-testing:XreroOfficeUITests/EditorUITests/testStoreScreenshots 2>&1 | grep -E "Test Case|error" | tail -10
+            xcrun xcresulttool export attachments --path "out/store-$DEV.xcresult" --output-path "out/raw-$DEV" >/dev/null 2>&1
+            xcrun simctl shutdown $DEV
+          done
+          python3 - <<'EOF'
+          import json, os, shutil
+          os.makedirs("out/raw", exist_ok=True)
+          for d in [x for x in os.listdir("out") if x.startswith("raw-")]:
+              m = json.load(open(os.path.join("out", d, "manifest.json")))
+              for t in m:
+                  for a in t.get("attachments", []):
+                      n = a.get("suggestedHumanReadableName") or ""
+                      if n.startswith("store-"):
+                          dev = "ipad" if "iPad" in json.dumps(t) or "pad" in d else "iphone"
+                          src = os.path.join("out", d, a["exportedFileName"])
+                          from struct import unpack
+                          w, h = unpack(">II", open(src, "rb").read()[16:24])
+                          kind = "ipad" if max(w, h) / min(w, h) < 1.6 else "iphone"
+                          shutil.copy(src, os.path.join("out/raw", "%s-%s.png" % (kind, n.split("_")[0][6:])))
+          print(sorted(os.listdir("out/raw")))
+          EOF
+
+      - name: Publish raw screenshots
+        if: ${{ always() }}
+        run: |
+          mkdir -p out/raw
+          ditto -c -k --keepParent out/raw store-raw.zip
+          gh release create "store-shots-r${GITHUB_RUN_NUMBER}" --prerelease --title "Store screenshots ${GITHUB_RUN_NUMBER}" \
+            --notes "Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" -R "$GITHUB_REPOSITORY" store-raw.zip

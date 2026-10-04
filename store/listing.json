@@ -1,0 +1,37 @@
+{
+  "app": {
+    "name": "Xrero Office",
+    "bundleId": "com.xrero.office",
+    "sku": "XRERO-OFFICE",
+    "primaryCategory": "PRODUCTIVITY",
+    "secondaryCategory": "BUSINESS",
+    "price": "free",
+    "ageRating": "4+",
+    "copyright": "© 2026 Xrero",
+    "supportUrl": "https://xrero.com/office/support",
+    "marketingUrl": "https://xrero.com/office",
+    "privacyPolicyUrl": "https://xrero.com/privacy",
+    "privacy": "Data Not Collected (no tracking, no account, files stay on the device)",
+    "encryption": "ITSAppUsesNonExemptEncryption = NO",
+    "devices": "iPhone, iPad, and Apple-silicon Mac (Designed for iPad)"
+  },
+  "localizations": {
+    "en-US": {
+      "name": "Xrero Office",
+      "subtitle": "Documents, Sheets & Slides",
+      "keywords": "docx,xlsx,pptx,office,arabic,editor,documents,spreadsheet,presentation,offline,rtl,writer",
+      "promotionalText": "Free, offline and Arabic-first. Open, edit and save .docx, .xlsx and .pptx files on your iPhone, iPad or Mac. Your files never leave your device.",
+      "description": "Xrero Office is a free office suite for documents, spreadsheets and presentations - built Arabic-first and working fully offline.\n\nOPEN AND EDIT THE FILES YOU ALREADY HAVE\n- Documents (.docx), spreadsheets (.xlsx) and presentations (.pptx)\n- Open from the Files app, iCloud Drive, email attachments or any app with Share\n- Save in the same format, ready to share with colleagues using other office apps\n\nREAL ARABIC SUPPORT\n- Right-to-left paragraphs, tables and slides that look right\n- Arabic fonts included: Cairo, Amiri, Tajawal and Noto Naskh\n- Switch the whole interface between Arabic and English in one tap\n\nA FULL EDITOR, NOT A VIEWER\n- Text styles, headings, lists, tables, images, colors and page layout\n- Formulas, cell formatting and multiple sheets\n- Slides with layouts, themes and transitions\n\nPRIVATE BY DESIGN\n- Everything happens on your device - no account, no upload, no tracking\n- Works without an internet connection\n\nMADE FOR EVERY SCREEN\n- iPhone for quick edits on the go\n- iPad and Mac for the complete desktop-class toolbar\n\nXrero Office is free and open-source software (AGPL-3.0), based on ONLYOFFICE.",
+      "whatsNew": "Welcome to Xrero Office for iPhone, iPad and Mac.\n- Edit documents, spreadsheets and presentations offline\n- Arabic-first: right-to-left editing, Arabic fonts, Arabic interface\n- Open and share files with the Files app"
+    },
+    "ar-SA": {
+      "name": "Xrero Office",
+      "subtitle": "مستندات وجداول وعروض تقديمية",
+      "keywords": "docx,xlsx,pptx,أوفيس,مستندات,جداول,عروض,محرر,عربي,مكتب",
+      "promotionalText": "مجاني ويعمل دون إنترنت ومصمم للعربية أولاً. افتح ملفات docx وxlsx وpptx وعدّلها واحفظها على الآيفون والآيباد والماك، وملفاتك لا تغادر جهازك.",
+      "description": "أوفيس Xrero حزمة مكتبية مجانية للمستندات والجداول والعروض التقديمية، مصممة للعربية أولاً وتعمل بالكامل دون إنترنت.\n\nافتح ملفاتك وعدّلها\n- المستندات (.docx) والجداول (.xlsx) والعروض التقديمية (.pptx)\n- افتح من تطبيق الملفات أو iCloud Drive أو مرفقات البريد أو أي تطبيق عبر «مشاركة»\n- احفظ بنفس الصيغة لتشاركها مع زملائك الذين يستخدمون برامج مكتبية أخرى\n\nدعم حقيقي للعربية\n- فقرات وجداول وشرائح من اليمين إلى اليسار تظهر بشكل صحيح\n- خطوط عربية مضمّنة: القاهرة، أميري، تجوال، نوتو نسخ\n- بدّل الواجهة كلها بين العربية والإنجليزية بلمسة واحدة\n\nمحرر كامل وليس مجرد عارض\n- أنماط النصوص والعناوين والقوائم والجداول والصور والألوان وتخطيط الصفحة\n- المعادلات وتنسيق الخلايا وأوراق العمل المتعددة\n- شرائح بتخطيطات وسمات وانتقالات\n\nالخصوصية أولاً\n- كل شيء يتم على جهازك: بلا حساب، بلا رفع للملفات، بلا تتبّع\n- يعمل دون اتصال بالإنترنت\n\nلكل الشاشات\n- الآيفون للتعديلات السريعة أثناء التنقل\n- الآيباد والماك لشريط الأدوات الكامل\n\nأوفيس Xrero برنامج مجاني ومفتوح المصدر (AGPL-3.0) مبني على ONLYOFFICE.",
+      "whatsNew": "مرحباً بك في أوفيس Xrero للآيفون والآيباد والماك.\n- عدّل المستندات والجداول والعروض دون إنترنت\n- العربية أولاً: تحرير من اليمين لليسار وخطوط وواجهة عربية\n- افتح الملفات وشاركها عبر تطبيق الملفات"
+    }
+  },
+  "reviewNotes": "No account or sign-in is needed. To review: create a new document with the + button, or open any .docx, .xlsx or .pptx from the Files app. Type, format, then tap Save in the editor's top bar. All editing and file conversion happen on the device (no server). The EN/AR switch in the editor header changes the interface language. The app is free and open-source (AGPL-3.0), based on ONLYOFFICE Docs; source: https://xrero.com/office."
+}

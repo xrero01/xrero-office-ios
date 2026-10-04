@@ -29,7 +29,8 @@ struct AutotestScreen: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            EditorWebView(document: $document, title: name, lang: AppLanguage.current, onCommand: handle, controller: controller)
+            EditorWebView(document: $document, title: name, lang: ProcessInfo.processInfo.environment["XR_LANG"] ?? AppLanguage.current,
+                          onCommand: handle, controller: controller)
                 .ignoresSafeArea(.container, edges: [.bottom])      // same as the real editor screen
             VStack(alignment: .leading, spacing: 2) {
                 Text(state).font(.system(size: 6)).accessibilityIdentifier("xr-state")

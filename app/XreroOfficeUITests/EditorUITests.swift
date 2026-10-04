@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 
 /// Real-keyboard editor tests on the simulator (app built in the "Autotest" configuration).
 /// The workflow then pulls Documents/<file> out of the simulator and checks the saved file's contents.
@@ -93,6 +94,23 @@ final class EditorUITests: XCTestCase {
         let saved = save(app)
         shot(app, "11-sample-saved")
         XCTAssertTrue(saved.hasPrefix("saved"), "sample save failed: \(saved)")
+    }
+
+    /// App Store screenshots: each sample from XR_STORE_SET ("name|lang|base64;...") opened in that UI language.
+    /// iPad in landscape (an office app's natural orientation there).
+    func testStoreScreenshots() throws {
+        guard let set = ProcessInfo.processInfo.environment["XR_STORE_SET"], !set.isEmpty else { throw XCTSkip("no store set") }
+        if UIDevice.current.userInterfaceIdiom == .pad { XCUIDevice.shared.orientation = .landscapeLeft }
+        for item in set.split(separator: ";") {
+            let p = item.split(separator: "|", maxSplits: 2).map(String.init)
+            guard p.count == 3 else { continue }
+            let app = launch(["XR_DOC_NAME": p[0], "XR_LANG": p[1], "XR_DOC_B64": p[2]])
+            let ready = waitState(app, prefix: "ready", timeout: 120)
+            sleep(5)
+            shot(app, "store-\(p[1])-\(p[0])")
+            XCTAssertEqual(ready, "ready", "\(p[0]) did not open")
+            app.terminate()
+        }
     }
 
     /// New spreadsheet and presentation open in their editors.
