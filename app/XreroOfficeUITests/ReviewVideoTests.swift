@@ -65,6 +65,17 @@ final class ReviewVideoTests: XCTestCase {
         pause(3)
     }
 
+    /// A system alert (e.g. "Unable to Import Document") is recorded, then closed so the rest of the flow still runs.
+    @discardableResult
+    private func dismissAlert(_ name: String) -> Bool {
+        let alert = app.alerts.firstMatch
+        guard alert.waitForExistence(timeout: 2) else { return false }
+        print("XR alert \(name): \(alert.label) | \(alert.staticTexts.allElementsBoundByIndex.map { $0.label })")
+        dump("alert-" + name)
+        alert.buttons.firstMatch.tap()
+        return true
+    }
+
     /// Browse > On My iPhone > Xrero Office > <name>
     private func openFromFiles(_ name: String) -> Bool {
         if let b = find(app.buttons, "label == 'Browse'", timeout: 5) { b.tap(); pause(1.5) }
@@ -80,7 +91,8 @@ final class ReviewVideoTests: XCTestCase {
         guard let file = find(app.cells, "label BEGINSWITH '\(base)'", timeout: 6)
                 ?? find(app.staticTexts, "label BEGINSWITH '\(base)'", timeout: 2) else { dump("file-" + base); return false }
         file.tap()
-        return true
+        pause(3)
+        return !dismissAlert("open-" + base)
     }
 
     func testReviewFlow() throws {
@@ -104,6 +116,8 @@ final class ReviewVideoTests: XCTestCase {
         if let create = find(app.buttons, "label CONTAINS[c] 'Create Document' OR label CONTAINS[c] 'New Document' OR label == 'Create'", timeout: 20) {
             create.tap()
         } else { dump("create") }
+        pause(3)
+        if dismissAlert("after-create") { pause(1) }
         waitEditor("word")
 
         // 3. Type English (one word in Bold) and Arabic, then Save

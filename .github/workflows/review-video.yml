@@ -69,6 +69,10 @@ jobs:
             -only-testing:XreroOfficeUITests/ReviewVideoTests/testReviewFlow 2>&1 | grep -E "Test Case|error|XCTAssert|failed" | tail -20
           sleep 2
           kill -INT $REC; wait $REC
+          # what the system said while the document browser created / imported / opened documents
+          xcrun simctl spawn $DEV log show --last 15m --style compact --predicate             'process == "XreroOffice" OR subsystem BEGINSWITH "com.apple.DocumentManager" OR subsystem BEGINSWITH "com.apple.FileProvider" OR process == "fileproviderd" OR process == "DocumentManagerUICore"'             > out/sim-log.txt 2>&1
+          grep -i -E "error|fail|import|denied|sandbox" out/sim-log.txt | grep -v -i "No error" | tail -80
+          echo "== app Documents"; ls -la "$C/Documents"; find "$C" -name "*.docx" 2>/dev/null | head
           ls -la out
           xcrun xcresulttool export attachments --path out/review.xcresult --output-path out/attachments >/dev/null 2>&1
           ls out/attachments | head -60
@@ -81,4 +85,4 @@ jobs:
           [ -d attachments ] && ditto -c -k --keepParent attachments review-attachments.zip
           gh release create "review-video-r${GITHUB_RUN_NUMBER}" --prerelease --title "App Review video ${GITHUB_RUN_NUMBER}" \
             --notes "Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" -R "$GITHUB_REPOSITORY" \
-            $(ls review-iphone.mp4 review-attachments.zip 2>/dev/null)
+            $(ls review-iphone.mp4 review-attachments.zip sim-log.txt 2>/dev/null)
