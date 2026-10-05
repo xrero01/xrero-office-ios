@@ -139,6 +139,10 @@ final class ReviewVideoTests: XCTestCase {
         guard waitEditor("word"), app.webViews.firstMatch.exists else {
             XCTFail("no editor after Create Document"); return
         }
+        let navButtons = app.navigationBars.buttons.allElementsBoundByIndex.map { "\($0.identifier)|\($0.label)" }
+        print("XR editor nav buttons:", navButtons)
+        XCTAssertEqual(app.navigationBars.buttons.matching(NSPredicate(format: "label == 'Documents' OR label == 'Back'")).count, 1,
+                       "exactly one back button in the editor: \(navButtons)")
 
         // 3. Type English (one word in Bold) and Arabic, then Save
         app.webViews.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35)).tap()

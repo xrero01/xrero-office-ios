@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// One open document: the Xrero editor full screen, with the system's back-to-Files navigation.
+/// One open document: the Xrero editor full screen, with a back button to the documents.
 struct EditorScreen: View {
     @Binding var document: OfficeDocument
     var fileURL: URL?
@@ -21,7 +21,6 @@ struct EditorScreen: View {
             .ignoresSafeArea(.container, edges: [.bottom])
             .navigationTitle((title as NSString).deletingPathExtension)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarRole(.editor)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button(action: close) { Image(systemName: "chevron.backward") }
