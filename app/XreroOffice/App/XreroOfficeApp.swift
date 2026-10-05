@@ -7,9 +7,7 @@ struct XreroOfficeApp: App {
         // CI build only (configuration "Autotest"): opens a fresh document straight in the editor for the UI tests
         WindowGroup { AutotestScreen() }
         #else
-        DocumentGroup(newDocument: OfficeDocument(kind: .word)) { file in
-            EditorScreen(document: file.$document, fileURL: file.fileURL)
-        }
+        WindowGroup { BrowserScene() }        // system document browser; documents open over it (DocumentBrowser.swift)
         #endif
     }
 }

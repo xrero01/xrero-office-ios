@@ -2,7 +2,7 @@ import XCTest
 
 /// App Review screen recording (review-video.yml records the simulator while this runs). Drives the REAL app (Debug/Release
 /// configuration: the system document browser + editor, no test overlay) the way a user does: Home screen -> tap the icon
-/// -> Create Document -> type English + Arabic with Bold -> Save -> close -> open a spreadsheet and a presentation from
+/// -> + New > Document -> type English + Arabic with Bold -> Save -> close -> open a spreadsheet and a presentation from
 /// Files -> switch the interface to Arabic -> Settings > Xrero Office > Licences. Steps are best-effort (the recording
 /// matters more than any single step); every step leaves a screenshot and the element tree when something is missing.
 final class ReviewVideoTests: XCTestCase {
@@ -67,7 +67,8 @@ final class ReviewVideoTests: XCTestCase {
 
     /// Back to the document browser with the editor's navigation (system back button of the document scene).
     private func closeDocument() {
-        let nav = app.navigationBars.buttons.element(boundBy: 0)
+        let back = app.buttons.matching(NSPredicate(format: "label == 'Documents' OR label == 'المستندات'")).firstMatch
+        let nav = back.exists ? back : app.navigationBars.buttons.element(boundBy: 0)
         if nav.waitForExistence(timeout: 5) && nav.isHittable { nav.tap() } else { dump("close") }
         pause(3)
     }
@@ -120,9 +121,14 @@ final class ReviewVideoTests: XCTestCase {
         shot("01-launched")
 
         // 2. New document from the document browser
-        if let create = find(app.buttons, "label CONTAINS[c] 'Create Document' OR label CONTAINS[c] 'New Document' OR label == 'Create'", timeout: 20) {
-            create.tap()
+        // the browser's "+" menu (New > Document); else its own Create Document (asks which kind)
+        if let plus = find(app.buttons, "label == 'New' OR label == 'جديد'", timeout: 20) {
+            plus.tap(); pause(1.5)
+        } else if let create = find(app.buttons, "label CONTAINS[c] 'Create Document'", timeout: 5) ?? find(app.cells, "label CONTAINS[c] 'Create Document'", timeout: 2) {
+            create.tap(); pause(1.5)
         } else { dump("create") }
+        shot("01b-new-menu")
+        if let doc = find(app.buttons, "label == 'Document' OR label == 'مستند'", timeout: 5) { doc.tap() } else { dump("new-menu") }
         // the editor, or a system alert (e.g. "Unable to Import Document"), whichever comes first
         let saveQ = app.webViews.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] 'Save' OR label BEGINSWITH 'حفظ'")).firstMatch
         let end = Date().addingTimeInterval(90)

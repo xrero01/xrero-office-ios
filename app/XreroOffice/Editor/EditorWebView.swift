@@ -179,10 +179,13 @@ struct EditorWebView: UIViewRepresentable {
         /// Runs the editor's own Save (the same as Ctrl+S): engine -> x2t -> "save" message above.
         /// Saves the document as it is now, changed or not (the desktop's own save entry point: engine -> x2t ->
         /// the "save" message). Used for the app going to the background, Share and the EN/AR switch.
-        func requestSave(then done: (() -> Void)? = nil) {
+        func requestSave(onlyIfModified: Bool = false, then done: (() -> Void)? = nil) {
             onSaved = done
+            let check = onlyIfModified ? """
+             try{ var a=w.Asc&&w.Asc.editor||w.editor; if(a){ var m=a.isDocumentModified?a.isDocumentModified():(a.asc_isDocumentModified?a.asc_isDocumentModified():true); if(!m)return 'unmodified'; } }catch(e){}
+            """ : ""
             let js = """
-            (function(){var f=document.querySelector('iframe');var w=f&&f.contentWindow;if(!w)return 'no editor frame';
+            (function(){var f=document.querySelector('iframe');var w=f&&f.contentWindow;if(!w)return 'no editor frame';\(check)
              try{ if(w.DesktopOfflineAppDocumentStartSave){w.DesktopOfflineAppDocumentStartSave(false);return 'ok';}
                   if(w.AscDesktopEditor_Save){w.AscDesktopEditor_Save();return 'ok';} return 'no save entry'; }
              catch(e){ return 'error: '+e; }})()
@@ -233,7 +236,7 @@ struct EditorWebView: UIViewRepresentable {
 /// Lets SwiftUI ask the web editor to save (share, language switch, app going to the background).
 final class EditorController: ObservableObject {
     weak var coordinator: EditorWebView.Coordinator?
-    func save(then done: (() -> Void)? = nil) {
-        if let c = coordinator { c.requestSave(then: done) } else { done?() }
+    func save(onlyIfModified: Bool = false, then done: (() -> Void)? = nil) {
+        if let c = coordinator { c.requestSave(onlyIfModified: onlyIfModified, then: done) } else { done?() }
     }
 }

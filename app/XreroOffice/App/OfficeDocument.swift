@@ -31,6 +31,22 @@ enum OfficeKind: String, CaseIterable {
         else if contentType.conforms(to: .pptx) { self = .slide }
         else { return nil }
     }
+    init?(url: URL) {
+        switch url.pathExtension.lowercased() {
+        case "docx": self = .word
+        case "xlsx": self = .cell
+        case "pptx": self = .slide
+        default: return nil
+        }
+    }
+    /// SF Symbol for the "+" menu.
+    var symbol: String {
+        switch self {
+        case .word: return "doc.text"
+        case .cell: return "tablecells"
+        case .slide: return "rectangle.on.rectangle"
+        }
+    }
 }
 
 /// An Office file as bytes. Opening and saving the format itself happens in the editor (x2t WebAssembly);
@@ -46,6 +62,11 @@ struct OfficeDocument: FileDocument {
     init(kind: OfficeKind = .word) {
         self.kind = kind
         self.data = OfficeDocument.blank(kind)
+    }
+
+    init(data: Data, kind: OfficeKind) {
+        self.data = data
+        self.kind = kind
     }
 
     init(configuration: ReadConfiguration) throws {
