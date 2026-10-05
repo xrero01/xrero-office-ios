@@ -14,6 +14,9 @@ on:
       runner:
         description: GitHub macOS image (macos-26 matches the iOS 26 simulator; older hosts break FileProvider)
         default: "macos-26"
+      samples:
+        description: "how the sample files reach On My iPhone > Xrero Office: after-first-launch | before-launch | none"
+        default: "after-first-launch"
 
 permissions:
   contents: write
@@ -63,7 +66,13 @@ jobs:
           APP=$(ls -d dd/Build/Products/Debug-iphonesimulator/XreroOffice.app)
           xcrun simctl install $DEV "$APP"
           C=$(xcrun simctl get_app_container $DEV com.xrero.office data); echo "container $C"
-          mkdir -p "$C/Documents" && cp store/samples/sales_en.xlsx store/samples/deck_en.pptx "$C/Documents/"
+          case "${{ inputs.samples }}" in
+            before-launch) mkdir -p "$C/Documents" && cp store/samples/sales_en.xlsx store/samples/deck_en.pptx "$C/Documents/" ;;
+            after-first-launch)
+              # let the app (and the system's file index for its folder) start once before any file appears there
+              xcrun simctl launch $DEV com.xrero.office; sleep 12; xcrun simctl terminate $DEV com.xrero.office; sleep 3
+              cp store/samples/sales_en.xlsx store/samples/deck_en.pptx "$C/Documents/" ;;
+          esac
           ls -la "$C/Documents"
           xcrun simctl io $DEV recordVideo --codec=h264 --force out/review-iphone.mp4 & REC=$!
           sleep 3
