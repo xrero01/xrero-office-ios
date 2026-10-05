@@ -2,8 +2,8 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
-/// The start screen of one window: the system document browser (Recents / Shared / Browse, like the Files app) with a
-/// "+" menu for a new document, spreadsheet or presentation.
+/// The start screen of one window: the system document browser (Recents / Shared / Browse, like the Files app). Its
+/// Create Document button asks for a new document, spreadsheet or presentation.
 ///
 /// New documents are written straight into "On My iPhone > Xrero Office" and opened by their file URL. The browser's
 /// own create-and-import path (and SwiftUI's DocumentGroup built on it) fails on the app's very first launch: the
@@ -32,9 +32,6 @@ struct DocumentBrowser: UIViewControllerRepresentable {
         browser.allowsPickingMultipleItems = false
         browser.delegate = context.coordinator
         browser.view.tintColor = UIColor(red: 0.12, green: 0.48, blue: 0.55, alpha: 1)
-        let plus = UIBarButtonItem(systemItem: .add, primaryAction: nil, menu: context.coordinator.newMenu())
-        plus.accessibilityLabel = L.new
-        browser.additionalTrailingNavigationBarButtonItems = [plus]
         context.coordinator.attach(browser)
         return browser
     }
@@ -52,15 +49,9 @@ final class BrowserCoordinator: NSObject, ObservableObject, UIDocumentBrowserVie
         if let url = pending { pending = nil; DispatchQueue.main.async { self.open(url) } }
     }
 
-    func newMenu() -> UIMenu {
-        UIMenu(title: L.new, children: OfficeKind.allCases.map { kind in
-            UIAction(title: L.name(kind), image: UIImage(systemName: kind.symbol)) { [weak self] _ in self?.createAndOpen(kind) }
-        })
-    }
-
     // MARK: browser delegate
 
-    /// The browser's own "Create Document": ask which kind, create it ourselves (see the type comment), import nothing.
+    /// The browser's "Create Document" (+): ask which kind, create it ourselves (see the type comment), import nothing.
     func documentBrowser(_ controller: UIDocumentBrowserViewController,
                          didRequestDocumentCreationWithHandler importHandler: @escaping (URL?, UIDocumentBrowserViewController.ImportMode) -> Void) {
         let sheet = UIAlertController(title: L.new, message: nil, preferredStyle: .actionSheet)

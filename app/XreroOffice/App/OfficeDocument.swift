@@ -39,14 +39,6 @@ enum OfficeKind: String, CaseIterable {
         default: return nil
         }
     }
-    /// SF Symbol for the "+" menu.
-    var symbol: String {
-        switch self {
-        case .word: return "doc.text"
-        case .cell: return "tablecells"
-        case .slide: return "rectangle.on.rectangle"
-        }
-    }
 }
 
 /// An Office file as bytes. Opening and saving the format itself happens in the editor (x2t WebAssembly);

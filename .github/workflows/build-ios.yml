@@ -58,7 +58,7 @@ jobs:
             xcrun simctl boot $DEV 2>/dev/null; xcrun simctl bootstatus $DEV -b >/dev/null
             ( while true; do xcrun simctl io $DEV screenshot "out/shots/$DEV-$(date +%H%M%S).png" >/dev/null 2>&1; sleep 6; done ) & SHOOT=$!
             xcodebuild test-without-building -project app/XreroOffice.xcodeproj -scheme XreroOffice -configuration Autotest \
-              -destination "id=$DEV" -derivedDataPath dd -resultBundlePath "out/ui-$DEV.xcresult" 2>&1 | grep -E "Test Case|error|passed|failed|XCTAssert|XR save path|XR web buttons" | tail -50
+              -destination "id=$DEV" -derivedDataPath dd -resultBundlePath "out/ui-$DEV.xcresult"               -only-testing:XreroOfficeUITests/EditorUITests 2>&1 | grep -E "Test Case|error|passed|failed|XCTAssert|XR save path|XR web buttons" | tail -50
             R=${PIPESTATUS[0]}; [ $R -ne 0 ] && RC=$R
             kill $SHOOT
             C=$(xcrun simctl get_app_container $DEV com.xrero.office data 2>/dev/null)

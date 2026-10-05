@@ -2,7 +2,7 @@ import XCTest
 
 /// App Review screen recording (review-video.yml records the simulator while this runs). Drives the REAL app (Debug/Release
 /// configuration: the system document browser + editor, no test overlay) the way a user does: Home screen -> tap the icon
-/// -> + New > Document -> type English + Arabic with Bold -> Save -> close -> open a spreadsheet and a presentation from
+/// -> Create Document > Document -> type English + Arabic with Bold -> Save -> close -> open a spreadsheet and a presentation from
 /// Files -> switch the interface to Arabic -> Settings > Xrero Office > Licences. Steps are best-effort (the recording
 /// matters more than any single step); every step leaves a screenshot and the element tree when something is missing.
 final class ReviewVideoTests: XCTestCase {
@@ -121,10 +121,9 @@ final class ReviewVideoTests: XCTestCase {
         shot("01-launched")
 
         // 2. New document from the document browser
-        // the browser's "+" menu (New > Document); else its own Create Document (asks which kind)
-        if let plus = find(app.buttons, "label == 'New' OR label == 'جديد'", timeout: 20) {
-            plus.tap(); pause(1.5)
-        } else if let create = find(app.buttons, "label CONTAINS[c] 'Create Document'", timeout: 5) ?? find(app.cells, "label CONTAINS[c] 'Create Document'", timeout: 2) {
+        // the browser's Create Document (+), which asks: Document / Spreadsheet / Presentation
+        if let create = find(app.buttons, "identifier == 'FullDocumentManagerViewControllerNavigationBarCreateButtonIdentifier' OR label CONTAINS[c] 'Create Document'", timeout: 20)
+            ?? find(app.cells, "label CONTAINS[c] 'Create Document'", timeout: 2) {
             create.tap(); pause(1.5)
         } else { dump("create") }
         shot("01b-new-menu")
