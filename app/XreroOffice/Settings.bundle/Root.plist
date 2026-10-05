@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>PreferenceSpecifiers</key>
+	<array>
+		<dict>
+			<key>FooterText</key>
+			<string>Free, open-source office suite for documents, spreadsheets and presentations. Arabic-first, works fully offline. Source code: https://github.com/xrero01/xrero-office-ios</string>
+			<key>Title</key>
+			<string>Xrero Office 20.0.9</string>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+		</dict>
+		<dict>
+			<key>File</key>
+			<string>Licences</string>
+			<key>Title</key>
+			<string>Licences</string>
+			<key>Type</key>
+			<string>PSChildPaneSpecifier</string>
+		</dict>
+	</array>
+</dict>
+</plist>

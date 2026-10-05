@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>PreferenceSpecifiers</key>
+	<array>
+		<dict>
+			<key>FooterText</key>
+			<string>Copyright (c) 2026 Xrero. Free software under the GNU Affero General Public License v3 (AGPL-3.0). Complete source code of this app: https://github.com/xrero01/xrero-office-ios</string>
+			<key>Title</key>
+			<string>Xrero Office</string>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+		</dict>
+		<dict>
+			<key>FooterText</key>
+			<string>Document, spreadsheet and presentation editors. Copyright (c) Ascensio System SIA. AGPL-3.0. https://github.com/ONLYOFFICE/web-apps and https://github.com/ONLYOFFICE/sdkjs. Modified by Xrero (Arabic text handling, branding, iPhone/iPad integration); the modified source is part of https://github.com/xrero01/xrero-office-ios</string>
+			<key>Title</key>
+			<string>ONLYOFFICE Docs editors</string>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+		</dict>
+		<dict>
+			<key>FooterText</key>
+			<string>Copyright (c) Ascensio System SIA; WebAssembly build by the CryptPad project. AGPL-3.0. https://github.com/ONLYOFFICE/core and https://github.com/cryptpad/onlyoffice-x2t-wasm</string>
+			<key>Title</key>
+			<string>ONLYOFFICE document converter (x2t) for WebAssembly</string>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+		</dict>
+		<dict>
+			<key>FooterText</key>
+			<string>Copyright (c) Ascensio System SIA 2012-2014. All rights reserved Licence: AGPL-3.0, part of the ONLYOFFICE editors.</string>
+			<key>Title</key>
+			<string>Font: ASCW3</string>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+		</dict>
+		<dict>
+			<key>FooterText</key>
+			<string>Copyright 2010-2022 The Amiri Project Authors (https://github.com/aliftype/amiri). Licence: SIL Open Font License 1.1.</string>
+			<key>Title</key>
+			<string>Font: Amiri</string>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+		</dict>
+		<dict>
+			<key>FooterText</key>
+			<string>Copyright 2009 The Cairo Project Authors (https://github.com/Gue3bara/Cairo) Licence: SIL Open Font License 1.1.</string>
+			<key>Title</key>
+			<string>Font: Cairo</string>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+		</dict>
+		<dict>
+			<key>FooterText</key>
+			<string>Copyright 2012 The Caladea Project Authors (https://github.com/huertatipografica/Caladea) Licence: SIL Open Font License 1.1.</string>
+			<key>Title</key>
+			<string>Font: Caladea</string>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+		</dict>
+		<dict>
+			<key>FooterText</key>
+			<string>Copyright (c) 2010-2013 by tyPoland Lukasz Dziedzic with Reserved Font Name "Carlito". Licensed under the SIL Open Font License, Version 1.1. Licence: SIL Open Font License 1.1.</string>
+			<key>Title</key>
+			<string>Font: Carlito</string>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+		</dict>
+		<dict>
+			<key>FooterText</key>
+			<string>Copyright (c) 2003 by Bitstream, Inc. All Rights Reserved. Copyright (c) 2006 by Tavmjong Bah. All Rights Reserved. DejaVu changes are in public domain Copyright (c) 2003 by Bitstream, Inc. All Rights Reserved. DejaVu changes are in public domain Licence: Bitstream Vera licence; DejaVu changes are in the public domain.</string>
+			<key>Title</key>
+			<string>Font: DejaVu</string>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+		</dict>
+		<dict>
+			<key>FooterText</key>
+			<string>Copyright (c) 2007 Red Hat, Inc. All rights reserved. LIBERATION is a trademark of Red Hat, Inc. Copyright 2010 Oracle and/or its affiliates Licence: GNU GPL v2 with the Liberation font exception (Liberation 1.07, https://fedoraproject.org/wiki/Licensing/LiberationFontLicense).</string>
+			<key>Title</key>
+			<string>Font: Liberation</string>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+		</dict>
+		<dict>
+			<key>FooterText</key>
+			<string>Copyright 2011 The Montserrat Project Authors (https://github.com/JulietaUla/Montserrat) Licence: SIL Open Font License 1.1.</string>
+			<key>Title</key>
+			<string>Font: Montserrat</string>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+		</dict>
+		<dict>
+			<key>FooterText</key>
+			<string>Copyright 2013 Google Inc. All Rights Reserved. Copyright 2014 Google Inc. All Rights Reserved. Licence: SIL Open Font License 1.1.</string>
+			<key>Title</key>
+			<string>Font: Noto Naskh Arabic</string>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+		</dict>
+		<dict>
+			<key>FooterText</key>
+			<string>Digitized data copyright (c) 2010-2011, Google Corporation. Digitized data copyright (c) 2011, Google Corporation. Licence: Apache License 2.0.</string>
+			<key>Title</key>
+			<string>Font: Open Sans</string>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+		</dict>
+		<dict>
+			<key>FooterText</key>
+			<string>Copyright 2011 Google Inc. All Rights Reserved. Licence: Apache License 2.0.</string>
+			<key>Title</key>
+			<string>Font: Roboto</string>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+		</dict>
+		<dict>
+			<key>FooterText</key>
+			<string>(c) 2017 by Boutros International. All rights reserved. Licence: SIL Open Font License 1.1.</string>
+			<key>Title</key>
+			<string>Font: Tajawal</string>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+		</dict>
+		<dict>
+			<key>Title</key>
+			<string>Licence texts</string>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+		</dict>
+		<dict>
+			<key>File</key>
+			<string>AGPL</string>
+			<key>Title</key>
+			<string>GNU Affero General Public License v3</string>
+			<key>Type</key>
+			<string>PSChildPaneSpecifier</string>
+		</dict>
+		<dict>
+			<key>File</key>
+			<string>GPL2</string>
+			<key>Title</key>
+			<string>GNU General Public License v2</string>
+			<key>Type</key>
+			<string>PSChildPaneSpecifier</string>
+		</dict>
+		<dict>
+			<key>File</key>
+			<string>OFL</string>
+			<key>Title</key>
+			<string>SIL Open Font License 1.1</string>
+			<key>Type</key>
+			<string>PSChildPaneSpecifier</string>
+		</dict>
+		<dict>
+			<key>File</key>
+			<string>Apache</string>
+			<key>Title</key>
+			<string>Apache License 2.0</string>
+			<key>Type</key>
+			<string>PSChildPaneSpecifier</string>
+		</dict>
+		<dict>
+			<key>File</key>
+			<string>DejaVu</string>
+			<key>Title</key>
+			<string>Bitstream Vera / DejaVu licence</string>
+			<key>Type</key>
+			<string>PSChildPaneSpecifier</string>
+		</dict>
+	</array>
+	<key>Title</key>
+	<string>Licences</string>
+</dict>
+</plist>
