@@ -116,9 +116,17 @@ final class ReviewVideoTests: XCTestCase {
         if let create = find(app.buttons, "label CONTAINS[c] 'Create Document' OR label CONTAINS[c] 'New Document' OR label == 'Create'", timeout: 20) {
             create.tap()
         } else { dump("create") }
-        pause(3)
-        if dismissAlert("after-create") { pause(1) }
-        waitEditor("word")
+        // the editor, or a system alert (e.g. "Unable to Import Document"), whichever comes first
+        let saveQ = app.webViews.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] 'Save' OR label BEGINSWITH 'حفظ'")).firstMatch
+        let end = Date().addingTimeInterval(90)
+        while Date() < end && !saveQ.exists && !app.alerts.firstMatch.exists { pause(1) }
+        if dismissAlert("after-create") {
+            print("XR create: alert -> opening the created document from Files instead")
+            _ = openFromFiles("Untitled.docx")
+        }
+        guard waitEditor("word"), app.webViews.firstMatch.exists else {
+            XCTFail("no editor after Create Document"); return
+        }
 
         // 3. Type English (one word in Bold) and Arabic, then Save
         app.webViews.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35)).tap()

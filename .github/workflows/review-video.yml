@@ -11,13 +11,16 @@ on:
       device:
         description: simulator name prefix
         default: "iPhone 17 Pro"
+      runner:
+        description: GitHub macOS image (macos-26 matches the iOS 26 simulator; older hosts break FileProvider)
+        default: "macos-26"
 
 permissions:
   contents: write
 
 jobs:
   video:
-    runs-on: macos-15
+    runs-on: ${{ inputs.runner }}
     timeout-minutes: 90
     env:
       GH_TOKEN: ${{ github.token }}
@@ -51,7 +54,7 @@ jobs:
           mkdir -p out
           xcrun simctl list devices available -j > devices.json
           DEV=$(python3 scripts/pick_sim.py devices.json "${{ inputs.device }}" || python3 scripts/pick_sim.py devices.json "iPhone")
-          xcrun simctl list devices | grep "$DEV"
+          sw_vers; xcodebuild -version; xcrun simctl list devices | grep "$DEV"
           # on-screen keyboard like a real phone (no Mac keyboard attached to the simulator)
           defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false
           xcrun simctl boot $DEV; xcrun simctl bootstatus $DEV -b >/dev/null
