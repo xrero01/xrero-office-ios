@@ -17,6 +17,9 @@ on:
       samples:
         description: "how the sample files reach On My iPhone > Xrero Office: after-first-launch | before-launch | none"
         default: "after-first-launch"
+      warmup:
+        description: "before the recorded run: none | files-app (open the Files app once: first use of the device's file system)"
+        default: "none"
 
 permissions:
   contents: write
@@ -66,6 +69,9 @@ jobs:
           APP=$(ls -d dd/Build/Products/Debug-iphonesimulator/XreroOffice.app)
           xcrun simctl install $DEV "$APP"
           C=$(xcrun simctl get_app_container $DEV com.xrero.office data); echo "container $C"
+          if [ "${{ inputs.warmup }}" = "files-app" ]; then
+            xcrun simctl launch $DEV com.apple.DocumentsApp; sleep 15; xcrun simctl terminate $DEV com.apple.DocumentsApp; sleep 2
+          fi
           case "${{ inputs.samples }}" in
             before-launch) mkdir -p "$C/Documents" && cp store/samples/sales_en.xlsx store/samples/deck_en.pptx "$C/Documents/" ;;
             after-first-launch)
