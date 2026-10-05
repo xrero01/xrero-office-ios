@@ -29,7 +29,14 @@ final class ReviewVideoTests: XCTestCase {
     private func pause(_ s: Double) { Thread.sleep(forTimeInterval: s) }
 
     private func typeSlowly(_ text: String) {
+        dismissKeyboardTip()
         for ch in text { app.typeText(String(ch)); usleep(120_000) }
+    }
+
+    /// iOS shows a one-time keyboard tip ("Speed up your typing by sliding your finger...") with a Continue button.
+    private func dismissKeyboardTip() {
+        let tip = app.buttons.matching(NSPredicate(format: "label == 'Continue'")).firstMatch
+        if tip.exists && tip.isHittable { tip.tap(); pause(1) }
     }
 
     /// First element (any type) whose label matches, waiting up to `timeout`.
@@ -130,7 +137,8 @@ final class ReviewVideoTests: XCTestCase {
 
         // 3. Type English (one word in Bold) and Arabic, then Save
         app.webViews.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35)).tap()
-        pause(1.5)
+        pause(2.5)
+        dismissKeyboardTip()
         typeSlowly("Xrero Office works ")
         let bold = webButton("label BEGINSWITH[c] 'Bold' OR label BEGINSWITH 'غامق'", timeout: 3)
         bold?.tap(); pause(0.5)
@@ -168,7 +176,7 @@ final class ReviewVideoTests: XCTestCase {
             }
             shot("06-deck")
             // 6. Interface language EN -> AR (the editor reopens in Arabic)
-            if let ar = webButton("label == 'AR' OR label CONTAINS[c] 'العربية' OR label CONTAINS[c] 'Arabic'", timeout: 3) {
+            if let ar = find(app.webViews.staticTexts, "label == 'AR'", timeout: 3) ?? webButton("label == 'AR'", timeout: 1) {
                 ar.tap(); pause(2); waitEditor("deck-ar")
             } else { dump("lang") }
             closeDocument()
@@ -178,17 +186,26 @@ final class ReviewVideoTests: XCTestCase {
         let settings = XCUIApplication(bundleIdentifier: "com.apple.Preferences")
         settings.launch()
         pause(2)
-        if let apps = find(settings.cells, "label == 'Apps'", timeout: 5) ?? find(settings.staticTexts, "label == 'Apps'", timeout: 1) {
-            apps.tap(); pause(1.5)
+        var apps: XCUIElement? = nil
+        for _ in 0..<4 {
+            apps = find(settings.buttons, "identifier == 'com.apple.settings.apps' OR label == 'Apps'", timeout: 2)
+                ?? find(settings.cells, "label == 'Apps'", timeout: 1)
+            if let a = apps, a.isHittable { break }
+            settings.swipeUp(); pause(0.8)
         }
+        if let a = apps { a.tap(); pause(2) } else { dump("settings-apps", settings) }
         var row: XCUIElement? = nil
-        for _ in 0..<6 {
-            row = find(settings.cells, "label CONTAINS 'Xrero Office'", timeout: 1) ?? find(settings.staticTexts, "label == 'Xrero Office'", timeout: 1)
+        for _ in 0..<8 {
+            row = find(settings.buttons, "label CONTAINS 'Xrero Office'", timeout: 1)
+                ?? find(settings.cells, "label CONTAINS 'Xrero Office'", timeout: 1)
+                ?? find(settings.staticTexts, "label == 'Xrero Office'", timeout: 1)
             if let r = row, r.isHittable { break }
             settings.swipeUp(); pause(0.8)
         }
-        if let r = row { r.tap(); pause(1.5) } else { dump("settings-app", settings) }
-        if let lic = find(settings.cells, "label CONTAINS 'Licences'", timeout: 4) ?? find(settings.staticTexts, "label == 'Licences'", timeout: 1) {
+        if let r = row { r.tap(); pause(2) } else { dump("settings-app", settings) }
+        if let lic = find(settings.buttons, "label CONTAINS 'Licences'", timeout: 4)
+            ?? find(settings.cells, "label CONTAINS 'Licences'", timeout: 1)
+            ?? find(settings.staticTexts, "label == 'Licences'", timeout: 1) {
             lic.tap(); pause(2)
             settings.swipeUp(); pause(1.5)
             shot("07-licences", settings)
