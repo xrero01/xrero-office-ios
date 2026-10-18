@@ -40,8 +40,8 @@ for dev in sorted(os.listdir(root)) if os.path.isdir(root) else []:
             r = PdfReader(pdf)
             rot = r.pages[0].get("/Rotate", 0)
             annots = sum(len(p.get("/Annots") or []) for p in r.pages)
-            text = "".join(p.extract_text() or "" for p in r.pages)
-            arabic = sum(1 for c in text if "؀" <= c <= "ۿ")      # the letter's Arabic text survived
+            pdf_text = "".join(p.extract_text() or "" for p in r.pages)
+            arabic = sum(1 for c in pdf_text if "؀" <= c <= "ۿ")      # the letter's Arabic text survived
             good = len(r.pages) == 2 and rot == 90 and annots >= 1 and arabic >= 100
             print("ar_letter.pdf saved: pages=%d rotate=%s annotations=%d arabic letters=%d -> %s"
                   % (len(r.pages), rot, annots, arabic, "OK" if good else "WRONG"))
