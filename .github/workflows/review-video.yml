@@ -89,6 +89,7 @@ jobs:
           kill -INT $REC; wait $REC
           # what the system said while the document browser created / imported / opened documents
           xcrun simctl spawn $DEV log show --last 15m --style compact --predicate             'process == "XreroOffice" OR subsystem BEGINSWITH "com.apple.DocumentManager" OR subsystem BEGINSWITH "com.apple.FileProvider" OR process == "fileproviderd" OR process == "DocumentManagerUICore"'             > out/sim-log.txt 2>&1
+          echo "== app XR log"; grep -a " XR " out/sim-log.txt | cut -c1-260 | tail -60
           grep -i -E "error|fail|import|denied|sandbox" out/sim-log.txt | grep -v -i "No error" | tail -80
           echo "== app Documents"; ls -la "$C/Documents"; find "$C" -name "*.docx" 2>/dev/null | head
           ls -la out

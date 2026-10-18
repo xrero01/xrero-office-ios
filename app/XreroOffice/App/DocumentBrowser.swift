@@ -21,6 +21,7 @@ struct BrowserScene: View {
             }
             .task {
                 await XreroAccount.shared.refresh()
+                NSLog("XR start welcomeShown=%ld signedIn=%ld", welcomeShown ? 1 : 0, XreroAccount.shared.isSignedIn ? 1 : 0)
                 if !welcomeShown && !XreroAccount.shared.isSignedIn {    // once: the optional Xrero account
                     welcomeShown = true
                     coordinator.presentWelcome()
@@ -55,13 +56,24 @@ final class BrowserCoordinator: NSObject, ObservableObject, UIDocumentBrowserVie
     /// The one-time card for the optional account, presented by the browser itself (a SwiftUI sheet on top of the
     /// document browser was not shown on the very first launch).
     func presentWelcome(attempt: Int = 0) {
-        guard let browser, browser.view.window != nil, browser.presentedViewController == nil else {
-            if attempt < 20 { DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.presentWelcome(attempt: attempt + 1) } }
+        let top = topController()
+        NSLog("XR welcome attempt=%ld browser=%ld window=%ld top=%@ editorOpen=%ld", attempt, browser == nil ? 0 : 1,
+              browser?.view.window == nil ? 0 : 1, top.map { String(describing: type(of: $0)) } ?? "nil", editorOpen ? 1 : 0)
+        guard !editorOpen else { return }                             // a document is already being opened: not now
+        guard let top, browser?.view.window != nil, !top.isBeingPresented, !top.isBeingDismissed else {
+            if attempt < 30 { DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.presentWelcome(attempt: attempt + 1) } }
             return
         }
         let host = UIHostingController(rootView: AccountView(welcome: true))
         host.modalPresentationStyle = .formSheet
-        browser.present(host, animated: true)
+        top.present(host, animated: true)
+    }
+
+    /// The controller everything new is presented from: the browser, or whatever it is already showing.
+    private func topController() -> UIViewController? {
+        var top: UIViewController? = browser
+        while let p = top?.presentedViewController, !p.isBeingDismissed { top = p }
+        return top
     }
 
     func attach(_ browser: UIDocumentBrowserViewController) {
@@ -118,7 +130,12 @@ final class BrowserCoordinator: NSObject, ObservableObject, UIDocumentBrowserVie
         }
     }
 
+    private func openPending() {
+        if let next = pending { pending = nil; open(next) }
+    }
+
     func open(_ url: URL) {
+        NSLog("XR open %@ editorOpen=%ld", url.lastPathComponent, editorOpen ? 1 : 0)
         guard let browser, !editorOpen else { pending = url; return }
         guard OfficeKind(url: url) != nil else { alert(L.cannotOpen, url.lastPathComponent); return }
         editorOpen = true
@@ -133,21 +150,26 @@ final class BrowserCoordinator: NSObject, ObservableObject, UIDocumentBrowserVie
                 return
             }
             let host = UIHostingController(rootView: AnyView(EmptyView()))
-            host.rootView = AnyView(EditorHost(model: model) { [weak self, weak host] in
+            host.rootView = AnyView(EditorHost(model: model) { [weak self] in
                 file.close { _ in
                     if scoped { url.stopAccessingSecurityScopedResource() }
-                    // dismiss from the browser: closes the editor AND anything still above it (the account sheet);
-                    // host.dismiss would only close that topmost sheet and leave the editor "open"
-                    let finish = {
-                        guard let self else { return }
-                        self.editorOpen = false
-                        if let next = self.pending { self.pending = nil; self.open(next) }
-                    }
-                    if let b = host?.presentingViewController { b.dismiss(animated: true, completion: finish) } else { finish() }
+                    guard let self else { return }
+                    // the editor is closed as far as opening the next file goes, whatever the animation does
+                    self.editorOpen = false
+                    NSLog("XR editor closed, presented=%@", String(describing: self.browser?.presentedViewController))
+                    // dismiss from the browser: closes the editor AND anything still above it (the account sheet)
+                    if let b = self.browser, b.presentedViewController != nil {
+                        b.dismiss(animated: true) { self.openPending() }
+                    } else { self.openPending() }
                 }
             })
             host.modalPresentationStyle = .fullScreen
-            browser.present(host, animated: true)
+            if let shown = browser.presentedViewController {        // e.g. the welcome card: replace it with the editor
+                NSLog("XR open: dismissing %@ first", String(describing: shown))
+                browser.dismiss(animated: false) { browser.present(host, animated: true) }
+            } else {
+                browser.present(host, animated: true)
+            }
         }
     }
 
