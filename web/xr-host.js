@@ -92,16 +92,46 @@
 
   // ---------------------------------------------------------------- x2t (WebAssembly) in a worker
   var worker = null, seq = 0, waiting = {};
-  function x2t(name, data, to, mediaList) {
+  function x2t(name, data, to, mediaList, opts) {
     if (!worker) {
       worker = new Worker(H.x2tBase + 'x2t-worker.js?base=' + encodeURIComponent(H.x2tBase));
       worker.onmessage = function (e) { var w = waiting[e.data.id]; delete waiting[e.data.id]; w && (e.data.ok ? w.ok(e.data) : w.fail(new Error(e.data.error))); };
       worker.onerror = function (e) { log('x2t worker error', e.message); };
     }
+    opts = opts || {};
     return new Promise(function (ok, fail) {
       var id = ++seq; waiting[id] = { ok: ok, fail: fail };
-      worker.postMessage({ id: id, name: name, data: data, to: to, media: mediaList || [] });
+      worker.postMessage({ id: id, name: name, data: data, to: to, media: mediaList || [],
+                           changes: opts.changes || [], fromChanges: !!opts.fromChanges, fonts: opts.fonts || null });
     });
+  }
+  // the editors' font files as absolute URLs (for x2t when it has to draw text: PDF editing)
+  function fontUrls() {
+    var ids = window.__fonts_files || [];
+    return ids.map(function (id) { return new URL(H.fontUrl(id), location.href).href; });
+  }
+
+  // PDF: opened as-is by the PDF editor (its own WebAssembly engine renders it); saving = the original file + the
+  // editor's compiled changes (annotations, forms, edited/added/deleted pages) applied by x2t, exactly what the
+  // desktop's native PDF engine does (EditPdf + AddToPdfFromBinary). Always against the ORIGINAL bytes: the
+  // changes describe the difference to the document as it was opened.
+  function savePdf(ed, done, t0) {
+    var dr = ed.WordControl && ed.WordControl.m_oDrawingDocument && ed.WordControl.m_oDrawingDocument.m_oDocumentRenderer;
+    var changes = null;
+    try { changes = dr && dr.Save ? dr.Save() : null; } catch (e) { log('save: pdf changes failed', e && e.stack || e); return done(2); }
+    if (!changes || changes.length <= 4) {
+      log('save: pdf has no changes');
+      return H.saveFile(opened.name, opened.bin.slice(0)).then(function () { done(0); }, function (e) { log('save failed', e); done(2); });
+    }
+    var ch = changes.slice(0);                       // own copy (transferable)
+    x2t('origin.pdf', opened.bin.slice(0), 'out.pdf', [], { changes: [{ name: 'changes0.bin', data: ch.buffer }], fromChanges: true, fonts: fontUrls() })
+      .then(function (r) {
+        if (r.data.byteLength < 8) throw new Error('empty pdf');
+        return H.saveFile(opened.name, r.data).then(function () {
+          log('saved', opened.name, r.data.byteLength, 'bytes (' + changes.length + ' bytes of PDF changes) in', Date.now() - t0, 'ms');
+          done(0);
+        });
+      }).catch(function (e) { log('save failed', e && e.message || e); done(2); });
   }
 
   var A = {
@@ -166,6 +196,7 @@
       H.openFile().then(function (f) {
         name = f.name;
         log('open', name, f.data.byteLength, 'bytes');
+        if (ext(name) === 'pdf') return { data: f.data, media: [], ms: 0 };   // the PDF editor reads the file itself
         return x2t(name, f.data, 'Editor.bin');
       }).then(function (r) {
         log('converted to Editor.bin', r.data.byteLength, 'bytes,', r.media.length, 'pictures,', r.ms, 'ms convert,',
@@ -179,7 +210,7 @@
         window.DesktopOfflineAppDocumentEndLoad(DOC_URL, '', 0);
       });
     },
-    GetOpenedFile: function () { return opened ? opened.bin : null; },
+    GetOpenedFile: function () { return opened ? (opened.ext === 'pdf' ? opened.bin.slice(0) : opened.bin) : null; },
     LocalFileGetSourcePath: function () { return ''; },
     LocalFileGetSaved: function () { return true; },
     LocalFileGetOpenChangesCount: function () { return 0; },
@@ -202,6 +233,7 @@
       if (!ed || !opened) { log('save: nothing open'); return done(2); }
       log('save start', opened.name);
       var t0 = Date.now(), bin;
+      if (opened.ext === 'pdf') return savePdf(ed, done, t0);
       try {
         // the engine's Editor.bin; in a web page it comes base64-encoded and already carries its "DOCY;v10;0;" header
         var file = ed.asc_nativeGetFile3(), d = file.data;

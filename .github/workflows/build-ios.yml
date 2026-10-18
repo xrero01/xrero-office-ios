@@ -4,7 +4,7 @@ on:
     inputs:
       editors:
         description: release tag holding ios-editors-<version>.zip
-        default: "ios-editors-20.0.9"
+        default: "ios-editors-20.0.10"
 
 permissions:
   contents: write
@@ -24,7 +24,7 @@ jobs:
           sudo xcode-select -s "$X/Contents/Developer"
           xcodebuild -version
           brew install xcodegen >/dev/null
-          python3 -m pip install --quiet --break-system-packages pillow 2>/dev/null || true
+          python3 -m pip install --quiet --break-system-packages pillow pypdf 2>/dev/null || true
           xcrun simctl list devices available | grep -E "iPhone|iPad" | head -20
 
       - name: Editors (Xrero payload subset) + app web folder
@@ -53,6 +53,7 @@ jobs:
           echo "iPhone $IPHONE  iPad $IPAD"
           export TEST_RUNNER_XR_SAMPLE_NAME=ar_letter.docx
           export TEST_RUNNER_XR_SAMPLE_B64=$(base64 -i tests/ar_letter.docx | tr -d '\n')
+          export TEST_RUNNER_XR_PDF_B64=$(base64 -i tests/ar_letter.pdf | tr -d '\n')
           RC=0
           for DEV in $IPHONE $IPAD; do
             xcrun simctl boot $DEV 2>/dev/null; xcrun simctl bootstatus $DEV -b >/dev/null

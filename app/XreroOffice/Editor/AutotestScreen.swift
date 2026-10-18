@@ -16,7 +16,7 @@ struct AutotestScreen: View {
         if let b64 = env["XR_DOC_B64"], let data = Data(base64Encoded: b64), let n = env["XR_DOC_NAME"] {
             var d = OfficeDocument(kind: OfficeKind(rawValue: env["XR_KIND"] ?? "") ?? .word)
             d.data = data
-            if n.hasSuffix(".xlsx") { d.kind = .cell } else if n.hasSuffix(".pptx") { d.kind = .slide } else { d.kind = .word }
+            d.kind = OfficeKind(url: URL(fileURLWithPath: n)) ?? .word
             _document = State(initialValue: d)
             name = n
         } else {
@@ -40,7 +40,16 @@ struct AutotestScreen: View {
         }
         // test-only trigger that needs no tapping: XCUIApplication.open(URL("xrero-autotest://save"))
         .onOpenURL { url in
-            if url.scheme == "xrero-autotest" && url.host == "save" { controller.save() }
+            guard url.scheme == "xrero-autotest" else { return }
+            if url.host == "save" { controller.save() }
+            if url.host == "pdfedit" {          // PDF editing test: rotate page 1, add a page, add a free-text box
+                let js = """
+                (function(){var f=document.querySelector('iframe');var w=f&&f.contentWindow;var ed=w&&w.Asc&&w.Asc.editor;
+                 if(!ed)return 'no editor';ed.asc_RotatePage(90,[0]);ed.asc_AddPage(1);
+                 setTimeout(function(){try{ed.AddFreeTextAnnot(0);}catch(e){}},800);return 'ok';})()
+                """
+                controller.coordinator?.web?.evaluateJavaScript(js) { r, e in handle("log", "pdfedit: \(r ?? e?.localizedDescription ?? "?")") }
+            }
         }
     }
 

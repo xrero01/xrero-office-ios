@@ -7,15 +7,19 @@ extension UTType {
     static let pptx = UTType("org.openxmlformats.presentationml.presentation") ?? UTType(importedAs: "org.openxmlformats.presentationml.presentation")
 }
 
-/// The three editors and the file format each one saves.
+/// The editors and the file format each one saves (PDF: opened, edited and saved as PDF by the PDF editor).
 enum OfficeKind: String, CaseIterable {
-    case word, cell, slide
+    case word, cell, slide, pdf
+
+    /// what "Create Document" offers (a new PDF is made by exporting a document, not from a blank template)
+    static let creatable: [OfficeKind] = [.word, .cell, .slide]
 
     var contentType: UTType {
         switch self {
         case .word: return .docx
         case .cell: return .xlsx
         case .slide: return .pptx
+        case .pdf: return .pdf
         }
     }
     var fileExtension: String {
@@ -23,12 +27,14 @@ enum OfficeKind: String, CaseIterable {
         case .word: return "docx"
         case .cell: return "xlsx"
         case .slide: return "pptx"
+        case .pdf: return "pdf"
         }
     }
     init?(contentType: UTType) {
         if contentType.conforms(to: .docx) { self = .word }
         else if contentType.conforms(to: .xlsx) { self = .cell }
         else if contentType.conforms(to: .pptx) { self = .slide }
+        else if contentType.conforms(to: .pdf) { self = .pdf }
         else { return nil }
     }
     init?(url: URL) {
@@ -36,6 +42,7 @@ enum OfficeKind: String, CaseIterable {
         case "docx": self = .word
         case "xlsx": self = .cell
         case "pptx": self = .slide
+        case "pdf": self = .pdf
         default: return nil
         }
     }
@@ -44,8 +51,8 @@ enum OfficeKind: String, CaseIterable {
 /// An Office file as bytes. Opening and saving the format itself happens in the editor (x2t WebAssembly);
 /// the app only moves bytes between the Files app and the editor.
 struct OfficeDocument: FileDocument {
-    static var readableContentTypes: [UTType] { [.docx, .xlsx, .pptx] }
-    static var writableContentTypes: [UTType] { [.docx, .xlsx, .pptx] }
+    static var readableContentTypes: [UTType] { [.docx, .xlsx, .pptx, .pdf] }
+    static var writableContentTypes: [UTType] { [.docx, .xlsx, .pptx, .pdf] }
 
     var data: Data
     var kind: OfficeKind

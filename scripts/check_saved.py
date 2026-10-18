@@ -33,6 +33,23 @@ for dev in sorted(os.listdir(root)) if os.path.isdir(root) else []:
         ok &= kept
     else:
         print("ar_letter.docx: MISSING"); ok = False
+    pdf = os.path.join(d, "ar_letter.pdf")
+    if os.path.exists(pdf):
+        try:
+            from pypdf import PdfReader
+            r = PdfReader(pdf)
+            rot = r.pages[0].get("/Rotate", 0)
+            annots = sum(len(p.get("/Annots") or []) for p in r.pages)
+            text = "".join(p.extract_text() or "" for p in r.pages)
+            arabic = sum(1 for c in text if "؀" <= c <= "ۿ")      # the letter's Arabic text survived
+            good = len(r.pages) == 2 and rot == 90 and annots >= 1 and arabic >= 100
+            print("ar_letter.pdf saved: pages=%d rotate=%s annotations=%d arabic letters=%d -> %s"
+                  % (len(r.pages), rot, annots, arabic, "OK" if good else "WRONG"))
+            ok &= good
+        except Exception as e:
+            print("ar_letter.pdf: cannot read the saved PDF:", e); ok = False
+    else:
+        print("ar_letter.pdf: MISSING (PDF edit + save)"); ok = False
 if not (os.path.isdir(root) and os.listdir(root)):
     print("no saved files from any simulator"); ok = False
 print("RESULT", "PASS" if ok else "FAIL")

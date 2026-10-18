@@ -17,5 +17,7 @@ rm -f "$OUT/editors/sdkjs/common/AllFonts.js"          # the app serves fonts-ge
 cp "$ROOT/fonts-src/LICENSES.md" "$OUT/fonts-gen/LICENSES.md"
 test -f "$OUT/editors/web-apps/apps/documenteditor/main/index.html"
 test -f "$OUT/editors/sdkjs/word/sdk-all-min.js"
+test -f "$OUT/editors/web-apps/apps/pdfeditor/main/index.html"         # PDF editor (packages from 20.0.10 on)
+test -f "$OUT/editors/sdkjs/pdf/src/engine/drawingfile.wasm"
 test -f "$OUT/templates/en/new.docx" && test -f "$OUT/templates/ar/new.docx"
 du -sh "$OUT" "$OUT"/* | sort -h | tail -8

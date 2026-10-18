@@ -27,7 +27,7 @@ struct DocumentBrowser: UIViewControllerRepresentable {
     func makeCoordinator() -> BrowserCoordinator { coordinator }
 
     func makeUIViewController(context: Context) -> UIDocumentBrowserViewController {
-        let browser = UIDocumentBrowserViewController(forOpening: [.docx, .xlsx, .pptx])
+        let browser = UIDocumentBrowserViewController(forOpening: [.docx, .xlsx, .pptx, .pdf])
         browser.allowsDocumentCreation = true
         browser.allowsPickingMultipleItems = false
         browser.delegate = context.coordinator
@@ -55,7 +55,7 @@ final class BrowserCoordinator: NSObject, ObservableObject, UIDocumentBrowserVie
     func documentBrowser(_ controller: UIDocumentBrowserViewController,
                          didRequestDocumentCreationWithHandler importHandler: @escaping (URL?, UIDocumentBrowserViewController.ImportMode) -> Void) {
         let sheet = UIAlertController(title: L.new, message: nil, preferredStyle: .actionSheet)
-        for kind in OfficeKind.allCases {
+        for kind in OfficeKind.creatable {
             sheet.addAction(UIAlertAction(title: L.name(kind), style: .default) { [weak self] _ in
                 importHandler(nil, .none)
                 self?.createAndOpen(kind)
@@ -214,6 +214,7 @@ enum L {
         case .word: return ar ? "مستند" : "Document"
         case .cell: return ar ? "جدول بيانات" : "Spreadsheet"
         case .slide: return ar ? "عرض تقديمي" : "Presentation"
+        case .pdf: return "PDF"
         }
     }
 }

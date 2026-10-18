@@ -7,7 +7,7 @@ on:
     inputs:
       editors:
         description: release tag holding ios-editors-<version>.zip
-        default: "ios-editors-20.0.9"
+        default: "ios-editors-20.0.10"
       upload:
         description: upload to App Store Connect (TestFlight)
         type: boolean

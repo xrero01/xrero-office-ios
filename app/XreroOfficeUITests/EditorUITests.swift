@@ -117,6 +117,23 @@ final class EditorUITests: XCTestCase {
         }
     }
 
+    /// PDF: opens in the PDF editor, gets edited (rotate page 1, add a page, add a free-text box), saves as PDF
+    /// (x2t applies the editor's changes to the original); the workflow checks the saved file.
+    func testPdfOpenEditSave() throws {
+        guard let b64 = ProcessInfo.processInfo.environment["XR_PDF_B64"] else { throw XCTSkip("no pdf passed") }
+        let app = launch(["XR_DOC_B64": b64, "XR_DOC_NAME": "ar_letter.pdf"])
+        let ready = waitState(app, prefix: "ready", timeout: 120)
+        sleep(3)
+        shot(app, "30-pdf-opened")
+        XCTAssertEqual(ready, "ready", "pdf did not open")
+        XCUIDevice.shared.system.open(URL(string: "xrero-autotest://pdfedit")!)
+        sleep(5)
+        shot(app, "31-pdf-edited")
+        let saved = save(app)
+        shot(app, "32-pdf-saved")
+        XCTAssertTrue(saved.hasPrefix("saved"), "pdf save failed: \(saved)")
+    }
+
     /// New spreadsheet and presentation open in their editors.
     func testSpreadsheetAndPresentationOpen() {
         for kind in ["cell", "slide"] {

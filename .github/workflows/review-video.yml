@@ -7,7 +7,7 @@ on:
     inputs:
       editors:
         description: release tag holding ios-editors-<version>.zip
-        default: "ios-editors-20.0.9"
+        default: "ios-editors-20.0.10"
       device:
         description: simulator name prefix
         default: "iPhone 17 Pro"

@@ -98,6 +98,19 @@
 				<string>org.openxmlformats.presentationml.presentation</string>
 			</array>
 		</dict>
+		<dict>
+			<!-- Alternate: Xrero is offered for PDFs ("Open in", Files) without replacing the user's default PDF app -->
+			<key>CFBundleTypeName</key>
+			<string>PDF Document</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.adobe.pdf</string>
+			</array>
+		</dict>
 	</array>
 	<key>CFBundleURLTypes</key>
 	<array>
