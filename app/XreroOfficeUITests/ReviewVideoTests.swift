@@ -119,6 +119,11 @@ final class ReviewVideoTests: XCTestCase {
         if launched { pause(1); app.activate() } else { dump("icon", springboard); app.launch() }
         pause(3)
         shot("01-launched")
+        // first launch: the optional Xrero account card -> continue without an account
+        if let skip = find(app.buttons, "identifier == 'xr-acct-skip'", timeout: 10) {
+            shot("01a-welcome")
+            skip.tap(); pause(1.5)
+        } else { dump("welcome") }
 
         // 2. New document from the document browser
         // the browser's Create Document (+), which asks: Document / Spreadsheet / Presentation
@@ -160,6 +165,27 @@ final class ReviewVideoTests: XCTestCase {
         shot("02-typed")
         saveDocument()
         shot("03-saved")
+
+        // 3b. The editor header's Sign in -> the account screen; a wrong password shows the server's answer
+        if let signIn = webButton("label == 'Sign in' OR label == 'تسجيل الدخول'", timeout: 5) {
+            signIn.tap(); pause(2)
+            let mail = app.textFields.matching(identifier: "xr-acct-email").firstMatch
+            if mail.waitForExistence(timeout: 10) {
+                mail.tap(); typeSlowly("review-check@example.com")
+                let pw = app.secureTextFields.matching(identifier: "xr-acct-password").firstMatch
+                pw.tap(); typeSlowly("not-a-real-password")
+                shot("03b-account")
+                app.buttons.matching(identifier: "xr-acct-submit").firstMatch.tap()
+                let answer = app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] 'Invalid' OR label CONTAINS[c] 'internet' OR label CONTAINS 'HTTP'")).firstMatch
+                XCTAssertTrue(answer.waitForExistence(timeout: 30), "no answer from the account server")
+                print("XR account answer:", answer.label)
+                shot("03c-account-answer")
+                let done = app.buttons.matching(NSPredicate(format: "label == 'Done' OR label == 'تم'")).firstMatch
+                if done.exists { done.tap() } else { app.swipeDown() }
+                pause(1.5)
+            } else { dump("account-sheet") }
+        } else { dump("signin-button") }
+
         closeDocument()
         shot("04-browser")
 

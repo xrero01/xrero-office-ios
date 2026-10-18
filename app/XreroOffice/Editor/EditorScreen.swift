@@ -9,6 +9,8 @@ struct EditorScreen: View {
     @StateObject private var controller = EditorController()
     @State private var lang = AppLanguage.current
     @State private var share: ShareFile?
+    @State private var showAccount = false
+    @ObservedObject private var account = XreroAccount.shared
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dismiss) private var dismiss
 
@@ -28,6 +30,8 @@ struct EditorScreen: View {
                 }
             }
             .sheet(item: $share) { ShareSheet(items: [$0.url]) }
+            .sheet(isPresented: $showAccount) { AccountView() }
+            .onChange(of: account.info) { _, _ in controller.syncAccount(account.webValue) }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .background { controller.save() }     // never lose typing when the app is left
             }
@@ -49,6 +53,10 @@ struct EditorScreen: View {
     private func handle(_ cmd: String, _ param: String) {
         if cmd == "close" {
             close()
+        } else if cmd == "xrero:account" || cmd == "xrero:signin" {
+            showAccount = true
+        } else if cmd == "xrero:signout" {
+            account.signOut()
         } else if cmd == "xrero:share" {
             controller.save {
                 let url = FileManager.default.temporaryDirectory.appendingPathComponent(title)

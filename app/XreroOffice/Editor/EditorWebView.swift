@@ -92,6 +92,8 @@ struct EditorWebView: UIViewRepresentable {
             web.configuration.userContentController.removeAllUserScripts()
             let ucc = web.configuration.userContentController
             ucc.addUserScript(WKUserScript(source: bridgeScript(), injectionTime: .atDocumentStart, forMainFrameOnly: false))
+            let acct = MainActor.assumeIsolated { XreroAccount.shared.webValue }     // the header's account chip
+            ucc.addUserScript(WKUserScript(source: EditorController.accountScript(acct), injectionTime: .atDocumentStart, forMainFrameOnly: true))
             if let host = try? String(contentsOf: resources.root.appendingPathComponent("xr-host.js"), encoding: .utf8) {
                 ucc.addUserScript(WKUserScript(source: host, injectionTime: .atDocumentStart, forMainFrameOnly: false))
             }
@@ -236,6 +238,15 @@ struct EditorWebView: UIViewRepresentable {
 /// Lets SwiftUI ask the web editor to save (share, language switch, app going to the background).
 final class EditorController: ObservableObject {
     weak var coordinator: EditorWebView.Coordinator?
+
+    /// localStorage "xr-acct" = the account the editors' header shows (its chip re-reads it every 0.8 s).
+    static func accountScript(_ json: String) -> String {
+        "try{localStorage.setItem('xr-acct', JSON.stringify(\(json)))}catch(e){}"
+    }
+
+    func syncAccount(_ json: String) {
+        coordinator?.web?.evaluateJavaScript(EditorController.accountScript(json), completionHandler: nil)
+    }
     func save(onlyIfModified: Bool = false, then done: (() -> Void)? = nil) {
         if let c = coordinator { c.requestSave(onlyIfModified: onlyIfModified, then: done) } else { done?() }
     }

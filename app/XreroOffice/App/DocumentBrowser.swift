@@ -11,6 +11,8 @@ import UniformTypeIdentifiers
 /// DocumentManager error 1) - so a new user's first tap on Create Document showed an error.
 struct BrowserScene: View {
     @StateObject private var coordinator = BrowserCoordinator()
+    @AppStorage("xr.welcomeShown") private var welcomeShown = false
+    @State private var showWelcome = false
 
     var body: some View {
         DocumentBrowser(coordinator: coordinator)
@@ -18,6 +20,14 @@ struct BrowserScene: View {
             .onOpenURL { url in
                 if url.isFileURL { coordinator.openExternal(url) }      // "Open in Xrero Office" from Files / Share
             }
+            .task {
+                await XreroAccount.shared.refresh()
+                if !welcomeShown && !XreroAccount.shared.isSignedIn {    // once: the optional Xrero account
+                    welcomeShown = true
+                    showWelcome = true
+                }
+            }
+            .sheet(isPresented: $showWelcome) { AccountView(welcome: true) }
     }
 }
 
@@ -209,6 +219,8 @@ enum L {
     static var documents: String { ar ? "المستندات" : "Documents" }
     static var cannotOpen: String { ar ? "تعذّر فتح الملف" : "Couldn't open the file" }
     static var cannotCreate: String { ar ? "تعذّر إنشاء الملف" : "Couldn't create the file" }
+    static var noConnection: String { ar ? "لا يوجد اتصال بالإنترنت" : "No internet connection" }
+    static var accountDisabled: String { ar ? "هذا الحساب موقوف" : "This account is disabled" }
     static func name(_ kind: OfficeKind) -> String {
         switch kind {
         case .word: return ar ? "مستند" : "Document"

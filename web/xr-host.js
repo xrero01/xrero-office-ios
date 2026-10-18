@@ -40,7 +40,8 @@
   // Xrero header controls that need the Windows shell (account, PDF->Word converter, Designs): not on this platform.
   // EN/AR and Share stay: the app handles 'xrero:lang:<code>' and 'xrero:share'.
   (function hideDesktopOnly() {
-    var css = '#xr-b-ctx,#xr-b-acct,#xr-acct-menu,#xr-designs-launch,#xr-design-ov{display:none!important}';
+    var css = '#xr-b-ctx,#xr-designs-launch,#xr-design-ov{display:none!important}' +
+              '#xr-b-signin{display:inline-flex;align-items:center}';
     var add = function () {
       if (document.getElementById('xr-host-css')) return;
       var s = document.createElement('style'); s.id = 'xr-host-css'; s.textContent = css;
@@ -311,6 +312,22 @@
       return undefined;
     }
   }) : A;
+
+  // Optional Xrero account: while signed out, a "Sign in" button next to Share in the editors' header (once signed in
+  // the header's own account chip takes its place - it reads localStorage "xr-acct", which the app keeps current).
+  (function signInButton() {
+    if (!/\/main\/index\.html$/.test(location.pathname)) return;
+    setInterval(function () {
+      var share = document.getElementById('xr-b-share');
+      if (!share || document.getElementById('xr-b-acct') || document.getElementById('xr-b-signin')) return;
+      var b = document.createElement('button');
+      b.id = 'xr-b-signin'; b.className = 'xr-share'; b.type = 'button';
+      b.textContent = H.lang === 'ar' ? 'تسجيل الدخول' : 'Sign in';
+      b.setAttribute('aria-label', b.textContent);
+      b.onclick = function (ev) { ev.stopPropagation(); H.command && H.command('xrero:signin', ''); };
+      share.parentNode.insertBefore(b, share.nextSibling);
+    }, 800);
+  })();
 
   // ---------------------------------------------------------------- engine patches (re-applied while it loads:
   // the local-mode module installs its own versions after the base ones)
