@@ -13,6 +13,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 KEY_FILE, KID, ISS = sys.argv[1], "43Y7PTLSWT", "57bafb2b-775d-4d48-b296-dd6787354a62"
 MODE = sys.argv[2] if len(sys.argv) > 2 else ""
 L = json.load(open(os.path.join(HERE, "listing.json"), encoding="utf-8"))
+import re as _re
+VERSION = _re.search(r'MARKETING_VERSION:\s*"([^"]+)"', open(os.path.join(HERE, "..", "app", "project.yml"), encoding="utf-8").read()).group(1)
 LOCALES = {"en-US": "en", "ar-SA": "ar"}
 SCREEN_TYPES = {"iphone": "APP_IPHONE_67", "ipad": "APP_IPAD_PRO_3GEN_129"}
 
@@ -87,7 +89,7 @@ def main():
     vid = ver["id"]
     if MODE != "--screens-only":
         must(*api("PATCH", f"/v1/appStoreVersions/{vid}", {"data": {"type": "appStoreVersions", "id": vid, "attributes": {
-            "versionString": "20.0.9", "copyright": L["app"]["copyright"]}}}), "version")
+            "versionString": VERSION, "copyright": L["app"]["copyright"]}}}), "version")
     vlocs = {l["attributes"]["locale"]: l for l in must(*api("GET", f"/v1/appStoreVersions/{vid}/appStoreVersionLocalizations"), "version locs")["data"]}
     first_release = len(vers) == 1
     for loc, lang in LOCALES.items():
