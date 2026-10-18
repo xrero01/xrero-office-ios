@@ -12,7 +12,6 @@ import UniformTypeIdentifiers
 struct BrowserScene: View {
     @StateObject private var coordinator = BrowserCoordinator()
     @AppStorage("xr.welcomeShown") private var welcomeShown = false
-    @State private var showWelcome = false
 
     var body: some View {
         DocumentBrowser(coordinator: coordinator)
@@ -24,10 +23,9 @@ struct BrowserScene: View {
                 await XreroAccount.shared.refresh()
                 if !welcomeShown && !XreroAccount.shared.isSignedIn {    // once: the optional Xrero account
                     welcomeShown = true
-                    showWelcome = true
+                    coordinator.presentWelcome()
                 }
             }
-            .sheet(isPresented: $showWelcome) { AccountView(welcome: true) }
     }
 }
 
@@ -53,6 +51,18 @@ final class BrowserCoordinator: NSObject, ObservableObject, UIDocumentBrowserVie
     private weak var browser: UIDocumentBrowserViewController?
     private var pending: URL?                 // asked to open while the browser or another document was not ready
     private var editorOpen = false
+
+    /// The one-time card for the optional account, presented by the browser itself (a SwiftUI sheet on top of the
+    /// document browser was not shown on the very first launch).
+    func presentWelcome(attempt: Int = 0) {
+        guard let browser, browser.view.window != nil, browser.presentedViewController == nil else {
+            if attempt < 20 { DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.presentWelcome(attempt: attempt + 1) } }
+            return
+        }
+        let host = UIHostingController(rootView: AccountView(welcome: true))
+        host.modalPresentationStyle = .formSheet
+        browser.present(host, animated: true)
+    }
 
     func attach(_ browser: UIDocumentBrowserViewController) {
         self.browser = browser
@@ -126,11 +136,14 @@ final class BrowserCoordinator: NSObject, ObservableObject, UIDocumentBrowserVie
             host.rootView = AnyView(EditorHost(model: model) { [weak self, weak host] in
                 file.close { _ in
                     if scoped { url.stopAccessingSecurityScopedResource() }
-                    host?.dismiss(animated: true) {
+                    // dismiss from the browser: closes the editor AND anything still above it (the account sheet);
+                    // host.dismiss would only close that topmost sheet and leave the editor "open"
+                    let finish = {
                         guard let self else { return }
                         self.editorOpen = false
                         if let next = self.pending { self.pending = nil; self.open(next) }
                     }
+                    if let b = host?.presentingViewController { b.dismiss(animated: true, completion: finish) } else { finish() }
                 }
             })
             host.modalPresentationStyle = .fullScreen
