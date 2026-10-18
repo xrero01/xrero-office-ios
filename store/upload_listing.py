@@ -53,15 +53,18 @@ def main():
     infos = must(*api("GET", f"/v1/apps/{app_id}/appInfos"), "appInfos")["data"]
     info = next((i for i in infos if i["attributes"].get("appStoreState") in ("PREPARE_FOR_SUBMISSION", "DEVELOPER_REJECTED", None)), infos[0])
     if MODE != "--screens-only":
-        must(*api("PATCH", f"/v1/appInfos/{info['id']}", {"data": {"type": "appInfos", "id": info["id"], "relationships": {
+        st_c, r_c = api("PATCH", f"/v1/appInfos/{info['id']}", {"data": {"type": "appInfos", "id": info["id"], "relationships": {
             "primaryCategory": {"data": {"type": "appCategories", "id": L["app"]["primaryCategory"]}},
-            "secondaryCategory": {"data": {"type": "appCategories", "id": L["app"]["secondaryCategory"]}}}}}), "categories")
+            "secondaryCategory": {"data": {"type": "appCategories", "id": L["app"]["secondaryCategory"]}}}}})
+        print("categories", "set" if st_c == 200 else "unchanged (locked while the app is live)")
         locs = {l["attributes"]["locale"]: l for l in must(*api("GET", f"/v1/appInfos/{info['id']}/appInfoLocalizations"), "info locs")["data"]}
         for loc in LOCALES:
             t = L["localizations"][loc]
             attrs = {"name": t["name"], "subtitle": t["subtitle"], "privacyPolicyUrl": L["app"]["privacyPolicyUrl"]}
             if loc in locs:
-                must(*api("PATCH", f"/v1/appInfoLocalizations/{locs[loc]['id']}", {"data": {"type": "appInfoLocalizations", "id": locs[loc]["id"], "attributes": attrs}}), "info loc " + loc)
+                st_l, _ = api("PATCH", f"/v1/appInfoLocalizations/{locs[loc]['id']}", {"data": {"type": "appInfoLocalizations", "id": locs[loc]["id"], "attributes": attrs}})
+                if st_l != 200:
+                    print("app info", loc, "unchanged (locked while the app is live)"); continue
             else:
                 must(*api("POST", "/v1/appInfoLocalizations", {"data": {"type": "appInfoLocalizations", "attributes": dict(attrs, locale=loc),
                      "relationships": {"appInfo": {"data": {"type": "appInfos", "id": info["id"]}}}}}), "new info loc " + loc)
