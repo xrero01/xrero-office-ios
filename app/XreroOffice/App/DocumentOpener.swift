@@ -13,8 +13,17 @@ final class DocumentOpener: NSObject, ObservableObject, UIDocumentBrowserViewCon
     weak var anchor: UIViewController?
     private var pending: URL?                 // asked to open while the window or another document was not ready
     private var editorOpen = false
+    /// The window's root, kept while it is reachable: under a full-screen editor the home screen's views leave the
+    /// window (anchor.view.window becomes nil), so the root must not be looked up through them when closing.
+    private weak var lastRoot: UIViewController?
+    /// The open editor and the controller that presented it.
+    private weak var editorHost: UIViewController?
+    private weak var editorPresenter: UIViewController?
 
-    private var root: UIViewController? { anchor?.view.window?.rootViewController }
+    private var root: UIViewController? {
+        if let r = anchor?.view.window?.rootViewController { lastRoot = r; return r }
+        return lastRoot
+    }
 
     func attach(_ vc: UIViewController) {
         anchor = vc
@@ -98,6 +107,8 @@ final class DocumentOpener: NSObject, ObservableObject, UIDocumentBrowserViewCon
                 }
             })
             host.modalPresentationStyle = .fullScreen
+            self.editorHost = host
+            self.editorPresenter = root
             if let shown = root.presentedViewController {            // e.g. the account card: replace it with the editor
                 root.dismiss(animated: false) { root.present(host, animated: true) }
             } else {
@@ -110,10 +121,11 @@ final class DocumentOpener: NSObject, ObservableObject, UIDocumentBrowserViewCon
     /// UIKit silently drops a dismissal asked for while another presentation is still animating (a sheet sliding
     /// down, the keyboard going away) - wait for that, and check that the editor really went.
     private func dismissEditor(attempt: Int = 0, then done: @escaping () -> Void) {
-        guard let r = root, let shown = r.presentedViewController else { done(); return }
-        shown.view.endEditing(true)
-        let busy = r.transitionCoordinator != nil || shown.isBeingPresented || shown.isBeingDismissed
-            || (shown.presentedViewController.map { $0.isBeingPresented || $0.isBeingDismissed } ?? false)
+        guard let host = editorHost, let r = host.presentingViewController ?? editorPresenter else { done(); return }
+        guard r.presentedViewController != nil else { done(); return }
+        host.view.endEditing(true)
+        let busy = r.transitionCoordinator != nil || host.isBeingPresented || host.isBeingDismissed
+            || (host.presentedViewController.map { $0.isBeingPresented || $0.isBeingDismissed } ?? false)
         if busy && attempt < 20 {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { self.dismissEditor(attempt: attempt + 1, then: done) }
             return
@@ -125,8 +137,12 @@ final class DocumentOpener: NSObject, ObservableObject, UIDocumentBrowserViewCon
             if r.presentedViewController != nil && attempt < 20 {      // still there (dropped dismissal): try again
                 NSLog("XR editor still shown after dismiss, retrying")
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { self.dismissEditor(attempt: attempt + 1, then: done) }
-            } else { done() }
+            } else {
+                NSLog("XR editor dismissed")
+                done()
+            }
         }
+        // from the presenter: closes the editor AND anything still above it (the account sheet)
         r.dismiss(animated: true) { check() }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { check() }   // no completion = the request was dropped
     }
