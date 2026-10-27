@@ -86,8 +86,12 @@ final class ReviewVideoTests: XCTestCase {
 
     /// Home > Browse files > Browse > On My iPhone > Xrero Office > <name>
     private func openFromFiles(_ name: String) -> Bool {
-        if let h = find(app.buttons, "identifier == 'xr-home-browse'", timeout: 10) { h.tap(); pause(2) } else { dump("home-browse") }
-        if let b = find(app.buttons, "label == 'Browse'", timeout: 5) { b.tap(); pause(1.5) }
+        if let h = find(app.buttons, "identifier == 'xr-home-browse'", timeout: 10) { h.tap(); pause(3) } else { dump("home-browse") }
+        // the browser slides in over the home screen: wait for its own tab bar, then Browse (tap again if still on Recents)
+        if let b = find(app.buttons, "label == 'Browse'", timeout: 15) {
+            b.tap(); pause(2)
+            if app.staticTexts["No Recents"].exists || !b.isSelected { b.tap(); pause(2) }
+        } else { dump("browser") }
         for loc in ["On My iPhone", "On My iPad"] {
             if let l = find(app.cells, "label BEGINSWITH '\(loc)'", timeout: 2) ?? find(app.staticTexts, "label == '\(loc)'", timeout: 1) {
                 l.tap(); pause(1.5); break
