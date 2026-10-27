@@ -40,8 +40,16 @@
   // Xrero header controls that need the Windows shell (account, PDF->Word converter, Designs): not on this platform.
   // EN/AR and Share stay: the app handles 'xrero:lang:<code>' and 'xrero:share'.
   (function hideDesktopOnly() {
-    var css = '#xr-b-ctx,#xr-designs-launch,#xr-design-ov{display:none!important}' +
-              '#xr-b-signin{display:inline-flex;align-items:center}';
+    // language / share / account are in the app's own top bar on iOS: the editors' header cluster is not needed
+    var css = '#xr-b-ctx,#xr-designs-launch,#xr-design-ov,#xr-hdr-btns,#xr-acct-menu{display:none!important}' +
+              // File menu: recent files live on the app's home screen; "Suggest a Feature" opens a desktop form
+              '#fm-btn-recent,#fm-btn-suggest{display:none!important}';
+    // phones: the status bar keeps what a finger needs (page/slide count, Present, zoom); the text-language picker,
+    // spell-check toggle and fit-to-page/width icons go (pinch and the zoom buttons cover fitting)
+    if (Math.min(screen.width, screen.height) < 600) {
+      css += '#btn-cnt-lang,#btn-doc-lang,#btn-doc-spell,#btn-zoom-topage,#btn-zoom-towidth,#status-label-zoom,#label-zoom,#slot-status-btn-info,#status-btn-multiple-pages{display:none!important}' +
+             '#statusbar .status-group.cnt-flex-center{justify-content:flex-end}';
+    }
     var add = function () {
       if (document.getElementById('xr-host-css')) return;
       var s = document.createElement('style'); s.id = 'xr-host-css'; s.textContent = css;
@@ -313,21 +321,6 @@
     }
   }) : A;
 
-  // Optional Xrero account: while signed out, a "Sign in" button next to Share in the editors' header (once signed in
-  // the header's own account chip takes its place - it reads localStorage "xr-acct", which the app keeps current).
-  (function signInButton() {
-    if (!/\/main\/index\.html$/.test(location.pathname)) return;
-    setInterval(function () {
-      var share = document.getElementById('xr-b-share');
-      if (!share || document.getElementById('xr-b-acct') || document.getElementById('xr-b-signin')) return;
-      var b = document.createElement('button');
-      b.id = 'xr-b-signin'; b.className = 'xr-share'; b.type = 'button';
-      b.textContent = H.lang === 'ar' ? 'تسجيل الدخول' : 'Sign in';
-      b.setAttribute('aria-label', b.textContent);
-      b.onclick = function (ev) { ev.stopPropagation(); H.command && H.command('xrero:signin', ''); };
-      share.parentNode.insertBefore(b, share.nextSibling);
-    }, 800);
-  })();
 
   // ---------------------------------------------------------------- engine patches (re-applied while it loads:
   // the local-mode module installs its own versions after the base ones)

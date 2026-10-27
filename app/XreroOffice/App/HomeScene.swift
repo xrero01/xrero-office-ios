@@ -1,0 +1,235 @@
+import SwiftUI
+import UniformTypeIdentifiers
+
+/// The start screen: what the app does at a glance (documents, spreadsheets, presentations, PDF), a tile per kind,
+/// the system file browser one tap away, and the files opened last.
+struct HomeScene: View {
+    @StateObject private var opener = DocumentOpener()
+    @ObservedObject private var recents = RecentFiles.shared
+    @ObservedObject private var account = XreroAccount.shared
+    @AppStorage("xr.welcomeShown") private var welcomeShown = false
+    @State private var showAccount = false
+    @State private var welcome = false
+    @State private var missing: String?
+    @Environment(\.horizontalSizeClass) private var hsc
+
+    private var ar: Bool { L.ar }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    header
+                    tiles
+                    browseButton
+                    recentSection
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 12)
+                .frame(maxWidth: 760)
+                .frame(maxWidth: .infinity)
+            }
+            .background(Color(.systemGroupedBackground))
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showAccount = true } label: {
+                        Image(systemName: account.isSignedIn ? "person.crop.circle.fill" : "person.crop.circle")
+                            .font(.title3)
+                    }
+                    .accessibilityLabel(account.isSignedIn ? (ar ? "الحساب" : "Account") : (ar ? "تسجيل الدخول" : "Sign in"))
+                    .accessibilityIdentifier("xr-home-account")
+                }
+            }
+        }
+        .background(PresenterAnchor(opener: opener).frame(width: 0, height: 0))
+        .environment(\.layoutDirection, ar ? .rightToLeft : .leftToRight)
+        .sheet(isPresented: $showAccount) { AccountView(welcome: welcome) }
+        .onChange(of: showAccount) { _, shown in if !shown { welcome = false } }
+        .alert(ar ? "تعذّر العثور على الملف" : "File not found", isPresented: Binding(
+            get: { missing != nil }, set: { if !$0 { missing = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: { Text(missing ?? "") }
+        .onOpenURL { url in
+            if url.isFileURL { opener.openExternal(url) }        // "Open in Xrero Office" from Files / Share
+        }
+        .task {
+            await XreroAccount.shared.refresh()
+            NSLog("XR start welcomeShown=%ld signedIn=%ld", welcomeShown ? 1 : 0, XreroAccount.shared.isSignedIn ? 1 : 0)
+            if !welcomeShown && !XreroAccount.shared.isSignedIn {    // once: the optional Xrero account
+                welcomeShown = true
+                welcome = true
+                showAccount = true
+            }
+        }
+    }
+
+    // MARK: parts
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 10) {
+                Image("Logo")
+                    .resizable().scaledToFit()
+                    .frame(width: 34, height: 34)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .accessibilityHidden(true)
+                Text("Xrero Office").font(.largeTitle.bold())
+            }
+            Text(ar ? "مستندات Word وجداول Excel وعروض PowerPoint وملفات PDF - بالعربية والإنجليزية، بدون إنترنت."
+                    : "Word documents, Excel sheets, PowerPoint slides and PDF files - Arabic and English, offline.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.top, 4)
+    }
+
+    private var tiles: some View {
+        let cols = Array(repeating: GridItem(.flexible(), spacing: 12), count: hsc == .regular ? 4 : 2)
+        return VStack(alignment: .leading, spacing: 10) {
+            Text(ar ? "إنشاء أو فتح" : "Create or open").font(.headline)
+            LazyVGrid(columns: cols, spacing: 12) {
+                ForEach(HomeTile.all) { t in
+                    Button { t.kind == .pdf ? opener.browse([.pdf]) : opener.create(t.kind) } label: { TileView(tile: t) }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("xr-home-" + t.id)
+                }
+            }
+        }
+    }
+
+    private var browseButton: some View {
+        Button { opener.browse() } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "folder.fill").font(.title2).foregroundStyle(Color.accentColor)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(ar ? "تصفّح الملفات" : "Browse files").font(.body.weight(.semibold)).foregroundStyle(.primary)
+                    Text(ar ? "على هذا الجهاز وiCloud Drive والتطبيقات الأخرى" : "On this device, iCloud Drive and other apps")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: ar ? "chevron.left" : "chevron.right").foregroundStyle(.tertiary)
+            }
+            .padding(14)
+            .frame(minHeight: 60)
+            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("xr-home-browse")
+    }
+
+    @ViewBuilder private var recentSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(ar ? "الملفات الأخيرة" : "Recent").font(.headline)
+            if recents.items.isEmpty {
+                Text(ar ? "الملفات التي تفتحها ستظهر هنا." : "Files you open will appear here.")
+                    .font(.subheadline).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 60)
+                    .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(recents.items) { item in
+                        Button { openRecent(item) } label: { RecentRow(item: item, ar: ar) }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("xr-recent-" + item.name)
+                            .contextMenu {
+                                Button(role: .destructive) { recents.remove(item) } label: {
+                                    Label(ar ? "إزالة من القائمة" : "Remove from list", systemImage: "minus.circle")
+                                }
+                            }
+                        if item != recents.items.last { Divider().padding(.leading, 60) }
+                    }
+                }
+                .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+        }
+    }
+
+    private func openRecent(_ item: RecentFiles.Item) {
+        guard let url = recents.resolve(item), FileManager.default.fileExists(atPath: url.path) || url.startAccessingSecurityScopedResource()
+        else {
+            missing = item.name
+            recents.remove(item)
+            return
+        }
+        url.stopAccessingSecurityScopedResource()
+        opener.open(url)
+    }
+}
+
+/// One kind of file: its colour, symbol and words.
+struct HomeTile: Identifiable {
+    let id: String
+    let kind: OfficeKind
+    let color: Color
+    let symbol: String
+    let title: (en: String, ar: String)
+    let detail: (en: String, ar: String)
+
+    static let all: [HomeTile] = [
+        HomeTile(id: "word", kind: .word, color: Color(red: 0.169, green: 0.341, blue: 0.604), symbol: "doc.text.fill",
+                 title: ("New document", "مستند جديد"), detail: ("Word · .docx", "Word · .docx")),
+        HomeTile(id: "cell", kind: .cell, color: Color(red: 0.063, green: 0.486, blue: 0.255), symbol: "tablecells.fill",
+                 title: ("New spreadsheet", "جدول بيانات جديد"), detail: ("Excel · .xlsx", "Excel · .xlsx")),
+        HomeTile(id: "slide", kind: .slide, color: Color(red: 0.769, green: 0.243, blue: 0.110), symbol: "play.rectangle.fill",
+                 title: ("New presentation", "عرض تقديمي جديد"), detail: ("PowerPoint · .pptx", "PowerPoint · .pptx")),
+        HomeTile(id: "pdf", kind: .pdf, color: Color(red: 0.776, green: 0.157, blue: 0.157), symbol: "doc.richtext.fill",
+                 title: ("Open a PDF", "فتح ملف PDF"), detail: ("View, edit, sign", "عرض وتعديل وتوقيع")),
+    ]
+
+    static func of(_ kind: OfficeKind?) -> HomeTile { all.first { $0.kind == kind } ?? all[0] }
+}
+
+struct TileView: View {
+    let tile: HomeTile
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Image(systemName: tile.symbol)
+                .font(.system(size: 26, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 48, height: 48)
+                .background(tile.color, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(L.ar ? tile.title.ar : tile.title.en)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2).minimumScaleFactor(0.85)
+                Text(L.ar ? tile.detail.ar : tile.detail.en)
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, minHeight: 128, alignment: .topLeading)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(alignment: .top) {
+            UnevenRoundedRectangle(topLeadingRadius: 16, topTrailingRadius: 16, style: .continuous)
+                .fill(tile.color).frame(height: 4)
+        }
+        .contentShape(Rectangle())
+    }
+}
+
+struct RecentRow: View {
+    let item: RecentFiles.Item
+    let ar: Bool
+    var body: some View {
+        let t = HomeTile.of(item.kind)
+        HStack(spacing: 12) {
+            Image(systemName: t.symbol)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 36, height: 36)
+                .background(t.color, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            VStack(alignment: .leading, spacing: 2) {
+                Text((item.name as NSString).deletingPathExtension).font(.body).foregroundStyle(.primary).lineLimit(1)
+                Text(item.date, format: .relative(presentation: .named))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Text((item.name as NSString).pathExtension.uppercased())
+                .font(.caption2.weight(.bold)).foregroundStyle(t.color)
+        }
+        .padding(.horizontal, 12)
+        .frame(minHeight: 58)
+        .contentShape(Rectangle())
+    }
+}

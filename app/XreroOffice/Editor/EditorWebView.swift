@@ -31,6 +31,12 @@ struct EditorWebView: UIViewRepresentable {
         web.scrollView.bounces = false
         web.scrollView.isScrollEnabled = false        // the editors scroll their own canvas
         web.allowsLinkPreview = false
+        // The editors' interface is drawn for a mouse (17-28 pt rows). Page zoom scales the whole interface the way
+        // the desktop app's interface scaling does (the editors read it as a higher pixel ratio), so tabs, buttons and
+        // the status bar become touch-sized while the document canvas stays sharp.
+        if #available(iOS 14.0, *) {
+            web.pageZoom = UIDevice.current.userInterfaceIdiom == .phone ? 1.3 : 1.15
+        }
         // When the keyboard opens, WebKit scrolls the page to reveal the editor's hidden input field, which slides
         // the whole editor sideways on a phone. The page itself never needs to scroll: keep it at the origin.
         c.offsetLock = web.scrollView.observe(\.contentOffset, options: [.new]) { sv, _ in

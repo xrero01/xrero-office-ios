@@ -28,6 +28,29 @@ struct EditorScreen: View {
                     Button(action: close) { Image(systemName: "chevron.backward") }
                         .accessibilityLabel(L.documents)
                 }
+                // language, share and account live in the system bar (full-size touch targets); the editors' own
+                // header buttons for them are hidden on iOS so the ribbon tabs get the whole width
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Menu {
+                        Button { handle("xrero:lang:en", "") } label: {
+                            Label("English", systemImage: lang == "en" ? "checkmark" : "")
+                        }
+                        Button { handle("xrero:lang:ar", "") } label: {
+                            Label("العربية", systemImage: lang == "ar" ? "checkmark" : "")
+                        }
+                    } label: { Image(systemName: "globe") }
+                        .accessibilityLabel(lang == "ar" ? "اللغة" : "Language")
+                        .accessibilityIdentifier("xr-nav-lang")
+                    Button { handle("xrero:share", "") } label: { Image(systemName: "square.and.arrow.up") }
+                        .accessibilityLabel(lang == "ar" ? "مشاركة" : "Share")
+                        .accessibilityIdentifier("xr-nav-share")
+                    Button { showAccount = true } label: {
+                        Image(systemName: account.isSignedIn ? "person.crop.circle.fill" : "person.crop.circle")
+                    }
+                        .accessibilityLabel(account.isSignedIn ? (lang == "ar" ? "الحساب" : "Account")
+                                                               : (lang == "ar" ? "تسجيل الدخول" : "Sign in"))
+                        .accessibilityIdentifier("xr-nav-account")
+                }
             }
             .sheet(item: $share) { ShareSheet(items: [$0.url]) }
             .sheet(isPresented: $showAccount) { AccountView() }

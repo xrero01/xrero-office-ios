@@ -2,7 +2,7 @@ import XCTest
 
 /// App Review screen recording (review-video.yml records the simulator while this runs). Drives the REAL app (Debug/Release
 /// configuration: the system document browser + editor, no test overlay) the way a user does: Home screen -> tap the icon
-/// -> Create Document > Document -> type English + Arabic with Bold -> Save -> close -> open a spreadsheet and a presentation from
+/// -> home screen > New document -> type English + Arabic with Bold -> Save -> close -> open a spreadsheet and a presentation from
 /// Files -> switch the interface to Arabic -> Settings > Xrero Office > Licences. Steps are best-effort (the recording
 /// matters more than any single step); every step leaves a screenshot and the element tree when something is missing.
 final class ReviewVideoTests: XCTestCase {
@@ -84,8 +84,9 @@ final class ReviewVideoTests: XCTestCase {
         return true
     }
 
-    /// Browse > On My iPhone > Xrero Office > <name>
+    /// Home > Browse files > Browse > On My iPhone > Xrero Office > <name>
     private func openFromFiles(_ name: String) -> Bool {
+        if let h = find(app.buttons, "identifier == 'xr-home-browse'", timeout: 10) { h.tap(); pause(2) } else { dump("home-browse") }
         if let b = find(app.buttons, "label == 'Browse'", timeout: 5) { b.tap(); pause(1.5) }
         for loc in ["On My iPhone", "On My iPad"] {
             if let l = find(app.cells, "label BEGINSWITH '\(loc)'", timeout: 2) ?? find(app.staticTexts, "label == '\(loc)'", timeout: 1) {
@@ -125,14 +126,9 @@ final class ReviewVideoTests: XCTestCase {
             skip.tap(); pause(1.5)
         } else { dump("welcome") }
 
-        // 2. New document from the document browser
-        // the browser's Create Document (+), which asks: Document / Spreadsheet / Presentation
-        if let create = find(app.buttons, "identifier == 'FullDocumentManagerViewControllerNavigationBarCreateButtonIdentifier' OR label CONTAINS[c] 'Create Document'", timeout: 20)
-            ?? find(app.cells, "label CONTAINS[c] 'Create Document'", timeout: 2) {
-            create.tap(); pause(1.5)
-        } else { dump("create") }
-        shot("01b-new-menu")
-        if let doc = find(app.buttons, "label == 'Document' OR label == 'مستند'", timeout: 5) { doc.tap() } else { dump("new-menu") }
+        // 2. The home screen: one tile per kind of file; New document
+        shot("01b-home")
+        if let tile = find(app.buttons, "identifier == 'xr-home-word'", timeout: 20) { tile.tap() } else { dump("home") }
         // the editor, or a system alert (e.g. "Unable to Import Document"), whichever comes first
         let saveQ = app.webViews.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] 'Save' OR label BEGINSWITH 'حفظ'")).firstMatch
         let end = Date().addingTimeInterval(90)
@@ -166,8 +162,8 @@ final class ReviewVideoTests: XCTestCase {
         saveDocument()
         shot("03-saved")
 
-        // 3b. The editor header's Sign in -> the account screen; a wrong password shows the server's answer
-        if let signIn = webButton("label == 'Sign in' OR label == 'تسجيل الدخول'", timeout: 5) {
+        // 3b. The top bar's account button -> the account screen; a wrong password shows the server's answer
+        if let signIn = find(app.buttons, "identifier == 'xr-nav-account'", timeout: 5) {
             signIn.tap(); pause(2)
             let mail = app.textFields.matching(identifier: "xr-acct-email").firstMatch
             if mail.waitForExistence(timeout: 10) {
@@ -187,7 +183,7 @@ final class ReviewVideoTests: XCTestCase {
         } else { dump("signin-button") }
 
         closeDocument()
-        shot("04-browser")
+        shot("04-home")
 
         // 4. A spreadsheet from Files: edit a cell, save
         if openFromFiles("sales_en.xlsx") && waitEditor("sheet") {

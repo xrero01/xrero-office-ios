@@ -8,9 +8,12 @@
   <title>Xrero Office</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <style>
-    html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; background: #f3f3f3; }
-    @media (prefers-color-scheme: dark) { html, body { background: #2a2a2a; } }
-    #wrap { position: absolute; left: env(safe-area-inset-left); right: env(safe-area-inset-right); top: 0; bottom: 0; }
+    html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; background: #f7f7f7; }
+    @media (prefers-color-scheme: dark) { html, body { background: #333333; } }
+    /* the editor ends ABOVE the home indicator (its status bar was half under it); the strip below has the status
+       bar's colour */
+    #wrap { position: absolute; left: env(safe-area-inset-left); right: env(safe-area-inset-right); top: 0;
+            bottom: env(safe-area-inset-bottom); }
   </style>
 </head>
 <body>
@@ -48,6 +51,8 @@
           compactHeader: phone,
           hideRulers: phone,
           hideRightMenu: phone,
+          // phones: no speaker-notes pane under the slide (View > Notes brings it back)
+          hideNotes: phone,
           // phones: the page gets the whole width (side icon columns hidden; their features stay in the tabs)
           // (Slides keep the left menu: its button reopens the slide strip, which starts collapsed on phones)
           layout: phone ? { leftMenu: (q.doctype === 'slide'), rightMenu: false } : {},
