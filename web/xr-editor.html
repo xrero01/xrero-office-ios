@@ -50,7 +50,8 @@
           compactToolbar: phone,
           compactHeader: phone,
           hideRulers: phone,
-          hideRightMenu: phone,
+          // phones and portrait iPads: the settings panel on the right starts closed (its side button opens it)
+          hideRightMenu: phone || window.innerWidth < 1000,
           // phones: no speaker-notes pane under the slide (View > Notes brings it back)
           hideNotes: phone,
           // phones: the page gets the whole width (side icon columns hidden; their features stay in the tabs)

@@ -39,6 +39,16 @@
 
   // Xrero header controls that need the Windows shell (account, PDF->Word converter, Designs): not on this platform.
   // EN/AR and Share stay: the app handles 'xrero:lang:<code>' and 'xrero:share'.
+  // iPad (and Mac "Designed for iPad" with touch): touch-sized rows, the full ribbon
+  var TABLET = Math.min(screen.width, screen.height) >= 600 &&
+    ((navigator.maxTouchPoints || 0) > 1 || /xrtouch/.test((function () { try { return top.location.search; } catch (e) { return ''; } })()));
+
+  // portrait iPads: the settings panel on the right takes a third of the width - start every document with it closed
+  // (the editors remember "closed by the user" per editor; the panel's side button still opens it)
+  if (TABLET && window.innerWidth < 1000) {
+    try { ['de', 'pe', 'sse', 'pdfe'].forEach(function (p) { localStorage.setItem(p + '-hide-right-settings', 'true'); }); } catch (e) {}
+  }
+
   (function hideDesktopOnly() {
     // language / share / account are in the app's own top bar on iOS: the editors' header cluster is not needed
     var css = '#xr-b-ctx,#xr-designs-launch,#xr-design-ov,#xr-hdr-btns,#xr-acct-menu{display:none!important}' +
@@ -57,6 +67,20 @@
           'padding:0 12px!important}' +
         '.toolbar .box-tabs,.toolbar .tabs{height:46px!important}' +
         '.toolbar .tabs a{outline:none!important}' +
+        // the ribbon: a tapped tab drops its panel over the page; on a phone every group of the tab wraps into rows
+        // (nothing hidden in an overflow menu, nothing clipped - menus open in full), buttons 1.3x
+        '.toolbar .box-controls{zoom:1.3;overflow:visible!important;height:auto!important;display:flex!important;' +
+          'flex-wrap:wrap!important;align-items:flex-start;padding-bottom:6px}' +
+        '.toolbar .box-controls>.panel.static{display:flex!important;flex-wrap:wrap}' +
+        '.toolbar .box-panels{width:100%!important;flex:1 1 100%!important;min-width:0}' +
+        '.toolbar .box-panels>.panel.active{display:flex!important;flex-wrap:wrap!important;width:auto!important;' +
+          'row-gap:6px;align-items:flex-start}' +
+        '.toolbar .box-panels>.panel.active>*{float:none!important}' +
+        '.toolbar .box-panels>.panel.active>.separator{display:none!important}' +
+        '.toolbar .box-panels .more-box{display:none!important}' +
+        '.toolbar .box-panels .group.field-styles{height:54px!important;position:relative!important;min-width:160px}' +
+        '.toolbar .box-panels .group.field-styles>.combo-dataview{position:relative!important;top:0!important;left:0!important}' +
+        '.toolbar.folded .box-controls{box-shadow:0 8px 20px rgba(0,0,0,.18)}' +
         '.toolbar .tabs .scroll{line-height:46px!important;height:46px!important;background:transparent!important}';
       // phones: an iOS-style bottom bar - 50 pt tall, 44 pt round buttons, the page / slide count as a pill.
       // It keeps what a finger needs (count, Present, previous / next page, zoom - +, sheet tabs); the text-language
@@ -93,6 +117,32 @@
         (/pdfeditor/.test(location.pathname) ? '#statusbar #slot-status-btn-prev,#statusbar #slot-status-btn-next{display:none!important}' : '') +
         // Excel: bigger sheet tabs
         '#statusbar #status-sheets-bar li>span,#statusbar #status-sheets-bar li a{line-height:40px!important;height:40px!important;font-size:15px!important;padding:0 14px!important}';
+    } else if (TABLET) {
+      // iPad: the full ribbon fits; rows and the status bar get touch-sized (40 / 44 pt) in the same iOS style
+      css += '#app-title,#box-document-title{height:40px!important}' +
+        '#box-document-title .btn{min-width:42px!important;height:36px!important;margin:2px!important;border-radius:9px!important}' +
+        '#box-document-title .btn .icon{transform:scale(1.2)}' +
+        '.toolbar .tabs>ul>li>a,.toolbar .tabs .ribtab>a{font-size:15px!important;line-height:40px!important;height:40px!important;' +
+          'padding:0 14px!important}' +
+        '.toolbar .box-tabs,.toolbar .tabs{height:40px!important}' +
+        '.toolbar .tabs a{outline:none!important}' +
+        '.toolbar .tabs .scroll{line-height:40px!important;height:40px!important;background:transparent!important}' +
+        '.toolbar .box-controls .btn-toolbar{min-width:30px}' +
+        '#statusbar #btn-cnt-lang,#statusbar #btn-doc-lang,#statusbar #btn-doc-spell,#statusbar #btn-zoom-topage,' +
+          '#statusbar #btn-zoom-towidth,#statusbar #status-btn-select-tool,#statusbar #status-btn-hand-tool{display:none!important}' +
+        '#statusbar .status-group.cnt-flex-center{justify-content:flex-end;flex:1 1 auto}' +
+        'body{--statusbar-height:44px!important}' +
+        '#statusbar{height:44px!important;border-top:.5px solid rgba(0,0,0,.12)!important}' +
+        '#statusbar>.statusbar{height:44px!important;align-items:center!important;padding:0 12px!important;box-sizing:border-box}' +
+        '#statusbar .status-group{display:flex;align-items:center;height:44px!important;gap:6px}' +
+        '#statusbar .separator{display:none!important}' +
+        '#statusbar .btn-toolbar{min-width:38px!important;height:34px!important;border-radius:10px!important;' +
+          'align-items:center;justify-content:center}' +
+        '#statusbar .btn-toolbar .icon{transform:scale(1.2)}' +
+        '#statusbar label{font-size:14px!important;font-weight:600!important;line-height:32px!important;height:32px!important;' +
+          'padding:0 12px!important;border-radius:16px;background:rgba(127,127,127,.12);margin:0!important}' +
+        '#statusbar #slot-status-btn-preview .btn:not(.dropdown-toggle){height:34px!important;border-radius:17px!important;' +
+          'padding:0 14px!important;font-size:14px!important;font-weight:600!important}';
     }
     var add = function () {
       if (document.getElementById('xr-host-css')) return;
@@ -373,17 +423,37 @@
   var PHONE = Math.min(screen.width, screen.height) < 600;
   function phoneHeights() {
     var S = window.Common && Common.Utils && Common.Utils.InternalSettings;
-    if (!PHONE || !S || S.get('xr-phone')) return;
+    if (!(PHONE || TABLET) || !S || S.get('xr-phone')) return;
     S.set('xr-phone', true);
-    S.set('toolbar-height-tabs', 46);
-    S.set('toolbar-height-tabs-top-title', 46);
-    S.set('document-title-height', 44);
-    S.set('toolbar-height-compact', 46);
-    S.set('toolbar-height-normal', 46 + (S.get('toolbar-height-controls') || 84));
+    var tabs = PHONE ? 46 : 40, title = PHONE ? 44 : 40;
+    S.set('toolbar-height-tabs', tabs);
+    S.set('toolbar-height-tabs-top-title', tabs);
+    S.set('document-title-height', title);
+    S.set('toolbar-height-compact', tabs);
+    S.set('toolbar-height-normal', tabs + (S.get('toolbar-height-controls') || 84));
+  }
+
+  // phones: the ribbon's own overflow logic moves whole groups (font, paragraph, styles) into a "more" menu whose button
+  // does not show on a phone-width folded toolbar - only cut / copy / paste stayed reachable. On phones every group stays
+  // in its tab and the tab's row scrolls sideways under the finger instead.
+  function phoneRibbon() {
+    var M = window.Common && Common.UI && Common.UI.Mixtbar;
+    if (!PHONE || !M || M.prototype.__xrPhone) return;
+    M.prototype.__xrPhone = true;
+    M.prototype.resizeToolbar = function () {
+      var $active = this.$panels && this.$panels.filter('.active');
+      if (this.$moreBar && $active && $active.length) {          // anything moved earlier goes back into its tab
+        var back = this.$moreBar.children('.group,.separator,[data-hidden-tb-item]');
+        if (back.length) $active.append(back);
+      }
+      $active && $active.find('.more-box').css('display', 'none');
+    };
+    M.prototype.resizeToolbar.__xr = true;
   }
 
   function patchEngine() {
     phoneHeights();
+    phoneRibbon();
     // fonts: the desktop loads "ascdesktop://fonts/<id>"; the host maps ids to its bundled files
     if (window.AscFonts && AscFonts.CFontFileLoader) {
       var P = AscFonts.CFontFileLoader.prototype;
