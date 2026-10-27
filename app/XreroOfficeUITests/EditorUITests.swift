@@ -65,7 +65,8 @@ final class EditorUITests: XCTestCase {
 
         let web = app.webViews.firstMatch
         XCTAssertTrue(web.waitForExistence(timeout: 10))
-        web.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).tap()
+        // the first line of the new page (on an iPad the page's empty middle is far below the only paragraph)
+        web.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: UIDevice.current.userInterfaceIdiom == .pad ? 0.19 : 0.3)).tap()
         sleep(2)
         typeSlowly(app, "Typed on iPhone - English OK.")
         app.typeText("\n")
