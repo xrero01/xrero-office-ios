@@ -94,10 +94,7 @@ final class DocumentOpener: NSObject, ObservableObject, UIDocumentBrowserViewCon
                     // the editor is closed as far as opening the next file goes, whatever the animation does
                     self.editorOpen = false
                     NSLog("XR editor closed")
-                    // dismiss from the root: closes the editor AND anything still above it (the account sheet)
-                    if let r = self.root, r.presentedViewController != nil {
-                        r.dismiss(animated: true) { self.openPending() }
-                    } else { self.openPending() }
+                    self.dismissEditor { self.openPending() }
                 }
             })
             host.modalPresentationStyle = .fullScreen
@@ -107,6 +104,31 @@ final class DocumentOpener: NSObject, ObservableObject, UIDocumentBrowserViewCon
                 root.present(host, animated: true)
             }
         }
+    }
+
+    /// Back to the home screen: dismisses the editor and anything still above it (the account sheet, the keyboard).
+    /// UIKit silently drops a dismissal asked for while another presentation is still animating (a sheet sliding
+    /// down, the keyboard going away) - wait for that, and check that the editor really went.
+    private func dismissEditor(attempt: Int = 0, then done: @escaping () -> Void) {
+        guard let r = root, let shown = r.presentedViewController else { done(); return }
+        shown.view.endEditing(true)
+        let busy = r.transitionCoordinator != nil || shown.isBeingPresented || shown.isBeingDismissed
+            || (shown.presentedViewController.map { $0.isBeingPresented || $0.isBeingDismissed } ?? false)
+        if busy && attempt < 20 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { self.dismissEditor(attempt: attempt + 1, then: done) }
+            return
+        }
+        var settled = false
+        let check = {
+            if settled { return }
+            settled = true
+            if r.presentedViewController != nil && attempt < 20 {      // still there (dropped dismissal): try again
+                NSLog("XR editor still shown after dismiss, retrying")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { self.dismissEditor(attempt: attempt + 1, then: done) }
+            } else { done() }
+        }
+        r.dismiss(animated: true) { check() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { check() }   // no completion = the request was dropped
     }
 
     private func top(of vc: UIViewController) -> UIViewController {

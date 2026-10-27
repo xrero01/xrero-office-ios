@@ -47,8 +47,52 @@
     // phones: the status bar keeps what a finger needs (page/slide count, Present, zoom); the text-language picker,
     // spell-check toggle and fit-to-page/width icons go (pinch and the zoom buttons cover fitting)
     if (Math.min(screen.width, screen.height) < 600) {
-      css += '#btn-cnt-lang,#btn-doc-lang,#btn-doc-spell,#btn-zoom-topage,#btn-zoom-towidth,#status-label-zoom,#label-zoom,#slot-status-btn-info,#status-btn-multiple-pages{display:none!important}' +
-             '#statusbar .status-group.cnt-flex-center{justify-content:flex-end}';
+      // header: 44 pt title row (save / undo / redo / more), 46 pt tabs with 16 pt labels
+      css += '#app-title,#box-document-title{height:44px!important}' +
+        '#box-document-title .btn{min-width:46px!important;height:40px!important;margin:2px 2px!important;border-radius:10px!important}' +
+        '#box-document-title .btn .icon{transform:scale(1.3)}' +
+        // the file name is already in the app's top bar
+        '#box-document-title #id-box-doc-name,#box-document-title #title-doc-name{display:none!important}' +
+        '.toolbar .tabs>ul>li>a,.toolbar .tabs .ribtab>a{font-size:16px!important;line-height:46px!important;height:46px!important;' +
+          'padding:0 12px!important}' +
+        '.toolbar .box-tabs,.toolbar .tabs{height:46px!important}' +
+        '.toolbar .tabs a{outline:none!important}' +
+        '.toolbar .tabs .scroll{line-height:46px!important;height:46px!important;background:transparent!important}';
+      // phones: an iOS-style bottom bar - 50 pt tall, 44 pt round buttons, the page / slide count as a pill.
+      // It keeps what a finger needs (count, Present, previous / next page, zoom - +, sheet tabs); the text-language
+      // picker, spell check, word count, track-changes toggle, select / hand tools and fit icons go (their features
+      // stay in the ribbon tabs). Set before the editor measures its layout (the status bar height is read once).
+      var hide = ['btn-cnt-lang', 'btn-doc-lang', 'btn-doc-spell', 'btn-zoom-topage', 'btn-zoom-towidth', 'status-label-zoom',
+                  'label-zoom', 'slot-status-btn-info', 'status-btn-multiple-pages', 'btn-doc-review', 'label-action',
+                  'status-btn-select-tool', 'status-btn-hand-tool', 'status-label-action'];
+      css += hide.map(function (id) { return '#statusbar #' + id; }).join(',') + '{display:none!important}' +
+        'body{--statusbar-height:50px!important}' +
+        '#statusbar{height:50px!important;border-top:.5px solid rgba(0,0,0,.12)!important}' +
+        '#statusbar>.statusbar{height:50px!important;align-items:center!important;padding:0 10px!important;box-sizing:border-box}' +
+        '#statusbar .status-group{display:flex;align-items:center;height:50px!important;gap:6px}' +
+        '#statusbar .status-group.cnt-flex-center{justify-content:flex-end;flex:1 1 auto}' +
+        '#statusbar .separator{display:none!important}' +
+        '#statusbar .btn-toolbar{min-width:44px!important;height:40px!important;border-radius:12px!important;' +
+          'align-items:center;justify-content:center;background:rgba(127,127,127,.12)!important}' +
+        '#statusbar .btn-toolbar:not([style*="none"]){display:inline-flex}' +
+        '#statusbar .btn-toolbar .icon{transform:scale(1.35)}' +
+        '#statusbar label{font-size:15px!important;font-weight:600!important;line-height:36px!important;height:36px!important;' +
+          'padding:0 14px!important;border-radius:18px;background:rgba(127,127,127,.12);margin:0!important}' +
+        // Slides: the Present button as a proper pill
+        '#statusbar #slot-status-btn-preview .btn-toolbar{background:transparent!important;min-width:0!important}' +
+        '#statusbar #slot-status-btn-preview .dropdown-toggle{display:none!important}' +
+        '#statusbar #slot-status-btn-preview .btn:not(.dropdown-toggle){height:40px!important;border-radius:20px!important;' +
+          'padding:0 16px!important;font-size:15px!important;font-weight:600!important}' +
+        // Slides fit the screen by themselves: no zoom buttons next to Present and the slide count
+        (/presentationeditor/.test(location.pathname) ? '#statusbar #btn-zoom-down,#statusbar #btn-zoom-up{display:none!important}' : '') +
+        // Spreadsheets: the sheet tabs need the room (no tab-scroll arrows or zoom; the tabs scroll by swiping)
+        (/spreadsheeteditor/.test(location.pathname) ? '#statusbar #status-btn-tabback,#statusbar #status-btn-tabnext,' +
+          '#statusbar #status-zoom-box,#statusbar #status-tabs-scroll{display:none!important}' +
+          '#statusbar #status-addtabs-box{flex:0 0 auto!important;padding:0 6px 0 0!important}' : '') +
+        // PDF: pages change by scrolling; the previous / next arrows make room for zoom
+        (/pdfeditor/.test(location.pathname) ? '#statusbar #slot-status-btn-prev,#statusbar #slot-status-btn-next{display:none!important}' : '') +
+        // Excel: bigger sheet tabs
+        '#statusbar #status-sheets-bar li>span,#statusbar #status-sheets-bar li a{line-height:40px!important;height:40px!important;font-size:15px!important;padding:0 14px!important}';
     }
     var add = function () {
       if (document.getElementById('xr-host-css')) return;
@@ -324,7 +368,22 @@
 
   // ---------------------------------------------------------------- engine patches (re-applied while it loads:
   // the local-mode module installs its own versions after the base ones)
+  // phones: touch-sized header rows. The editors lay their rows out with fixed heights (title 28, tabs 32) read from
+  // InternalSettings when the viewport is built - set larger ones as soon as the settings exist, before that.
+  var PHONE = Math.min(screen.width, screen.height) < 600;
+  function phoneHeights() {
+    var S = window.Common && Common.Utils && Common.Utils.InternalSettings;
+    if (!PHONE || !S || S.get('xr-phone')) return;
+    S.set('xr-phone', true);
+    S.set('toolbar-height-tabs', 46);
+    S.set('toolbar-height-tabs-top-title', 46);
+    S.set('document-title-height', 44);
+    S.set('toolbar-height-compact', 46);
+    S.set('toolbar-height-normal', 46 + (S.get('toolbar-height-controls') || 84));
+  }
+
   function patchEngine() {
+    phoneHeights();
     // fonts: the desktop loads "ascdesktop://fonts/<id>"; the host maps ids to its bundled files
     if (window.AscFonts && AscFonts.CFontFileLoader) {
       var P = AscFonts.CFontFileLoader.prototype;
