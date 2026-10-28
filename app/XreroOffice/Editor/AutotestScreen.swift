@@ -11,6 +11,7 @@ struct AutotestScreen: View {
     @State private var recovery = "none"                    // sticky: "recovered:edited" / "recovered:" / "too-large"
     @State private var recovered: RecoveryNotice?
     @State private var tooLarge = false
+    @State private var modified = "0"                      // the engine's "document modified" mark (crash test)
     @State private var ended = 0                            // "web process ended" log lines seen (the delegate fired)
     @StateObject private var controller = EditorController()
     private let name: String
@@ -43,6 +44,7 @@ struct AutotestScreen: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(state).font(.system(size: 6)).accessibilityIdentifier("xr-state")
                 Text(recovery).font(.system(size: 6)).accessibilityIdentifier("xr-recovery")
+                Text("modified:" + modified).font(.system(size: 6)).accessibilityIdentifier("xr-modified")
                 Button("save") { controller.save() }.font(.system(size: 6)).accessibilityIdentifier("xr-save")
             }
             .opacity(0.02)
@@ -84,6 +86,7 @@ struct AutotestScreen: View {
     private func handle(_ cmd: String, _ param: String) {
         switch cmd {
         case "ready": state = "ready"; tooLarge = false
+        case "modified": modified = param
         case "recovered":
             recovery = "recovered:" + param
             recovered = RecoveryNotice(edited: param == "edited")

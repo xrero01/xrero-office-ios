@@ -144,10 +144,15 @@ final class EditorUITests: XCTestCase {
         XCTAssertEqual(waitState(app, prefix: "ready", timeout: 120), "ready", "editor did not become ready")
         let web = app.webViews.firstMatch
         XCTAssertTrue(web.waitForExistence(timeout: 10))
-        web.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: UIDevice.current.userInterfaceIdiom == .pad ? 0.19 : 0.3)).tap()
-        sleep(2)
-        typeSlowly(app, "unsaved")                 // marks the document edited, never saved
-        sleep(2)
+        // type until the engine marks the document edited (never saved): the capsule must then warn about it
+        var edited = ""
+        for _ in 0..<3 where !edited.hasSuffix("1") {
+            web.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: UIDevice.current.userInterfaceIdiom == .pad ? 0.19 : 0.3)).tap()
+            sleep(2)
+            typeSlowly(app, "unsaved ")
+            edited = waitLabel(app, "xr-modified", prefix: "modified:1", timeout: 15)
+        }
+        XCTAssertEqual(edited, "modified:1", "typing did not mark the document edited")
 
         XCUIDevice.shared.system.open(URL(string: "xrero-autotest://crash")!)
         let first = waitLabel(app, "xr-recovery", prefix: "recovered", timeout: 90)
