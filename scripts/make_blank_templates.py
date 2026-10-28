@@ -189,12 +189,12 @@ def pptx():
     m = 457200          # 0.5 inch side margin
     W, H = sz
 
-    def sp(id_, name, ph, box=None, body=""):
+    def sp(id_, name, ph, box=None, body="", lst=""):
         xfrm = ('<a:xfrm><a:off x="%d" y="%d"/><a:ext cx="%d" cy="%d"/></a:xfrm>' % box) if box else ""
         return ('<p:sp><p:nvSpPr><p:cNvPr id="%d" name="%s"/><p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr>'
-                '<p:nvPr>%s</p:nvPr></p:nvSpPr><p:spPr>%s</p:spPr><p:txBody><a:bodyPr%s/><a:lstStyle/>'
+                '<p:nvPr>%s</p:nvPr></p:nvSpPr><p:spPr>%s</p:spPr><p:txBody><a:bodyPr%s/><a:lstStyle>%s</a:lstStyle>'
                 '<a:p><a:pPr algn="r" rtl="1"/><a:endParaRPr lang="%s"/></a:p></p:txBody></p:sp>'
-                ) % (id_, name, ph, xfrm, body, LANG)
+                ) % (id_, name, ph, xfrm, body, lst, LANG)
 
     def tree(shapes, name="", bg=""):
         """a slide/layout/master shape tree (bg: the master's background, which comes before the shapes)"""
@@ -229,7 +229,9 @@ def pptx():
     layouts = [
         layout("Title Slide", "title", [
             sp(2, "Title 1", '<p:ph type="ctrTitle"/>', (m * 2, 1700000, W - 4 * m, 1800000), ' anchor="b"'),
-            sp(3, "Subtitle 2", '<p:ph type="subTitle" idx="1"/>', (m * 2, 3650000, W - 4 * m, 1200000))]),
+            # the subtitle is body text without the body's bullet (as on any title slide)
+            sp(3, "Subtitle 2", '<p:ph type="subTitle" idx="1"/>', (m * 2, 3650000, W - 4 * m, 1200000),
+               lst='<a:lvl1pPr marL="0" indent="0" algn="r" rtl="1"><a:buNone/><a:defRPr sz="2400"/></a:lvl1pPr>')]),
         layout("Title and Content", "obj", [
             sp(2, "Title 1", '<p:ph type="title"/>'), sp(3, "Content Placeholder 2", '<p:ph idx="1"/>')]),
         layout("Title Only", "titleOnly", [sp(2, "Title 1", '<p:ph type="title"/>')]),
