@@ -78,6 +78,8 @@ struct OfficeDocument: FileDocument {
         FileWrapper(regularFileWithContents: data)
     }
 
+    /// web/templates/ar holds Xrero's own right-to-left blanks (scripts/make_blank_templates.py: bidi paragraphs,
+    /// Cairo, ar-AE; right-to-left sheet; right-aligned slide placeholders), so Arabic starts on the right at once.
     static func blank(_ kind: OfficeKind) -> Data {
         let lang = AppLanguage.current == "ar" ? "ar" : "en"
         let root = Bundle.main.resourceURL!.appendingPathComponent("web/templates")

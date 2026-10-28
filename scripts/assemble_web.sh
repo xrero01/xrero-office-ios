@@ -8,6 +8,10 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 rm -rf "$OUT"; mkdir -p "$OUT"
 ditto -x -k "$ZIP" "$OUT" 2>/dev/null || unzip -q "$ZIP" -d "$OUT"
 cp "$ROOT/web/xr-host.js" "$OUT/xr-host.js"
+# Xrero's own Arabic blanks (scripts/make_blank_templates.py: right-to-left, Cairo, ar-AE) replace the package's
+# ar-SA ones, so a new file made while the app is in Arabic starts right-to-left; templates/en stay as packaged
+mkdir -p "$OUT/templates/ar"
+cp "$ROOT/web/templates/ar/new.docx" "$ROOT/web/templates/ar/new.xlsx" "$ROOT/web/templates/ar/new.pptx" "$OUT/templates/ar/"
 cp "$ROOT/web/xr-editor.html" "$OUT/editors/web-apps/apps/api/documents/xr-editor.html"
 mkdir -p "$OUT/x2t"
 cp "$ROOT/web/x2t-worker.js" "$ROOT/vendor/x2t-wasm/x2t.js" "$ROOT/vendor/x2t-wasm/x2t.wasm" "$OUT/x2t/"

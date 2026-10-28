@@ -27,6 +27,9 @@ jobs:
           python3 -m pip install --quiet --break-system-packages pillow pypdf 2>/dev/null || true
           xcrun simctl list devices available | grep -E "iPhone|iPad" | head -20
 
+      - name: Arabic blank templates are the generated right-to-left ones
+        run: python3 scripts/make_blank_templates.py --verify
+
       - name: Editors (Xrero payload subset) + app web folder
         run: |
           set -e

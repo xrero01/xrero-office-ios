@@ -79,6 +79,38 @@ final class EditorUITests: XCTestCase {
         XCTAssertTrue(saved.hasPrefix("saved"), "save did not complete: \(saved)")
     }
 
+    /// Arabic-first blanks (plan M10): with the app in Arabic, a new document / spreadsheet / presentation comes from
+    /// Xrero's right-to-left templates. The document gets Arabic typed into it; all three are saved through the engine
+    /// (x2t) as xr-test-ar.*, and check_saved.py asserts the saved files are still right-to-left with the text kept.
+    /// "-xr.lang ar" goes to the launch arguments (argument domain): AppLanguage reads it for this launch only and
+    /// nothing is persisted, so the English typing test that follows still gets the English blank.
+    func testArabicBlanksStartRightToLeft() {
+        for kind in ["word", "cell", "slide"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-xr.lang", "ar"]
+            app.launchEnvironment = ["XR_KIND": kind,
+                                     "XR_DOC_NAME": "xr-test-ar." + ["word": "docx", "cell": "xlsx", "slide": "pptx"][kind]!]
+            app.launch()
+            let ready = waitState(app, prefix: "ready", timeout: 120)
+            sleep(2)
+            shot(app, "40-ar-" + kind + "-ready")
+            XCTAssertEqual(ready, "ready", "Arabic blank \(kind) did not open")
+            if kind == "word" {
+                // the only paragraph is right-to-left: it starts at the right edge, so tap the right half of line 1
+                app.webViews.firstMatch.coordinate(withNormalizedOffset: CGVector(
+                    dx: 0.65, dy: UIDevice.current.userInterfaceIdiom == .pad ? 0.19 : 0.3)).tap()
+                sleep(2)
+                typeSlowly(app, "\u{0645}\u{0631}\u{062D}\u{0628}\u{0627}")      // مرحبا
+                sleep(2)
+                shot(app, "41-ar-word-typed")
+            }
+            let saved = save(app)
+            shot(app, "42-ar-" + kind + "-saved")
+            XCTAssertTrue(saved.hasPrefix("saved"), "Arabic blank \(kind) save failed: \(saved)")
+            app.terminate()
+        }
+    }
+
     /// Opens the Arabic sample passed by the workflow, adds a word, saves it.
     func testOpenArabicSampleAndSave() throws {
         guard let b64 = ProcessInfo.processInfo.environment["XR_SAMPLE_B64"],

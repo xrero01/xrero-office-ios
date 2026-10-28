@@ -2,7 +2,8 @@ import SwiftUI
 
 #if XR_AUTOTEST
 /// CI only (build configuration "Autotest"). Opens one document straight in the editor so XCUITest can type into
-/// it with the real keyboard path. Environment: XR_KIND=word|cell|slide, or XR_DOC_NAME + XR_DOC_B64 (a sample).
+/// it with the real keyboard path. Environment: XR_KIND=word|cell|slide (+ optional XR_DOC_NAME for the saved file),
+/// or XR_DOC_NAME + XR_DOC_B64 (a sample).
 /// Writes Documents/<name> on every save and Documents/xr-log-<name>.txt (editor log) for the workflow.
 struct AutotestScreen: View {
     @State private var document: OfficeDocument
@@ -22,7 +23,9 @@ struct AutotestScreen: View {
         } else {
             let kind = OfficeKind(rawValue: env["XR_KIND"] ?? "") ?? .word
             _document = State(initialValue: OfficeDocument(kind: kind))
-            name = "xr-test." + kind.fileExtension
+            // XR_DOC_NAME without XR_DOC_B64: a blank under its own name (the Arabic-blank test must not overwrite
+            // xr-test.docx, which the typing gate reads)
+            name = env["XR_DOC_NAME"] ?? "xr-test." + kind.fileExtension
         }
         try? FileManager.default.removeItem(at: docs.appendingPathComponent("xr-log-" + name + ".txt"))
     }
