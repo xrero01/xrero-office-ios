@@ -49,6 +49,17 @@
     try { ['de', 'pe', 'sse', 'pdfe'].forEach(function (p) { localStorage.setItem(p + '-hide-right-settings', 'true'); }); } catch (e) {}
   }
 
+  // 20.2: earlier versions stored a zoom the editors read before the configured one (de-/pe-/pdfe-/sse- settings-zoom
+  // and last-zoom) - clear them once so the corrected default (fit width / fit slide) reaches existing users
+  try {
+    if (!localStorage.getItem('xr-mig-202-zoom')) {
+      ['de', 'pe', 'pdfe', 'sse'].forEach(function (p) {
+        localStorage.removeItem(p + '-settings-zoom'); localStorage.removeItem(p + '-last-zoom');
+      });
+      localStorage.setItem('xr-mig-202-zoom', '1');
+    }
+  } catch (e) {}
+
   (function hideDesktopOnly() {
     // language / share / account are in the app's own top bar on iOS: the editors' header cluster is not needed
     var css = '#xr-b-ctx,#xr-designs-launch,#xr-design-ov,#xr-hdr-btns,#xr-acct-menu{display:none!important}' +
@@ -262,7 +273,6 @@
       try {
         api.asc_registerCallback('asc_onDocumentContentReady', function () {
           if (Math.min(window.innerWidth, screen.width) < 700) {
-            try { api.zoomFitToWidth ? api.zoomFitToWidth() : api['zoomFitToWidth'] && api['zoomFitToWidth'](); } catch (e) { log('fit width', e); }
             // presentations: the slide strip would take half the phone; start with the slide at full width
             // (through the UI's own toggle so its button stays in sync, then let the layout re-measure)
             // (the UI wires its controllers a moment after the engine reports ready: wait for that)

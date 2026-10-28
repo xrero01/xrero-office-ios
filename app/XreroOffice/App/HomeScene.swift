@@ -75,8 +75,8 @@ struct HomeScene: View {
                     .accessibilityHidden(true)
                 Text("Xrero Office").font(.largeTitle.bold())
             }
-            Text(ar ? "مستندات Word وجداول Excel وعروض PowerPoint وملفات PDF - بالعربية والإنجليزية، بدون إنترنت."
-                    : "Word documents, Excel sheets, PowerPoint slides and PDF files - Arabic and English, offline.")
+            Text(ar ? "مستندات وجداول وعروض تقديمية وملفات PDF - بالعربية والإنجليزية، بدون إنترنت."
+                    : "Documents, spreadsheets, presentations and PDF - Arabic and English, offline.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
@@ -165,15 +165,17 @@ struct HomeTile: Identifiable {
     let title: (en: String, ar: String)
     let detail: (en: String, ar: String)
 
+    // Xrero's own colours and generic symbols: the kinds are told apart at a glance without Microsoft's Office colours,
+    // icons or product names (the subtitles name the file format only)
     static let all: [HomeTile] = [
-        HomeTile(id: "word", kind: .word, color: Color(red: 0.169, green: 0.341, blue: 0.604), symbol: "doc.text.fill",
-                 title: ("New document", "مستند جديد"), detail: ("Word · .docx", "Word · .docx")),
-        HomeTile(id: "cell", kind: .cell, color: Color(red: 0.063, green: 0.486, blue: 0.255), symbol: "tablecells.fill",
-                 title: ("New spreadsheet", "جدول بيانات جديد"), detail: ("Excel · .xlsx", "Excel · .xlsx")),
-        HomeTile(id: "slide", kind: .slide, color: Color(red: 0.769, green: 0.243, blue: 0.110), symbol: "play.rectangle.fill",
-                 title: ("New presentation", "عرض تقديمي جديد"), detail: ("PowerPoint · .pptx", "PowerPoint · .pptx")),
-        HomeTile(id: "pdf", kind: .pdf, color: Color(red: 0.776, green: 0.157, blue: 0.157), symbol: "doc.richtext.fill",
-                 title: ("Open a PDF", "فتح ملف PDF"), detail: ("View, edit, sign", "عرض وتعديل وتوقيع")),
+        HomeTile(id: "word", kind: .word, color: Color(red: 0.231, green: 0.420, blue: 0.851), symbol: "doc.text.fill",
+                 title: ("New document", "مستند جديد"), detail: ("Document · .docx", "مستند · ‎.docx")),
+        HomeTile(id: "cell", kind: .cell, color: Color(red: 0.122, green: 0.588, blue: 0.396), symbol: "tablecells.fill",
+                 title: ("New spreadsheet", "جدول بيانات جديد"), detail: ("Spreadsheet · .xlsx", "جدول · ‎.xlsx")),
+        HomeTile(id: "slide", kind: .slide, color: Color(red: 0.863, green: 0.369, blue: 0.188), symbol: "rectangle.stack.fill",
+                 title: ("New presentation", "عرض تقديمي جديد"), detail: ("Presentation · .pptx", "عرض · ‎.pptx")),
+        HomeTile(id: "pdf", kind: .pdf, color: Color(red: 0.820, green: 0.235, blue: 0.235), symbol: "doc.richtext.fill",
+                 title: ("Open a PDF", "فتح ملف PDF"), detail: ("View, fill, annotate", "عرض وتعبئة وتعليق")),
     ]
 
     static func of(_ kind: OfficeKind?) -> HomeTile { all.first { $0.kind == kind } ?? all[0] }
