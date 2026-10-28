@@ -9,6 +9,7 @@ struct HomeScene: View {
     @ObservedObject private var account = XreroAccount.shared
     @AppStorage("xr.welcomeShown") private var welcomeShown = false
     @State private var showAccount = false
+    @State private var showAbout = false
     @State private var welcome = false
     @State private var missing: String?
     @Environment(\.horizontalSizeClass) private var hsc
@@ -39,7 +40,21 @@ struct HomeScene: View {
                     .accessibilityLabel(account.isSignedIn ? (ar ? "الحساب" : "Account") : (ar ? "تسجيل الدخول" : "Sign in"))
                     .accessibilityIdentifier("xr-home-account")
                 }
+                // ⋯: the app's own menu (About & Licences: version, AGPL source, ONLYOFFICE and font notices)
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button { showAbout = true } label: {
+                            Label(ar ? "حول التطبيق والتراخيص" : "About & Licences", systemImage: "info.circle")
+                        }
+                        .accessibilityIdentifier("xr-home-about")
+                    } label: {
+                        Image(systemName: "ellipsis.circle").font(.title3)
+                    }
+                    .accessibilityLabel(ar ? "المزيد" : "More")
+                    .accessibilityIdentifier("xr-home-more")
+                }
             }
+            .sheet(isPresented: $showAbout) { AboutSheet() }
         }
         .background(PresenterAnchor(opener: opener).frame(width: 0, height: 0))
         .environment(\.layoutDirection, ar ? .rightToLeft : .leftToRight)

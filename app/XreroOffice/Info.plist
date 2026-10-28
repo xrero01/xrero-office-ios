@@ -124,7 +124,12 @@
 			</array>
 		</dict>
 	</array>
+	<!-- Arabic: ar.lproj/InfoPlist.strings (keep both in step with this text) -->
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Xrero Office inserts the photos you choose into your document.</string>
+	<!-- the commit this build was made from: GitHub's builders set GITHUB_SHA (xcodebuild sees the environment as build
+	     settings), so About > "Source code of this version" links to exactly this source; empty in a local build -->
+	<key>XRSourceCommit</key>
+	<string>$(GITHUB_SHA)</string>
 </dict>
 </plist>

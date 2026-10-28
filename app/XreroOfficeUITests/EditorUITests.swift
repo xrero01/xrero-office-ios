@@ -135,6 +135,86 @@ final class EditorUITests: XCTestCase {
         XCTAssertTrue(saved.hasPrefix("saved"), "pdf save failed: \(saved)")
     }
 
+    /// Swipes until `e` is on screen (lists are lazy: rows below the fold are not in the tree yet).
+    private func reveal(_ app: XCUIApplication, _ e: XCUIElement, up: Bool = true) -> Bool {
+        for _ in 0..<6 {
+            if e.exists && e.isHittable { return true }
+            if up { app.swipeUp() } else { app.swipeDown() }
+            usleep(600_000)
+        }
+        return e.exists && e.isHittable
+    }
+
+    /// About & Licences (M13) opened over the editor: version, the AGPL source link, the ONLYOFFICE attribution and
+    /// logo, the third-party notices and licence texts of Settings.bundle, the Microsoft trademark notice; closing it
+    /// leaves the editor as it was. Then the same screen in Arabic (mirrored).
+    func testAboutAndLicences() {
+        for lang in ["en", "ar"] {
+            let app = XCUIApplication()
+            app.launchEnvironment = ["XR_KIND": "cell"]       // not xr-test.docx: that file belongs to the typing test
+            app.launchArguments = ["-xr.lang", lang]          // the interface language (UserDefaults argument domain)
+            app.launch()
+            let ready = waitState(app, prefix: "ready", timeout: 120)
+            XCTAssertEqual(ready, "ready", "editor did not become ready (\(lang))")
+            XCUIDevice.shared.system.open(URL(string: "xrero-autotest://about")!)
+
+            let version = app.staticTexts["xr-about-version"]
+            XCTAssertTrue(version.waitForExistence(timeout: 20), "About did not open (\(lang))")
+            sleep(1)
+            shot(app, "40-about-\(lang)")
+            print("XR about \(lang): version=\(version.label)")
+            XCTAssertNotNil(version.label.range(of: #"\d+\.\d+ \(\d+\)"#, options: .regularExpression), "no version/build: \(version.label)")
+            let source = app.descendants(matching: .any)["xr-about-source"]
+            XCTAssertTrue(source.exists, "no source code link (\(lang))")
+            print("XR about \(lang): source=\(source.label)")      // the link + the commit of this build
+            XCTAssertTrue(app.staticTexts["xr-about-agpl"].label.contains("AGPL-3.0"), "no AGPL notice (\(lang))")
+            let engine = app.staticTexts["xr-about-onlyoffice"]
+            XCTAssertTrue(reveal(app, engine), "no ONLYOFFICE attribution (\(lang))")
+            XCTAssertTrue(engine.label.contains("ONLYOFFICE") && engine.label.contains("Ascensio System SIA"), engine.label)
+            XCTAssertTrue(app.images["xr-about-onlyoffice-logo"].exists, "no ONLYOFFICE logo (\(lang))")
+            let marks = app.staticTexts["xr-about-trademarks"]
+            XCTAssertTrue(reveal(app, marks), "no trademark notice (\(lang))")
+            XCTAssertTrue(marks.label.contains("Microsoft"), marks.label)
+            shot(app, "41-about-\(lang)-licences")
+
+            if lang == "en" {
+                // the notices page: Settings.bundle's Licences entries (app, editors, converter, every font)
+                let notices = app.descendants(matching: .any)["xr-about-notices"]
+                XCTAssertTrue(reveal(app, notices, up: false), "no notices row")
+                notices.tap()
+                let onlyoffice = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'ONLYOFFICE Docs editors'")).firstMatch
+                XCTAssertTrue(onlyoffice.waitForExistence(timeout: 10), "notices not loaded from Settings.bundle")
+                let count = app.descendants(matching: .any).matching(identifier: "xr-notice").count
+                print("XR about notices visible:", count)
+                XCTAssertGreaterThanOrEqual(count, 3)
+                shot(app, "42-about-notices")
+                app.swipeUp(); usleep(800_000)
+                XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'Font: '")).firstMatch.exists,
+                              "no font notices")
+                shot(app, "43-about-notices-fonts")
+                app.navigationBars.buttons.element(boundBy: 0).tap()
+                sleep(1)
+
+                // the full AGPL text
+                let agpl = app.descendants(matching: .any)["xr-about-licence-AGPL"]
+                XCTAssertTrue(reveal(app, agpl), "no AGPL licence row")
+                agpl.tap()
+                let title = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'AFFERO GENERAL PUBLIC LICENSE'")).firstMatch
+                XCTAssertTrue(title.waitForExistence(timeout: 10), "AGPL text not shown")
+                shot(app, "44-about-agpl-text")
+                app.navigationBars.buttons.element(boundBy: 0).tap()
+                sleep(1)
+            }
+
+            app.buttons["xr-about-done"].tap()
+            for _ in 0..<20 where version.exists { usleep(500_000) }
+            XCTAssertFalse(version.exists, "About did not close (\(lang))")
+            XCTAssertEqual(app.staticTexts["xr-state"].label, "ready", "editor state changed under About (\(lang))")
+            shot(app, "45-about-\(lang)-closed")
+            app.terminate()
+        }
+    }
+
     /// New spreadsheet and presentation open in their editors.
     func testSpreadsheetAndPresentationOpen() {
         for kind in ["cell", "slide"] {

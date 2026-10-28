@@ -47,6 +47,10 @@
 				<string>CA92.1</string>
 			</array>
 		</dict>
+		<!-- Checked for 20.2 (About & Licences review): the app's own code calls no other required-reason API - no file
+		     timestamps (creation/modification dates, stat), no system boot time, no disk space, no active keyboards.
+		     Recent files keep the time they were opened (Date()), not the file's date. Declare a category here when code
+		     starting to use one lands (e.g. FileTimestamp C617.1 / 3B52.1 for file dates in a document list). -->
 	</array>
 </dict>
 </plist>
