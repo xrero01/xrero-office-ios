@@ -163,7 +163,15 @@ final class EditorUITests: XCTestCase {
             sleep(1)
             shot(app, "40-about-\(lang)")
             print("XR about \(lang): version=\(version.label)")
-            XCTAssertNotNil(version.label.range(of: #"\d+\.\d+ \(\d+\)"#, options: .regularExpression), "no version/build: \(version.label)")
+            // the labels as a text attachment too: it lands in the evidence zip even when the job log is out of reach
+            let probes = [version, app.staticTexts["xr-about-agpl"], app.descendants(matching: .any)["xr-about-source"]]
+            let labels = XCTAttachment(string: probes.map { $0.exists ? $0.label : "(missing)" }
+                .map { $0.unicodeScalars.map { $0.value < 128 ? String($0) : String(format: "<U+%04X>", $0.value) }.joined() }
+                .joined(separator: "\n"))
+            labels.name = "about-labels-\(lang)"; labels.lifetime = .keepAlways; add(labels)
+            // in Arabic, SwiftUI wraps the interpolated numbers in bidi isolates (U+2066-2069): drop them before matching
+            let plain = String(version.label.unicodeScalars.filter { !(0x2066...0x2069).contains($0.value) && $0.value != 0x200F && $0.value != 0x200E })
+            XCTAssertNotNil(plain.range(of: #"\d+\.\d+ \(\d+\)"#, options: .regularExpression), "no version/build: \(version.label)")
             let source = app.descendants(matching: .any)["xr-about-source"]
             XCTAssertTrue(source.exists, "no source code link (\(lang))")
             print("XR about \(lang): source=\(source.label)")      // the link + the commit of this build
