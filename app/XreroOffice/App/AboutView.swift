@@ -1,9 +1,10 @@
 import SwiftUI
 
 /// About & Licences: who makes the app and which version this is, the AGPL-3.0 source offer (a link to the source of
-/// this very build), the ONLYOFFICE attribution with the ONLYOFFICE logo (its licence's Section 7(b) asks for the logo
-/// to be kept), every third-party notice and licence text, the Microsoft trademark notice and the privacy promise.
-/// Reached from Home (⋯) and from the account sheet, which the editor's top bar opens too.
+/// this very build), the ONLYOFFICE attribution, every third-party notice and licence text, the Microsoft trademark
+/// notice and the privacy promise. Reached from Home (⋯) and from the account sheet, which the editor's top bar opens too.
+/// The attribution is text only, no ONLYOFFICE logo: the 9.4 sources we ship drop the old "retain the Product logo"
+/// Section 7(b) term and say "No trademark rights are granted under this License", so their logo is not ours to show.
 struct AboutView: View {
     private var ar: Bool { L.ar }
 
@@ -76,12 +77,6 @@ struct AboutView: View {
     private var engine: some View {
         Section(ar ? "محرك التحرير" : "Editing engine") {
             VStack(alignment: .leading, spacing: 10) {
-                // ONLYOFFICE's own logo (dark-mode variant in the asset), kept as its AGPL Section 7(b) terms require
-                Image("OnlyofficeLogo")
-                    .resizable().scaledToFit()
-                    .frame(height: 22)
-                    .accessibilityLabel("ONLYOFFICE")
-                    .accessibilityIdentifier("xr-about-onlyoffice-logo")
                 Text(ar ? "محررات المستندات والجداول والعروض التقديمية وملفات PDF مبنية على ONLYOFFICE Docs من شركة Ascensio System SIA وفق رخصة AGPL-3.0، وعدّلتها Xrero لدعم النص العربي وأجهزة iPhone وiPad. ONLYOFFICE علامة تجارية لشركة Ascensio System SIA، وXrero Office غير تابع لها ولا معتمد منها."
                         : "The document, spreadsheet, presentation and PDF editors are based on ONLYOFFICE Docs by Ascensio System SIA under the AGPL-3.0, modified by Xrero for Arabic text, iPhone and iPad. ONLYOFFICE is a trademark of Ascensio System SIA; Xrero Office is not affiliated with or endorsed by Ascensio System SIA.")
                     .font(.subheadline)

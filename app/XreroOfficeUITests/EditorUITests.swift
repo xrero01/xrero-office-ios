@@ -145,8 +145,8 @@ final class EditorUITests: XCTestCase {
         return e.exists && e.isHittable
     }
 
-    /// About & Licences (M13) opened over the editor: version, the AGPL source link, the ONLYOFFICE attribution and
-    /// logo, the third-party notices and licence texts of Settings.bundle, the Microsoft trademark notice; closing it
+    /// About & Licences (M13) opened over the editor: version, the AGPL source link, the ONLYOFFICE attribution, the
+    /// third-party notices and licence texts of Settings.bundle, the Microsoft trademark notice; closing it
     /// leaves the editor as it was. Then the same screen in Arabic (mirrored).
     func testAboutAndLicences() {
         for lang in ["en", "ar"] {
@@ -171,7 +171,6 @@ final class EditorUITests: XCTestCase {
             let engine = app.staticTexts["xr-about-onlyoffice"]
             XCTAssertTrue(reveal(app, engine), "no ONLYOFFICE attribution (\(lang))")
             XCTAssertTrue(engine.label.contains("ONLYOFFICE") && engine.label.contains("Ascensio System SIA"), engine.label)
-            XCTAssertTrue(app.images["xr-about-onlyoffice-logo"].exists, "no ONLYOFFICE logo (\(lang))")
             let marks = app.staticTexts["xr-about-trademarks"]
             XCTAssertTrue(reveal(app, marks), "no trademark notice (\(lang))")
             XCTAssertTrue(marks.label.contains("Microsoft"), marks.label)
