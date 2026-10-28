@@ -45,7 +45,30 @@ final class EditorUITests: XCTestCase {
         XCUIDevice.shared.system.open(URL(string: "xrero-autotest://geom")!)
         let g = waitState(app, prefix: "geom:", timeout: 20)
         print("XR geom \(name): \(g)")
+        // recorded, but the test goes on: one editor's layout failure must not hide the later editors' results
+        let keep = continueAfterFailure
+        continueAfterFailure = true
         XCTAssertTrue(g.hasPrefix("geom:ok"), "iPad layout (\(name)): \(g)")
+        continueAfterFailure = keep
+    }
+
+    /// iPad: the right settings panel, opened in landscape, closes again when the window turns portrait (rotation).
+    private func checkIPadRotation(_ app: XCUIApplication, _ name: String) {
+        guard UIDevice.current.userInterfaceIdiom == .pad else { return }
+        let keep = continueAfterFailure
+        continueAfterFailure = true
+        defer { XCUIDevice.shared.orientation = .portrait; continueAfterFailure = keep }
+        XCUIDevice.shared.orientation = .landscapeLeft
+        sleep(4)
+        XCUIDevice.shared.system.open(URL(string: "xrero-autotest://rpopen")!)
+        let rp = waitState(app, prefix: "rp:", timeout: 15)
+        print("XR rotate \(name) landscape panel: \(rp)")
+        shot(app, "04-\(name)-landscape-panel")
+        XCTAssertGreaterThan(Int(rp.dropFirst(3)) ?? 0, 100, "right panel did not open in landscape: \(rp)")
+        XCUIDevice.shared.orientation = .portrait
+        sleep(4)
+        shot(app, "05-\(name)-rotated-portrait")
+        checkIPadLayout(app, name + "-rotated")       // asserts the panel is closed (rm<=100) in portrait
     }
 
     /// Save the way a user does: the editor's own Save button; then Cmd+S; then the test hook.
@@ -89,6 +112,7 @@ final class EditorUITests: XCTestCase {
         shot(app, "03-word-saved")
         XCTAssertTrue(saved.hasPrefix("saved"), "save did not complete: \(saved)")
         checkIPadLayout(app, "word")         // after the save, so a layout failure never hides the typing result
+        checkIPadRotation(app, "word")
     }
 
     /// Opens the Arabic sample passed by the workflow, adds a word, saves it.

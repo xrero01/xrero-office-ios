@@ -63,10 +63,29 @@
         if (w === lastW) return;
         lastW = w;
         if (!narrowWindow()) return;
-        var btn = document.querySelector('#right-menu .btn.active');      // only the editor frame has the panel
-        if (btn && btn.offsetParent) { try { btn.click(); } catch (e) { log('right panel', e); } }
+        closeRightPanel();
       }, 300);
     });
+  }
+  // Collapse the right settings panel to its button column through the editor's RightMenu controller (the same
+  // clearSelection the editors call themselves) and remember it like a user's close. Fallback: the active side button.
+  function closeRightPanel() {
+    var btn = document.querySelector('#right-menu .btn.active');      // only the editor frame has the panel
+    if (!btn || !btn.offsetParent) return;                            // already closed / not an editor frame
+    var apps = { de: window.DE, pe: window.PE, sse: window.SSE, pdfe: window.PDFE };
+    for (var p in apps) {
+      var ctl = null;
+      try { ctl = apps[p] && apps[p].getController && apps[p].getController('RightMenu'); } catch (e) {}
+      if (ctl && ctl.rightmenu && ctl.rightmenu.clearSelection) {
+        try {
+          ctl.rightmenu.clearSelection();
+          Common.localStorage.setItem(p + '-hide-right-settings', 1);
+          Common.Utils.InternalSettings.set(p + '-hide-right-settings', true);
+          return;
+        } catch (e) { log('right panel', e); }
+      }
+    }
+    try { btn.click(); } catch (e) { log('right panel', e); }
   }
 
   // 20.2: earlier versions stored a zoom the editors read before the configured one (de-/pe-/pdfe-/sse- settings-zoom
@@ -161,10 +180,18 @@
         '.toolbar .tabs a{outline:none!important}' +
         '.toolbar .tabs .scroll{line-height:40px!important;height:40px!important;background:transparent!important}' +
         '.toolbar .box-controls .btn-toolbar{min-width:30px}' +
+        // the ribbon's own height rule is "tabs row + controls row" with the stock 28 / 32 px tabs row (a less constant,
+        // not a variable). The 40 pt tabs above took 8-12 px from the controls row, so the bottom of "Edit PDF" and
+        // the second row of small icons were cut off: give the box the 40 pt row plus the full controls row
+        // (fitRibbon below makes the layout reserve the same height, so nothing lies over the page)
+        '.toolbar:not(.folded),.top-title>.toolbar:not(.folded),.toolbar.folded.expanded,.top-title>.toolbar.folded.expanded{' +
+          'height:calc(40px + var(--toolbar-height-controls,66px))!important}' +
+        '.toolbar.folded:not(.expanded),.top-title>.toolbar.folded:not(.expanded){height:40px!important}' +
         '#statusbar #btn-cnt-lang,#statusbar #btn-doc-lang,#statusbar #btn-doc-spell,#statusbar #btn-zoom-topage,' +
           '#statusbar #btn-zoom-towidth,#statusbar #status-btn-select-tool,#statusbar #status-btn-hand-tool{display:none!important}' +
         // labels the editors leave empty (the "action" label, a blank page counter) drew as empty grey pills
-        '#statusbar label:empty,#statusbar #label-action{display:none!important}' +
+        // (:empty only - the same labels carry real status text, e.g. a save or recalculation message, when set)
+        '#statusbar label:empty{display:none!important}' +
         'body{--statusbar-height:50px!important}' +
         '#statusbar{height:50px!important;border-top:.5px solid rgba(0,0,0,.12)!important}' +
         // the iPadOS window-resize corner sits at the bottom RIGHT (in Arabic too): keep 28 pt free there. The bar is
@@ -189,7 +216,8 @@
           // (flex:1 like the other editors) pushed the tabs to zero width and the zoom box over + / list.
           // So: no flex growth here; the scroll arrows go (tabs scroll by swiping) with a zero width the measurement
           // reads; + and the sheet list are 44 pt; tabs 40 pt with 15 px text and a 2 pt underline on the active one.
-          '#statusbar #status-tabs-scroll{display:none!important;width:0!important;padding:0!important}' +
+          // (a trackpad / mouse keeps the arrows: any-pointer:fine; VoiceOver uses the sheet list button)
+          '@media not all and (any-pointer:fine){#statusbar #status-tabs-scroll{display:none!important;width:0!important;padding:0!important}}' +
           '#statusbar #status-addtabs-box{display:flex!important;align-items:center;gap:4px;padding:0 6px!important;flex:0 0 auto!important;' +
             'height:50px!important}' +
           '#statusbar #status-zoom-box{display:flex!important;align-items:center;gap:6px;height:50px!important}' +
@@ -508,8 +536,31 @@
     M.prototype.resizeToolbar.__xr = true;
   }
 
+  // iPad: the layout reserves "toolbar-height-normal" for the ribbon. phoneHeights sets it before the viewport is built
+  // when it wins the race with the editor's start-up, but the controls row's real height is only known once the touch
+  // CSS applies. So, once the ribbon exists: measure the tabs row and the controls row, store the real values and,
+  // if the layout reserved less (the bottom of the ribbon was cut off), give the ribbon its height and re-lay out.
+  function fitRibbon() {
+    var S = window.Common && Common.Utils && Common.Utils.InternalSettings;
+    if (!TABLET || !S) return;
+    var tb = document.querySelector('#toolbar .toolbar'), tabs = tb && tb.querySelector('.box-tabs'),
+      bc = tb && tb.querySelector('.box-controls');
+    if (!tb || !tabs || !bc || !bc.offsetHeight || tb.classList.contains('folded')) return;
+    var app = window.DE || window.PE || window.SSE || window.PDFE, vl = null;
+    try { vl = app && app.getController('Viewport').viewport.vlayout; } catch (e) {}
+    var item = vl && vl.getItem && vl.getItem('toolbar');
+    if (!item) return;
+    var ctrl = bc.offsetHeight, normal = tabs.offsetHeight + ctrl;
+    if (S.get('toolbar-height-controls') !== ctrl) S.set('toolbar-height-controls', ctrl);
+    if (S.get('toolbar-height-normal') !== normal) S.set('toolbar-height-normal', normal);
+    if (item.height >= normal) return;
+    item.height = normal;
+    try { Common.NotificationCenter.trigger('layout:changed', 'toolbar'); } catch (e) { log('ribbon', e); }
+  }
+
   function patchEngine() {
     phoneHeights();
+    fitRibbon();
     phoneRibbon();
     // fonts: the desktop loads "ascdesktop://fonts/<id>"; the host maps ids to its bundled files
     if (window.AscFonts && AscFonts.CFontFileLoader) {
