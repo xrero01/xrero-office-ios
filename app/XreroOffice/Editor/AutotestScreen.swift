@@ -67,6 +67,16 @@ struct AutotestScreen: View {
                 """
                 controller.coordinator?.web?.evaluateJavaScript(js) { r, e in handle("log", "addtext: \(r ?? e?.localizedDescription ?? "?")") }
             }
+            if url.host == "openhome" {         // clipboard test: phones fold the ribbon - drop the Home panel so the
+                                                // test's tap on Copy / Paste lands on the button, never on the page
+                let js = """
+                (function(){var f=document.querySelector('iframe');var d=f&&f.contentDocument;if(!d)return 'no editor';
+                 var bar=d.querySelector('.toolbar.folded');if(!bar)return 'not folded';if(bar.classList.contains('expanded'))return 'open';
+                 var a=d.querySelector('.ribtab > a[data-tab="home"]');if(!a)return 'no home tab';
+                 a.parentNode.classList.remove('active');a.parentNode.click();return 'opened';})()
+                """
+                controller.coordinator?.web?.evaluateJavaScript(js) { r, e in handle("log", "openhome: \(r ?? e?.localizedDescription ?? "?")") }
+            }
             if url.host == "pbset",             // clipboard test: text "from another app" (written in-app: no Allow Paste prompt)
                let t = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "t" })?.value {
                 UIPasteboard.general.string = t

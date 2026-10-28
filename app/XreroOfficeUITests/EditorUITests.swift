@@ -80,30 +80,27 @@ final class EditorUITests: XCTestCase {
     }
 
     /// Runs a Home-tab ribbon command by its exact name ("Copy", not "Copy style") and waits until the app reports
-    /// it done (the Autotest state turns "clip<n> ..."). On a phone the ribbon is folded: the Home tab drops its
-    /// panel first, and a tap on a button of a folded panel does nothing - so retry through the Home tab.
+    /// it done (the Autotest state turns "clip<n> ..."). Phones fold the ribbon, and a tap on a button of a folded
+    /// panel lands on the page (it moves the caret and drops the selection) - so the Home panel is opened through
+    /// the Autotest hook first, every time; the tap itself is a real tap on the button.
     private func ribbonCommand(_ app: XCUIApplication, _ name: String) -> String? {
         let pred = NSPredicate(format: "label == %@ OR label BEGINSWITH %@", name, name + " (")
         let state = app.staticTexts["xr-state"]
-        for attempt in 0..<4 {
+        for _ in 0..<2 {
+            autotest("openhome")
             let before = state.exists ? state.label : ""
-            if attempt > 0 {
-                let home = app.webViews.descendants(matching: .any).matching(NSPredicate(format: "label == 'Home'")).firstMatch
-                if home.exists { home.tap(); sleep(1) }
-            }
             let b = app.webViews.buttons.matching(pred).firstMatch
-            if b.exists && b.isHittable {
-                b.tap()
-                let end = Date().addingTimeInterval(5)
-                while Date() < end {
-                    let allow = app.buttons["Allow Paste"]           // iOS asks before reading another app's text
-                    if allow.exists { allow.tap() }
-                    if state.exists && state.label != before && state.label.hasPrefix("clip") { return state.label }
-                    Thread.sleep(forTimeInterval: 0.3)
-                }
+            guard b.exists && b.isHittable else { continue }
+            b.tap()
+            let end = Date().addingTimeInterval(6)
+            while Date() < end {
+                let allow = app.buttons["Allow Paste"]           // iOS asks before reading another app's text
+                if allow.exists { allow.tap() }
+                if state.exists && state.label != before && state.label.hasPrefix("clip") { return state.label }
+                Thread.sleep(forTimeInterval: 0.3)
             }
         }
-        print("XR ribbon: '\(name)' did not run - web buttons:", app.webViews.buttons.allElementsBoundByIndex.prefix(40).map { $0.label })
+        print("XR web buttons: '\(name)' did not run -", app.webViews.buttons.allElementsBoundByIndex.prefix(40).map { "\($0.label)/\($0.isEnabled)" })
         return nil
     }
 
@@ -125,6 +122,7 @@ final class EditorUITests: XCTestCase {
         XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 10))
         sleep(2)
         autotest("addtext", "Hello \u{0645}\u{0631}\u{062D}\u{0628}\u{0627}")      // Hello مرحبا
+        autotest("openhome")
         autotest("selectall")
 
         let copy = ribbonCommand(app, "Copy")
