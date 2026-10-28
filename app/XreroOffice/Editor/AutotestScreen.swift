@@ -38,6 +38,7 @@ struct AutotestScreen: View {
                           onCommand: handle, controller: controller)
                 .ignoresSafeArea(.container, edges: [.bottom])      // same as the real editor screen
                 .editorRecovery(notice: $recovered, tooLarge: tooLarge, ar: (ProcessInfo.processInfo.environment["XR_LANG"] ?? AppLanguage.current) == "ar",
+                                hold: Double(ProcessInfo.processInfo.environment["XR_RECOVERY_HOLD"] ?? "") ?? 3,
                                 share: { state = "share" }, back: { state = "back" })
             VStack(alignment: .leading, spacing: 2) {
                 Text(state).font(.system(size: 6)).accessibilityIdentifier("xr-state")

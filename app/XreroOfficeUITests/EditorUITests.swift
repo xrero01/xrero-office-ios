@@ -139,7 +139,8 @@ final class EditorUITests: XCTestCase {
     /// the "Recovered your document" capsule (+ "changes may be missing" once edited); a second end within 60 s
     /// does not reload in a loop but shows "too large" with Share and Back.
     func testCrashRecovery() {
-        let app = launch(["XR_KIND": "word", "XR_DOC_NAME": "xr-crash.docx"])
+        // the capsule holds 12 s here instead of 3: one accessibility query of the editor page can take seconds
+        let app = launch(["XR_KIND": "word", "XR_DOC_NAME": "xr-crash.docx", "XR_RECOVERY_HOLD": "12"])
         XCTAssertEqual(waitState(app, prefix: "ready", timeout: 120), "ready", "editor did not become ready")
         let web = app.webViews.firstMatch
         XCTAssertTrue(web.waitForExistence(timeout: 10))
@@ -150,15 +151,17 @@ final class EditorUITests: XCTestCase {
 
         XCUIDevice.shared.system.open(URL(string: "xrero-autotest://crash")!)
         let first = waitLabel(app, "xr-recovery", prefix: "recovered", timeout: 90)
+        let capsule = app.staticTexts["xr-recovered"]
+        let shown = capsule.waitForExistence(timeout: 5)
         shot(app, "40-crash-recovered")
         XCTAssertTrue(first.hasPrefix("recovered"), "editor did not come back after its web process ended: \(first)")
         XCTAssertEqual(first, "recovered:edited", "the capsule should warn that unsaved changes may be missing")
-        let capsule = app.staticTexts["xr-recovered"]
-        XCTAssertTrue(capsule.waitForExistence(timeout: 2), "recovered capsule not shown")
+        XCTAssertTrue(shown, "recovered capsule not shown")
         XCTAssertTrue(capsule.label.contains("Recovered") || capsule.label.contains("\u{0627}\u{0633}\u{062A}\u{0631}\u{062F}\u{0627}\u{062F}"),
                       "capsule text: \(capsule.label)")
-        sleep(5)
-        XCTAssertFalse(app.staticTexts["xr-recovered"].exists, "capsule should hide after 3 s")
+        let gone = NSPredicate(format: "exists == false")
+        let hidden = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: gone, object: capsule)], timeout: 20) == .completed
+        XCTAssertTrue(hidden, "capsule should hide by itself")
 
         XCUIDevice.shared.system.open(URL(string: "xrero-autotest://crash")!)   // second end within 60 s
         let second = waitLabel(app, "xr-recovery", prefix: "too-large", timeout: 30)

@@ -11,9 +11,11 @@ struct RecoveryNotice: Equatable {
 }
 
 extension View {
-    func editorRecovery(notice: Binding<RecoveryNotice?>, tooLarge: Bool, ar: Bool,
+    /// `hold`: how long the capsule stays (3 s in the app; the CI autotest holds it longer so a slow simulator
+    /// accessibility query can still see it before it goes).
+    func editorRecovery(notice: Binding<RecoveryNotice?>, tooLarge: Bool, ar: Bool, hold: Double = 3,
                         share: @escaping () -> Void, back: @escaping () -> Void) -> some View {
-        modifier(EditorRecoveryOverlay(notice: notice, tooLarge: tooLarge, ar: ar, share: share, back: back))
+        modifier(EditorRecoveryOverlay(notice: notice, tooLarge: tooLarge, ar: ar, hold: hold, share: share, back: back))
     }
 }
 
@@ -21,6 +23,7 @@ struct EditorRecoveryOverlay: ViewModifier {
     @Binding var notice: RecoveryNotice?
     var tooLarge: Bool
     var ar: Bool
+    var hold: Double
     var share: () -> Void
     var back: () -> Void
 
@@ -40,7 +43,7 @@ struct EditorRecoveryOverlay: ViewModifier {
             .animation(.easeInOut(duration: 0.2), value: notice)
             .task(id: notice?.id) {                       // shown for 3 s; a newer notice restarts the time
                 guard notice != nil else { return }
-                try? await Task.sleep(for: .seconds(3))
+                try? await Task.sleep(for: .seconds(hold))
                 if !Task.isCancelled { notice = nil }
             }
             .onChange(of: notice) { _, n in               // VoiceOver: 3 s is too short to find it by swiping
