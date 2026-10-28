@@ -22,7 +22,7 @@ struct AutotestScreen: View {
         } else {
             let kind = OfficeKind(rawValue: env["XR_KIND"] ?? "") ?? .word
             _document = State(initialValue: OfficeDocument(kind: kind))
-            name = "xr-test." + kind.fileExtension
+            name = env["XR_NEW_NAME"] ?? ("xr-test." + kind.fileExtension)     // own file per test (clipboard test)
         }
         try? FileManager.default.removeItem(at: docs.appendingPathComponent("xr-log-" + name + ".txt"))
     }
@@ -49,6 +49,17 @@ struct AutotestScreen: View {
                  setTimeout(function(){try{ed.AddFreeTextAnnot(0);}catch(e){}},800);return 'ok';})()
                 """
                 controller.coordinator?.web?.evaluateJavaScript(js) { r, e in handle("log", "pdfedit: \(r ?? e?.localizedDescription ?? "?")") }
+            }
+            if url.host == "selectall" {        // clipboard test: select the document's text (selection is not under test)
+                let js = """
+                (function(){var f=document.querySelector('iframe');var w=f&&f.contentWindow;var ed=w&&w.Asc&&w.Asc.editor;
+                 if(!ed)return 'no editor';ed.asc_EditSelectAll();return 'ok';})()
+                """
+                controller.coordinator?.web?.evaluateJavaScript(js) { r, e in handle("log", "selectall: \(r ?? e?.localizedDescription ?? "?")") }
+            }
+            if url.host == "pbset",             // clipboard test: text "from another app" (written in-app: no Allow Paste prompt)
+               let t = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "t" })?.value {
+                UIPasteboard.general.string = t
             }
         }
     }

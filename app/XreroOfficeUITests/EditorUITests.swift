@@ -79,6 +79,70 @@ final class EditorUITests: XCTestCase {
         XCTAssertTrue(saved.hasPrefix("saved"), "save did not complete: \(saved)")
     }
 
+    /// A ribbon button of the Home tab by its exact name ("Copy", not "Copy style"). On a phone the ribbon is folded:
+    /// the Home tab drops its panel first (and folds it again after a command).
+    private func tapRibbon(_ app: XCUIApplication, _ name: String) -> Bool {
+        let pred = NSPredicate(format: "label == %@ OR label BEGINSWITH %@", name, name + " (")
+        for attempt in 0..<3 {
+            let b = app.webViews.buttons.matching(pred).firstMatch
+            if b.exists && b.isHittable { b.tap(); return true }
+            if attempt == 2 { break }
+            let home = app.webViews.descendants(matching: .any).matching(NSPredicate(format: "label == 'Home'")).firstMatch
+            if home.exists { home.tap() }
+            sleep(1)
+        }
+        print("XR ribbon: no hittable '\(name)' - web buttons:", app.webViews.buttons.allElementsBoundByIndex.prefix(40).map { $0.label })
+        return false
+    }
+
+    /// iOS asks before an app reads text another app put on the pasteboard; answer it if it shows.
+    private func allowPasteIfAsked(_ app: XCUIApplication) {
+        let allow = app.buttons["Allow Paste"]
+        if allow.waitForExistence(timeout: 2) { allow.tap() }
+    }
+
+    /// Clipboard (20.2 M2): the ribbon's Copy + Paste round-trip mixed English/Arabic text (Xrero's own copy,
+    /// full formatting), then Paste brings in plain text another app put on the pasteboard. check_saved.py reads
+    /// xr-clip.docx: "Hello مرحبا" twice (typed once + pasted) and the outside text once.
+    func testClipboardCopyPasteAndSave() {
+        let app = launch(["XR_KIND": "word", "XR_NEW_NAME": "xr-clip.docx"])
+        let ready = waitState(app, prefix: "ready", timeout: 120)
+        XCTAssertEqual(ready, "ready", "editor did not become ready")
+        let web = app.webViews.firstMatch
+        XCTAssertTrue(web.waitForExistence(timeout: 10))
+        web.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: UIDevice.current.userInterfaceIdiom == .pad ? 0.19 : 0.3)).tap()
+        sleep(2)
+        typeSlowly(app, "Hello \u{0645}\u{0631}\u{062D}\u{0628}\u{0627}")      // Hello مرحبا
+        sleep(1)
+
+        XCUIDevice.shared.system.open(URL(string: "xrero-autotest://selectall")!)
+        sleep(2)
+        XCTAssertTrue(tapRibbon(app, "Copy"), "ribbon Copy button not found")
+        sleep(2)
+        shot(app, "40-clip-copied")
+        // the first Paste replaces the selection with the copy, the second one adds it after: two in the file
+        XCTAssertTrue(tapRibbon(app, "Paste"), "ribbon Paste button not found")
+        allowPasteIfAsked(app)
+        sleep(2)
+        XCTAssertTrue(tapRibbon(app, "Paste"), "ribbon Paste button not found (2nd)")
+        allowPasteIfAsked(app)
+        sleep(2)
+        shot(app, "41-clip-pasted")
+
+        // text from "another app": arrives as plain text
+        let outside = "Outside text 42"
+        XCUIDevice.shared.system.open(URL(string: "xrero-autotest://pbset?t=" + outside.replacingOccurrences(of: " ", with: "%20"))!)
+        sleep(2)
+        XCTAssertTrue(tapRibbon(app, "Paste"), "ribbon Paste button not found (outside text)")
+        allowPasteIfAsked(app)
+        sleep(2)
+        shot(app, "42-clip-outside-pasted")
+
+        let saved = save(app)
+        shot(app, "43-clip-saved")
+        XCTAssertTrue(saved.hasPrefix("saved"), "clipboard document save failed: \(saved)")
+    }
+
     /// Opens the Arabic sample passed by the workflow, adds a word, saves it.
     func testOpenArabicSampleAndSave() throws {
         guard let b64 = ProcessInfo.processInfo.environment["XR_SAMPLE_B64"],

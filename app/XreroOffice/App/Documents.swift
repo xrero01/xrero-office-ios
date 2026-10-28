@@ -72,6 +72,7 @@ enum L {
     static var documents: String { ar ? "المستندات" : "Documents" }
     static var cannotOpen: String { ar ? "تعذّر فتح الملف" : "Couldn't open the file" }
     static var cannotCreate: String { ar ? "تعذّر إنشاء الملف" : "Couldn't create the file" }
+    static var cannotPaste: String { ar ? "تعذّر اللصق" : "Couldn't paste" }
     static var noConnection: String { ar ? "لا يوجد اتصال بالإنترنت" : "No internet connection" }
     static var accountDisabled: String { ar ? "هذا الحساب موقوف" : "This account is disabled" }
     static func name(_ kind: OfficeKind) -> String {
