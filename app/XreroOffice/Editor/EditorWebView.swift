@@ -37,6 +37,9 @@ struct EditorWebView: UIViewRepresentable {
             if sv.contentOffset != .zero { sv.contentOffset = .zero }
         }
         c.web = web
+        // Only for crash recovery (webViewWebContentProcessDidTerminate below). No navigation-policy methods are
+        // implemented, so loading, the xrero:// / ascdesktop:// schemes and links keep WebKit's default behaviour.
+        web.navigationDelegate = c
         controller.coordinator = c
         c.load()
         return web
@@ -50,6 +53,7 @@ struct EditorWebView: UIViewRepresentable {
     }
 
     static func dismantleUIView(_ web: WKWebView, coordinator: Coordinator) {
+        web.navigationDelegate = nil        // a closed editor must not reopen itself when its web process goes away
         web.configuration.userContentController.removeAllScriptMessageHandlers()
     }
 
@@ -67,6 +71,13 @@ struct EditorWebView: UIViewRepresentable {
         private var ready = false
         private var reloads = 0
         private var watchdog: DispatchWorkItem?
+        /// The engine's own "document modified" mark (onDocumentModifiedChanged in xr-host.js -> "modified" 1/0).
+        /// Kept here because once the web process is gone nobody can ask the engine any more.
+        private var edited = false
+        /// When the editor's web process died while the app was in use (see recoverFromTermination).
+        private var terminations: [Date] = []
+        /// Set while the last saved version is being reopened after a termination; reported once it is "ready".
+        private var pendingRecovery: (edited: Bool, since: Date)?
 
         /// The web editors occasionally lose a script-loading race in WebKit and never start (seen on Slides).
         /// Nothing is open at that point, so reload (twice at most) when "ready" has not arrived in time.
@@ -86,6 +97,7 @@ struct EditorWebView: UIViewRepresentable {
             guard let web else { return }
             if !keepReloadCount { reloads = 0 }
             ready = false
+            edited = false
             armWatchdog()
             loadedLang = parent.lang
             resources.media.removeAll()
@@ -165,8 +177,17 @@ struct EditorWebView: UIViewRepresentable {
             case "ui":
                 replyHandler(nil, nil)
                 let c = body["c"] as? String ?? ""
+                let p = body["p"] as? String ?? ""
+                if c == "modified" { edited = p == "1" }          // O(1): this can arrive while typing
                 if c == "ready" { ready = true; watchdog?.cancel() }
-                parent.onCommand(c, body["p"] as? String ?? "")
+                parent.onCommand(c, p)
+                if c == "ready", let r = pendingRecovery {       // the reopened document is on screen again
+                    pendingRecovery = nil
+                    let ms = Int(Date().timeIntervalSince(r.since) * 1000)
+                    NSLog("XR editor recovered in %ld ms", ms)
+                    parent.onCommand("log", "recovered: last saved version back on screen in \(ms) ms")
+                    parent.onCommand("recovered", r.edited ? "edited" : "")
+                }
             case "log":
                 replyHandler(nil, nil)
                 #if DEBUG
@@ -197,6 +218,36 @@ struct EditorWebView: UIViewRepresentable {
                 self?.parent.onCommand("log", "native save request: " + r)
                 if r != "ok" { self?.onSaved?(); self?.onSaved = nil }
             }
+        }
+
+        // MARK: crash recovery
+        /// iOS ends the editor's web process when it needs the memory (a big document on a small device) or when it
+        /// crashes; the web view is then blank and the user's work looks lost. Reopen the editor with the last saved
+        /// version (parent.document.data - what the "open" message hands the editor) and let the screen say so once
+        /// it is back. If the document itself keeps taking the process down - a second end within 60 s while the app
+        /// is in use - reopening would only loop: stop and let the screen offer Share and Back instead.
+        /// Also called directly by the CI autotest when it cannot end the process itself.
+        func recoverFromTermination() {
+            let now = Date()
+            // ends while the app is in the background (iOS reclaiming memory) are not the document's fault
+            let active = MainActor.assumeIsolated { UIApplication.shared.applicationState != .background }
+            if active { terminations = terminations.filter { now.timeIntervalSince($0) < 60 } + [now] }
+            let lostEdits = edited || (pendingRecovery?.edited ?? false)
+            // a save that was running in the dead page can never finish: let whoever waits for it (Share, the
+            // language switch) carry on with the last saved version instead of waiting forever
+            if let done = onSaved { onSaved = nil; done() }
+            if terminations.count >= 2 {
+                pendingRecovery = nil
+                watchdog?.cancel()
+                NSLog("XR editor web process ended twice within 60 s - not reopening")
+                parent.onCommand("log", "web process ended \(terminations.count)x within 60 s - not reopening (too large)")
+                parent.onCommand("too-large", "")
+                return
+            }
+            NSLog("XR editor web process ended (app active=%ld) - reopening the last saved version", active ? 1 : 0)
+            parent.onCommand("log", "web process ended (app active=\(active), unsaved edits=\(lostEdits)) - reopening the last saved version")
+            pendingRecovery = (lostEdits, pendingRecovery?.since ?? now)
+            load()
         }
 
         // MARK: pictures
@@ -232,6 +283,14 @@ struct EditorWebView: UIViewRepresentable {
             while let p = vc?.presentedViewController { vc = p }
             return vc
         }
+    }
+}
+
+/// The web view's navigation delegate, for one event only. (Declared in an extension so the coordinator's own
+/// isolation stays as it is.)
+extension EditorWebView.Coordinator: WKNavigationDelegate {
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        recoverFromTermination()
     }
 }
 

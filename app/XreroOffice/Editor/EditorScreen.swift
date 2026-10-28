@@ -10,6 +10,8 @@ struct EditorScreen: View {
     @State private var lang = AppLanguage.current
     @State private var share: ShareFile?
     @State private var showAccount = false
+    @State private var recovered: RecoveryNotice?           // the editor was reopened after its web process ended
+    @State private var tooLarge = false                     // ... twice within a minute: Share / Back instead
     @ObservedObject private var account = XreroAccount.shared
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dismiss) private var dismiss
@@ -21,6 +23,7 @@ struct EditorScreen: View {
     var body: some View {
         EditorWebView(document: $document, title: title, lang: lang, onCommand: handle, controller: controller)
             .ignoresSafeArea(.container, edges: [.bottom])
+            .editorRecovery(notice: $recovered, tooLarge: tooLarge, ar: lang == "ar", share: shareDocument, back: leave)
             .navigationTitle((title as NSString).deletingPathExtension)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -67,25 +70,40 @@ struct EditorScreen: View {
         let finish = {
             if finished { return }
             finished = true
-            if let onClose { onClose() } else { dismiss() }
+            leave()
         }
         controller.save(onlyIfModified: true) { finish() }
         DispatchQueue.main.asyncAfter(deadline: .now() + 10) { finish() }
     }
 
+    /// Back to the documents without saving (also the way out when the editor cannot be reopened).
+    private func leave() {
+        if let onClose { onClose() } else { dismiss() }
+    }
+
+    /// The document as last saved, handed to the share sheet as a file.
+    private func shareDocument() {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(title)
+        try? document.data.write(to: url, options: .atomic)
+        share = ShareFile(url: url)
+    }
+
     private func handle(_ cmd: String, _ param: String) {
         if cmd == "close" {
             close()
+        } else if cmd == "recovered" {          // the last saved version is back on screen after the web process ended
+            recovered = RecoveryNotice(edited: param == "edited")
+        } else if cmd == "too-large" {          // it ended again within a minute: no reload loop, offer Share and Back
+            recovered = nil
+            tooLarge = true
+        } else if cmd == "ready" {
+            tooLarge = false                    // the editor came back after all (e.g. reopened in the other language)
         } else if cmd == "xrero:account" || cmd == "xrero:signin" {
             showAccount = true
         } else if cmd == "xrero:signout" {
             account.signOut()
         } else if cmd == "xrero:share" {
-            controller.save {
-                let url = FileManager.default.temporaryDirectory.appendingPathComponent(title)
-                try? document.data.write(to: url, options: .atomic)
-                share = ShareFile(url: url)
-            }
+            controller.save { shareDocument() }
         } else if cmd.hasPrefix("xrero:lang:") {
             let new = String(cmd.dropFirst("xrero:lang:".count)) == "ar" ? "ar" : "en"
             guard new != lang else { return }
