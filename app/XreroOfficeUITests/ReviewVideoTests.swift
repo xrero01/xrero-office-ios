@@ -2,8 +2,9 @@ import XCTest
 
 /// App Review screen recording (review-video.yml records the simulator while this runs). Drives the REAL app (Debug/Release
 /// configuration: the system document browser + editor, no test overlay) the way a user does: Home screen -> tap the icon
-/// -> home screen > New document -> type English + Arabic with Bold -> Save -> close -> open a spreadsheet and a presentation from
-/// Files -> switch the interface to Arabic -> Settings > Xrero Office > Licences. Steps are best-effort (the recording
+/// -> home screen (the optional account card: Sign in opens the account, Not now hides it) > New document -> type English +
+/// Arabic with Bold -> Save -> close -> open a spreadsheet and a presentation from Files -> switch the interface to Arabic ->
+/// Settings > Xrero Office > Licences -> relaunch (no account card). Steps are best-effort (the recording
 /// matters more than any single step); every step leaves a screenshot and the element tree when something is missing.
 final class ReviewVideoTests: XCTestCase {
 
@@ -124,11 +125,26 @@ final class ReviewVideoTests: XCTestCase {
         if launched { pause(1); app.activate() } else { dump("icon", springboard); app.launch() }
         pause(3)
         shot("01-launched")
-        // first launch: the optional Xrero account card -> continue without an account
-        if let skip = find(app.buttons, "identifier == 'xr-acct-skip'", timeout: 10) {
-            shot("01a-welcome")
-            skip.tap(); pause(1.5)
-        } else { dump("welcome") }
+        // first launch: no sign-in wall. Home comes straight up with the optional account as an inline card, whose
+        // Sign in opens the account sheet and whose Not now hides it for good.
+        let acctEmail = app.textFields.matching(identifier: "xr-acct-email").firstMatch
+        XCTAssertFalse(acctEmail.waitForExistence(timeout: 3), "an account sheet was presented by itself on first launch")
+        let card = app.descendants(matching: .any).matching(identifier: "xr-home-account-card").firstMatch
+        if card.waitForExistence(timeout: 15) {
+            shot("01a-account-card")
+            if let signIn = find(app.buttons, "identifier == 'xr-home-signin'", timeout: 3) {
+                signIn.tap()
+                XCTAssertTrue(acctEmail.waitForExistence(timeout: 10), "Sign in on the Home card did not open the account sheet")
+                shot("01a-account-sheet")
+                let done = app.buttons.matching(NSPredicate(format: "label == 'Done' OR label == 'تم'")).firstMatch
+                if done.exists { done.tap() } else { app.swipeDown() }
+                pause(1.5)
+            } else { XCTFail("no Sign in button on the account card"); dump("card-signin") }
+            if let later = find(app.buttons, "identifier == 'xr-home-signin-later'", timeout: 5) {
+                later.tap(); pause(1.5)
+            } else { XCTFail("no Not now button on the account card"); dump("card-later") }
+            XCTAssertFalse(card.exists, "the account card is still shown after Not now")
+        } else { XCTFail("no account card on Home at first launch"); dump("account-card") }
 
         // 2. The home screen: one tile per kind of file; New document
         shot("01b-home")
@@ -246,5 +262,15 @@ final class ReviewVideoTests: XCTestCase {
             shot("07-licences", settings)
         } else { dump("licences", settings) }
         pause(1)
+
+        // 8. Back to Xrero Office after a fresh start: the account card answered with Not now stays away
+        app.terminate()
+        app.launch()
+        pause(3)
+        XCTAssertTrue(app.buttons.matching(identifier: "xr-home-word").firstMatch.waitForExistence(timeout: 20), "no Home after relaunch")
+        XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "xr-home-account-card").firstMatch.exists,
+                       "the account card came back after Not now")
+        XCTAssertFalse(acctEmail.exists, "an account sheet was presented by itself after relaunch")
+        shot("08-relaunched-home")
     }
 }

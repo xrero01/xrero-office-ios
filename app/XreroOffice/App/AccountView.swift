@@ -46,7 +46,7 @@ struct AccountView: View {
                         : "Your account (name and email) will be permanently deleted from xrero.com. Documents on this device are not affected. Enter your password to confirm.")
             }
             .alert(ar ? "تم حذف الحساب" : "Account deleted", isPresented: $deleted) {
-                Button("OK") { dismiss() }
+                Button(L.ok) { dismiss() }
             }
         }
         .environment(\.layoutDirection, ar ? .rightToLeft : .leftToRight)
