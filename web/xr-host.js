@@ -60,6 +60,28 @@
     }
   } catch (e) {}
 
+  // Save As / Download As (File menu format tiles, Ctrl+Shift+S): a COPY in a format the user picks, handed to the
+  // share sheet; the original file is never touched. Only formats the on-device converter writes correctly are offered - checked by
+  // converting the EN + AR store samples to each one and back (all text kept; OOXML templates get their own content
+  // type only when x2t is told the format code). Left out on purpose: PDF / PDF/A / pictures / HTML / EPUB / FB2 / MD
+  // (x2t-wasm cannot write them yet), TXT and CSV (this WebAssembly build writes Arabic as broken single bytes), ODS /
+  // OTS (its writer drops header cells). Codes = Asc.c_oAscFileType = x2t's AVS_OFFICESTUDIO_FILE_* values.
+  var SAVE_AS = {
+    documenteditor: [['docx', 0x41], ['dotx', 0x4c], ['odt', 0x43], ['ott', 0x4f], ['rtf', 0x44]],
+    spreadsheeteditor: [['xlsx', 0x101], ['xltx', 0x106]],
+    presentationeditor: [['pptx', 0x81], ['potx', 0x87], ['ppsx', 0x84], ['odp', 0x83], ['otp', 0x8a]]
+  };
+  function saveAsFormats() {
+    var m = /\/(documenteditor|spreadsheeteditor|presentationeditor)\//.exec(location.pathname);
+    return m ? SAVE_AS[m[1]] : [];
+  }
+  function saveAsTiles() {
+    var f = saveAsFormats();
+    if (!f.length) return '';
+    return '#panel-saveas .format-item:not(:has(' + f.map(function (x) { return '.btn-doc-format[format="' + x[1] + '"]'; }).join(',') +
+      ')){display:none!important}';
+  }
+
   (function hideDesktopOnly() {
     // language / share / account are in the app's own top bar on iOS: the editors' header cluster is not needed
     var css = '#xr-b-ctx,#xr-designs-launch,#xr-design-ov,#xr-hdr-btns,#xr-acct-menu{display:none!important}' +
@@ -70,8 +92,10 @@
               // screen); Print / Print preview call AscDesktopEditor.Print, a no-op without a printer bridge (M7b);
               // Spreadsheets' "Export to PDF" asks for a PDF, which the on-device converter cannot write yet
               '#fm-btn-local-open,#fm-btn-print,#fm-btn-print-with-preview,#fm-btn-export-pdf{display:none!important}' +
-              // PDFs are saved in place by the PDF editor (savePdf); a "copy as" of a PDF has no other format to offer
-              (/pdfeditor/.test(location.pathname) ? '#fm-btn-save-desktop{display:none!important}' : '');
+              // PDFs are saved in place by the PDF editor (savePdf): no "Download As" / "Save As" copy to offer there
+              (/pdfeditor/.test(location.pathname) ? '#fm-btn-download,#fm-btn-save-desktop,#panel-saveas{display:none!important}' :
+              // "Download As" format tiles: only the formats Save As really writes (SAVE_AS below); the rest are hidden
+              saveAsTiles());
     // phones: the status bar keeps what a finger needs (page/slide count, Present, zoom); the text-language picker,
     // spell-check toggle and fit-to-page/width icons go (pinch and the zoom buttons cover fitting)
     if (Math.min(screen.width, screen.height) < 600) {
@@ -256,21 +280,7 @@
       }).catch(function (e) { log('save failed', e && e.message || e); done(2); });
   }
 
-  // ---- Save As (File > Save As, Ctrl+Shift+S): a COPY in a format the user picks, handed to the share sheet; the
-  // original file is never touched. Only formats the on-device converter writes correctly are offered - checked by
-  // converting the EN + AR store samples to each one and back (all text kept; OOXML templates get their own content
-  // type only when x2t is told the format code). Left out on purpose: PDF / PDF/A / pictures / HTML / EPUB / FB2 / MD
-  // (x2t-wasm cannot write them yet), TXT and CSV (this WebAssembly build writes Arabic as broken single bytes), ODS /
-  // OTS (its writer drops header cells). Codes = Asc.c_oAscFileType = x2t's AVS_OFFICESTUDIO_FILE_* values.
-  var SAVE_AS = {
-    documenteditor: [['docx', 0x41], ['dotx', 0x4c], ['odt', 0x43], ['ott', 0x4f], ['rtf', 0x44]],
-    spreadsheeteditor: [['xlsx', 0x101], ['xltx', 0x106]],
-    presentationeditor: [['pptx', 0x81], ['potx', 0x87], ['ppsx', 0x84], ['odp', 0x83], ['otp', 0x8a]]
-  };
-  function saveAsFormats() {
-    var m = /\/(documenteditor|spreadsheeteditor|presentationeditor)\//.exec(location.pathname);
-    return m ? SAVE_AS[m[1]] : [];
-  }
+  // ---- Save As / Download As: the copy itself (formats: SAVE_AS at the top)
   var pendingCopy = null;                     // {bin, done} while the app asks which format
   // The app answers 'saveas' with the chosen extension ('' = cancelled). The engine waits (its save action is open)
   // until done() runs. done(1), never done(0): the document itself was NOT saved, so it must stay "modified".
@@ -404,8 +414,8 @@
         }
       } catch (e) { log('save: serialize failed', e); return done(2); }
       if (/saveas=true/.test(param || '')) {
-        // Save As: the desktop asks its native dialog for the format (fileType 0); here the app shows the formats.
-        // A format the editor already chose (fileType != 0) is used directly when it is one that really works.
+        // A format chosen in the File menu's "Download As" tiles (fileType != 0) is used directly when it really
+        // works; without one (the desktop's Save As / Ctrl+Shift+S, which ask a native dialog) the app lists them.
         var fmts = saveAsFormats();
         if (!fmts.length) { log('save as: no formats here'); return done(1); }
         if (pendingCopy) pendingCopy.done(1);

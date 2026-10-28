@@ -53,9 +53,23 @@ struct AutotestScreen: View {
                  if(t&&(!p||p.style.display==='none'))t.click();
                  setTimeout(function(){var ids=[].slice.call(d.querySelectorAll('#file-menu-panel .panel-menu > li.fm-btn'))
                    .filter(function(li){return w.getComputedStyle(li).display!=='none';}).map(function(li){return li.id;});
-                   w.XreroHost.log('file menu visible: '+ids.join(' '));},1500);return 'ok';})()
+                   var tiles=[].slice.call(d.querySelectorAll('#panel-saveas .format-item'))
+                   .filter(function(el){return w.getComputedStyle(el).display!=='none';})
+                   .map(function(el){var b=el.querySelector('.btn-doc-format');return b?b.getAttribute('format'):'?';});
+                   w.XreroHost.log('file menu visible: '+ids.join(' '));
+                   w.XreroHost.log('download as formats: '+tiles.join(' '));},1500);return 'ok';})()
                 """
                 controller.coordinator?.web?.evaluateJavaScript(js) { r, e in handle("log", "filemenu: \(r ?? e?.localizedDescription ?? "?")") }
+            }
+            if url.host == "tile" {             // taps a "Download As" format tile, e.g. xrero-autotest://tile?f=67 (ODT)
+                let f = (URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "f" }?.value ?? "")
+                    .filter(\.isNumber)
+                let js = """
+                (function(){var f=document.querySelector('iframe');var w=f&&f.contentWindow;if(!w)return 'no frame';
+                 var b=w.document.querySelector('#panel-saveas .btn-doc-format[format="\(f)"]');if(!b)return 'no tile';
+                 b.click();return 'ok';})()
+                """
+                controller.coordinator?.web?.evaluateJavaScript(js) { r, e in handle("log", "tile \(f): \(r ?? e?.localizedDescription ?? "?")") }
             }
             if url.host == "saveas" {           // the call File > Save As makes (fallback when the tap cannot reach it)
                 let js = """

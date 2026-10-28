@@ -57,11 +57,28 @@ for dev in sorted(os.listdir(root)) if os.path.isdir(root) else []:
         shown = menu[-1].split()
         dead = [b for b in ("fm-btn-local-open", "fm-btn-print", "fm-btn-print-with-preview", "fm-btn-export-pdf",
                             "fm-btn-recent", "fm-btn-suggest") if b in shown]
-        good = not dead and "fm-btn-save-desktop" in shown and "fm-btn-save" in shown
+        good = not dead and ("fm-btn-download" in shown or "fm-btn-save-desktop" in shown) and "fm-btn-save" in shown
         print("File menu entries:", " ".join(shown), "-> %s" % ("OK" if good else "WRONG (no-op entries: %s)" % dead))
         ok &= good
     else:
         print("File menu entries: NOT LOGGED"); ok = False
+    tiles = re.findall(r"download as formats: ([^\n]*)", log)
+    if tiles:
+        shown = tiles[-1].split()
+        # Word: DOCX, DOTX, ODT, OTT, RTF (Asc.c_oAscFileType) - the formats the on-device converter writes correctly
+        good = bool(shown) and "67" in shown and set(shown) <= {"65", "76", "67", "79", "68"}
+        print("Download As formats:", " ".join(shown), "-> %s" % ("OK" if good else "WRONG"))
+        ok &= good
+    else:
+        print("Download As formats: NOT LOGGED"); ok = False
+    rtf = os.path.join(d, "ar_letter.rtf")
+    if os.path.exists(rtf):
+        raw = open(rtf, "rb").read()
+        good = raw.startswith(rb"{\rtf") and rb"\u1575" in raw         # an RTF holding Arabic (alef = U+0627 as \u1575)
+        print("ar_letter.rtf (Save As list copy): %d bytes -> %s" % (len(raw), "OK" if good else "WRONG"))
+        ok &= good
+    else:
+        print("ar_letter.rtf: MISSING (Save As format list)"); ok = False
     if "exported copy" in log:
         rewrote = re.search(r"^saved ar_letter\.docx", log, re.M) is not None
         print("Save As left the original alone: %s" % (not rewrote))

@@ -101,9 +101,9 @@ final class EditorUITests: XCTestCase {
         XCTAssertTrue(saved.hasPrefix("saved"), "sample save failed: \(saved)")
     }
 
-    /// File > Save As: only working entries in the File menu (logged for check_saved.py), the app's format list
-    /// offers only formats the converter really writes, and picking ODT exports a copy (ar_letter.odt) while the
-    /// document's own file is not rewritten.
+    /// File > Download As / Save As: only working entries and formats in the File menu (logged for check_saved.py);
+    /// the ODT tile exports ar_letter.odt, the app's own format list (Save As without a format) exports ar_letter.rtf;
+    /// the document's own file is not rewritten.
     func testSaveAsCopy() throws {
         guard let b64 = ProcessInfo.processInfo.environment["XR_SAMPLE_B64"],
               let name = ProcessInfo.processInfo.environment["XR_SAMPLE_NAME"] else {
@@ -114,30 +114,32 @@ final class EditorUITests: XCTestCase {
         sleep(3)
         XCTAssertEqual(ready, "ready", "sample did not open")
 
-        // the File menu as the user sees it; the hook logs which entries are visible
+        // the File menu as the user sees it (it opens on "Download As"); the hook logs the visible entries + formats
         XCUIDevice.shared.system.open(URL(string: "xrero-autotest://filemenu")!)
         sleep(4)
         shot(app, "40-file-menu")
 
-        // tap "Save As" in the File menu (the editors' own entry); the test hook makes the same call if unreachable
-        let entry = app.webViews.descendants(matching: .any)
-            .matching(NSPredicate(format: "label BEGINSWITH[c] 'Save as' OR label BEGINSWITH 'حفظ باسم'")).firstMatch
-        let odt = app.buttons["xr-saveas-odt"]
-        var tapped = false
-        if entry.exists && entry.isHittable { entry.tap(); tapped = odt.waitForExistence(timeout: 15) }
-        print("XR save-as path:", tapped ? "File menu tap" : "test URL")
-        if !tapped { XCUIDevice.shared.system.open(URL(string: "xrero-autotest://saveas")!) }
-        XCTAssertTrue(odt.waitForExistence(timeout: 30), "the Save As format list did not appear")
-        shot(app, "41-saveas-formats")
+        // 1) the ODT tile in "Download As" (format 0x43): the copy is exported straight away
+        let base = (name as NSString).deletingPathExtension
+        XCUIDevice.shared.system.open(URL(string: "xrero-autotest://tile?f=67")!)
+        let first = waitState(app, prefix: "exported:" + base + ".odt", timeout: 60)
+        shot(app, "41-download-as-odt")
+        XCTAssertEqual(first, "exported:" + base + ".odt", "ODT copy not exported from the Download As tile")
+
+        // 2) Save As without a format (Ctrl+Shift+S / the desktop's Save As): the app's own list of formats
+        XCUIDevice.shared.system.open(URL(string: "xrero-autotest://saveas")!)
+        let rtf = app.buttons["xr-saveas-rtf"].firstMatch
+        XCTAssertTrue(rtf.waitForExistence(timeout: 30), "the Save As format list did not appear")
+        shot(app, "42-saveas-formats")
         // formats the on-device converter cannot write (or corrupts) are not offered
         for ext in ["pdf", "txt", "html", "epub", "docm"] {
             XCTAssertFalse(app.buttons["xr-saveas-" + ext].exists, "\(ext) offered but not supported")
         }
-        XCTAssertTrue(app.buttons["xr-saveas-docx"].exists && app.buttons["xr-saveas-rtf"].exists)
-        odt.tap()
-        let exported = waitState(app, prefix: "exported", timeout: 60)
-        shot(app, "42-saveas-exported")
-        XCTAssertEqual(exported, "exported:" + (name as NSString).deletingPathExtension + ".odt", "copy not exported")
+        XCTAssertTrue(app.buttons["xr-saveas-docx"].firstMatch.exists && app.buttons["xr-saveas-odt"].firstMatch.exists)
+        rtf.tap()
+        let second = waitState(app, prefix: "exported:" + base + ".rtf", timeout: 60)
+        shot(app, "43-saveas-rtf-exported")
+        XCTAssertEqual(second, "exported:" + base + ".rtf", "RTF copy not exported from the Save As list")
     }
 
     /// App Store screenshots: each sample from XR_STORE_SET ("name|lang|base64;...") opened in that UI language
