@@ -271,7 +271,9 @@
   function copyCut(cut) {
     var api = window.__xrApi, text = '';
     try { text = (api && api.asc_GetSelectedText && api.asc_GetSelectedText()) || ''; } catch (e) {}   // before a cut
-    var ok = !!webClipboard(cut ? 'Cut' : 'Copy');
+    var C = window.AscCommon && AscCommon.g_clipboardBase;
+    if (C) C.LastCopyBinary = null;           // refilled by the engine only when it really copied something
+    var ok = !!webClipboard(cut ? 'Cut' : 'Copy') && !(C && !C.LastCopyBinary);
     clipText = text;
     // ok=false: WebKit did not write the pasteboard - the app writes the plain text itself
     H.command && H.command('copied', JSON.stringify({ ok: ok, text: String(text) }));
@@ -291,6 +293,7 @@
         if (b.type === F.Internal) internal = b.data; else if (b.type === F.Text) own = b.data;
       });
       var t = squash(text);
+      if (internal == null || (t !== squash(own) && t !== squash(clipText))) log('paste detail: plain text (internal copy ' + (internal == null ? 'absent' : 'differs') + ')');
       if (internal != null && t && (t === squash(own) || t === squash(clipText))) {
         api.asc_PasteData(F.Internal, internal, null, own != null ? own : text);
         return 'internal';

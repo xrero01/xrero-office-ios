@@ -7,6 +7,7 @@ import SwiftUI
 struct AutotestScreen: View {
     @State private var document: OfficeDocument
     @State private var state = "loading"
+    @State private var clipCount = 0
     @StateObject private var controller = EditorController()
     private let name: String
     private let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -57,6 +58,15 @@ struct AutotestScreen: View {
                 """
                 controller.coordinator?.web?.evaluateJavaScript(js) { r, e in handle("log", "selectall: \(r ?? e?.localizedDescription ?? "?")") }
             }
+            if url.host == "addtext",           // clipboard test: the text to copy, without the keyboard (typing has its own tests)
+               let t = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "t" })?.value {
+                let arg = String(data: (try? JSONSerialization.data(withJSONObject: [t])) ?? Data("[\"\"]".utf8), encoding: .utf8) ?? "[\"\"]"
+                let js = """
+                (function(){var f=document.querySelector('iframe');var w=f&&f.contentWindow;var ed=w&&w.Asc&&w.Asc.editor;
+                 if(!ed)return 'no editor';ed.asc_AddText(\(arg)[0]);return 'ok';})()
+                """
+                controller.coordinator?.web?.evaluateJavaScript(js) { r, e in handle("log", "addtext: \(r ?? e?.localizedDescription ?? "?")") }
+            }
             if url.host == "pbset",             // clipboard test: text "from another app" (written in-app: no Allow Paste prompt)
                let t = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "t" })?.value {
                 UIPasteboard.general.string = t
@@ -76,6 +86,8 @@ struct AutotestScreen: View {
             if let h = try? FileHandle(forWritingTo: url) { h.seekToEndOfFile(); h.write(line); try? h.close() }
             else { try? line.write(to: url) }
             if param.hasPrefix("open failed") || param.hasPrefix("engine error") { state = "error: " + param }
+            // clipboard test: each finished Copy / Paste shows (numbered, so the test sees every new one)
+            if param.hasPrefix("copy: ") || param.hasPrefix("paste: ") { clipCount += 1; state = "clip\(clipCount) " + param }
         default: break
         }
     }
