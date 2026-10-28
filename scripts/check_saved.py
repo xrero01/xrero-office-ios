@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """check_saved.py <out/saved> - verifies what the UI tests saved on each simulator (iPhone, iPad):
 xr-test.docx must contain the English (and, if the keyboard could type it, the Arabic) test text;
-ar_letter.docx must still hold the original Arabic letter after open + save. Prints each editor log."""
+ar_letter.docx must still hold the original Arabic letter after open + save; File > Save As must export ar_letter.odt
+(a real ODT with the letter) without rewriting the original, and the File menu must show no no-op entry.
+Prints each editor log."""
 import os, re, sys, zipfile
 
 root = sys.argv[1]
@@ -33,6 +35,37 @@ for dev in sorted(os.listdir(root)) if os.path.isdir(root) else []:
         ok &= kept
     else:
         print("ar_letter.docx: MISSING"); ok = False
+    # File > Save As (testSaveAsCopy): the copy is a real ODT holding the letter, the original was not rewritten,
+    # and the File menu shows no entry that does nothing on iOS
+    odt = os.path.join(d, "ar_letter.odt")
+    if os.path.exists(odt):
+        try:
+            z = zipfile.ZipFile(odt)
+            mime = z.read("mimetype").decode("ascii", "replace")
+            body = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", z.read("content.xml").decode("utf-8")))
+            good = mime == "application/vnd.oasis.opendocument.text" and "السادة أولياء الأمور الكرام" in body
+            print("ar_letter.odt (Save As copy): mimetype=%s letter kept=%s -> %s" % (mime, "السادة أولياء الأمور الكرام" in body, "OK" if good else "WRONG"))
+            ok &= good
+        except Exception as e:
+            print("ar_letter.odt: cannot read the exported copy:", e); ok = False
+    else:
+        print("ar_letter.odt: MISSING (File > Save As copy)"); ok = False
+    lg = os.path.join(d, "xr-log-ar_letter.docx.txt")
+    log = open(lg, encoding="utf-8", errors="replace").read() if os.path.exists(lg) else ""
+    menu = re.findall(r"file menu visible: ([^\n]*)", log)
+    if menu:
+        shown = menu[-1].split()
+        dead = [b for b in ("fm-btn-local-open", "fm-btn-print", "fm-btn-print-with-preview", "fm-btn-export-pdf",
+                            "fm-btn-recent", "fm-btn-suggest") if b in shown]
+        good = not dead and "fm-btn-save-desktop" in shown and "fm-btn-save" in shown
+        print("File menu entries:", " ".join(shown), "-> %s" % ("OK" if good else "WRONG (no-op entries: %s)" % dead))
+        ok &= good
+    else:
+        print("File menu entries: NOT LOGGED"); ok = False
+    if "exported copy" in log:
+        rewrote = re.search(r"^saved ar_letter\.docx", log, re.M) is not None
+        print("Save As left the original alone: %s" % (not rewrote))
+        ok &= not rewrote
     pdf = os.path.join(d, "ar_letter.pdf")
     if os.path.exists(pdf):
         try:

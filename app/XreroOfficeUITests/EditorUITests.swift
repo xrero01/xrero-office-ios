@@ -101,6 +101,45 @@ final class EditorUITests: XCTestCase {
         XCTAssertTrue(saved.hasPrefix("saved"), "sample save failed: \(saved)")
     }
 
+    /// File > Save As: only working entries in the File menu (logged for check_saved.py), the app's format list
+    /// offers only formats the converter really writes, and picking ODT exports a copy (ar_letter.odt) while the
+    /// document's own file is not rewritten.
+    func testSaveAsCopy() throws {
+        guard let b64 = ProcessInfo.processInfo.environment["XR_SAMPLE_B64"],
+              let name = ProcessInfo.processInfo.environment["XR_SAMPLE_NAME"] else {
+            throw XCTSkip("no sample passed")
+        }
+        let app = launch(["XR_DOC_B64": b64, "XR_DOC_NAME": name])
+        let ready = waitState(app, prefix: "ready", timeout: 120)
+        sleep(3)
+        XCTAssertEqual(ready, "ready", "sample did not open")
+
+        // the File menu as the user sees it; the hook logs which entries are visible
+        XCUIDevice.shared.system.open(URL(string: "xrero-autotest://filemenu")!)
+        sleep(4)
+        shot(app, "40-file-menu")
+
+        // tap "Save As" in the File menu (the editors' own entry); the test hook makes the same call if unreachable
+        let entry = app.webViews.descendants(matching: .any)
+            .matching(NSPredicate(format: "label BEGINSWITH[c] 'Save as' OR label BEGINSWITH 'حفظ باسم'")).firstMatch
+        let odt = app.buttons["xr-saveas-odt"]
+        var tapped = false
+        if entry.exists && entry.isHittable { entry.tap(); tapped = odt.waitForExistence(timeout: 15) }
+        print("XR save-as path:", tapped ? "File menu tap" : "test URL")
+        if !tapped { XCUIDevice.shared.system.open(URL(string: "xrero-autotest://saveas")!) }
+        XCTAssertTrue(odt.waitForExistence(timeout: 30), "the Save As format list did not appear")
+        shot(app, "41-saveas-formats")
+        // formats the on-device converter cannot write (or corrupts) are not offered
+        for ext in ["pdf", "txt", "html", "epub", "docm"] {
+            XCTAssertFalse(app.buttons["xr-saveas-" + ext].exists, "\(ext) offered but not supported")
+        }
+        XCTAssertTrue(app.buttons["xr-saveas-docx"].exists && app.buttons["xr-saveas-rtf"].exists)
+        odt.tap()
+        let exported = waitState(app, prefix: "exported", timeout: 60)
+        shot(app, "42-saveas-exported")
+        XCTAssertEqual(exported, "exported:" + (name as NSString).deletingPathExtension + ".odt", "copy not exported")
+    }
+
     /// App Store screenshots: each sample from XR_STORE_SET ("name|lang|base64;...") opened in that UI language
     /// (portrait: XCUITest's landscape screenshots come out rotated/cropped on the iPad simulator).
     func testStoreScreenshots() throws {

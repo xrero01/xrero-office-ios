@@ -9,6 +9,7 @@ struct EditorScreen: View {
     @StateObject private var controller = EditorController()
     @State private var lang = AppLanguage.current
     @State private var share: ShareFile?
+    @State private var saveAsFormats: [String] = []
     @State private var showAccount = false
     @ObservedObject private var account = XreroAccount.shared
     @Environment(\.scenePhase) private var scenePhase
@@ -52,6 +53,7 @@ struct EditorScreen: View {
                         .accessibilityIdentifier("xr-nav-account")
                 }
             }
+            .saveAsCopy(formats: $saveAsFormats, lang: lang, controller: controller)
             .sheet(item: $share) { ShareSheet(items: [$0.url]) }
             .sheet(isPresented: $showAccount) { AccountView() }
             .onChange(of: account.info) { _, _ in controller.syncAccount(account.webValue) }
@@ -80,6 +82,10 @@ struct EditorScreen: View {
             showAccount = true
         } else if cmd == "xrero:signout" {
             account.signOut()
+        } else if cmd == "saveas" {
+            saveAsFormats = param.split(separator: ",").map(String.init)
+        } else if cmd == "export" {
+            share = ShareFile(url: URL(fileURLWithPath: param))    // the copy: Save to Files, AirDrop, Mail...
         } else if cmd == "xrero:share" {
             controller.save {
                 let url = FileManager.default.temporaryDirectory.appendingPathComponent(title)
@@ -92,6 +98,71 @@ struct EditorScreen: View {
             AppLanguage.set(new)
             controller.save { lang = new }                       // reopen the editor in the other language
         }
+    }
+}
+
+/// File > Save As: the formats the editor can really write, as a system list. The pick goes back to the editor,
+/// which converts a copy (the original file stays as it is); closing the list without a pick cancels.
+struct SaveAsCopy: ViewModifier {
+    @Binding var formats: [String]
+    var lang: String
+    var controller: EditorController
+    @State private var waiting = false
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: formats) { _, f in if !f.isEmpty { waiting = true } }
+            .confirmationDialog(lang == "ar" ? "حفظ نسخة بصيغة" : "Save a copy as",
+                                isPresented: Binding(get: { !formats.isEmpty }, set: { shown in
+                                    guard !shown else { return }
+                                    formats = []
+                                    // after any button action of this same tap: only a dismissal without a pick cancels
+                                    DispatchQueue.main.async {
+                                        if waiting { waiting = false; controller.answerSaveAs("") }
+                                    }
+                                }),
+                                titleVisibility: .visible) {
+                ForEach(formats, id: \.self) { ext in
+                    Button(SaveAsCopy.label(ext, lang)) {
+                        waiting = false
+                        formats = []
+                        controller.answerSaveAs(ext)
+                    }
+                    .accessibilityIdentifier("xr-saveas-" + ext)
+                }
+                Button(lang == "ar" ? "إلغاء" : "Cancel", role: .cancel) {}
+                    .accessibilityIdentifier("xr-saveas-cancel")
+            } message: {
+                Text(lang == "ar" ? "يبقى الملف الأصلي كما هو." : "The original file stays as it is.")
+            }
+    }
+
+    /// Plain names (no product names), the extension always shown so the choice is unambiguous.
+    static func label(_ ext: String, _ lang: String) -> String {
+        let ar = lang == "ar"
+        let name: String
+        switch ext {
+        case "docx": name = ar ? "مستند" : "Document"
+        case "dotx": name = ar ? "قالب مستند" : "Document template"
+        case "odt": name = ar ? "نص OpenDocument" : "OpenDocument text"
+        case "ott": name = ar ? "قالب نص OpenDocument" : "OpenDocument text template"
+        case "rtf": name = ar ? "نص منسّق" : "Rich text"
+        case "xlsx": name = ar ? "جدول بيانات" : "Spreadsheet"
+        case "xltx": name = ar ? "قالب جدول بيانات" : "Spreadsheet template"
+        case "pptx": name = ar ? "عرض تقديمي" : "Presentation"
+        case "potx": name = ar ? "قالب عرض تقديمي" : "Presentation template"
+        case "ppsx": name = ar ? "عرض شرائح" : "Slide show"
+        case "odp": name = ar ? "عرض OpenDocument" : "OpenDocument presentation"
+        case "otp": name = ar ? "قالب عرض OpenDocument" : "OpenDocument presentation template"
+        default: name = ext.uppercased()
+        }
+        return name + " (." + ext + ")"
+    }
+}
+
+extension View {
+    func saveAsCopy(formats: Binding<[String]>, lang: String, controller: EditorController) -> some View {
+        modifier(SaveAsCopy(formats: formats, lang: lang, controller: controller))
     }
 }
 

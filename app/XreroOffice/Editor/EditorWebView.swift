@@ -124,6 +124,7 @@ struct EditorWebView: UIViewRepresentable {
                 lang: cfg.lang, theme: cfg.theme, title: cfg.title,
                 openFile: function () { return call({ cmd: 'open' }).then(function (r) { return { name: r.name, data: unb64(r.data) }; }); },
                 saveFile: function (name, bytes) { return call({ cmd: 'save', name: name, data: b64(bytes) }); },
+                exportFile: function (name, bytes) { return call({ cmd: 'export', name: name, data: b64(bytes) }); },
                 putMedia: function (name, bytes) { return call({ cmd: 'media', name: name, data: b64(bytes) }); },
                 mediaUrl: function (name) { return 'xrero://media/' + encodeURIComponent(name); },
                 x2tBase: 'xrero://app/x2t/',
@@ -154,6 +155,17 @@ struct EditorWebView: UIViewRepresentable {
                 replyHandler(true, nil)
                 parent.onCommand("saved", String(d.count))
                 onSaved?(); onSaved = nil
+            case "export":
+                // Save As: a copy in another format, written to a temporary folder and handed to the screen (share
+                // sheet); the document's own file is not touched
+                guard let n = body["name"] as? String, let s = body["data"] as? String, let d = Data(base64Encoded: s),
+                      !d.isEmpty else { replyHandler(nil, "no data"); return }
+                let dir = FileManager.default.temporaryDirectory.appendingPathComponent("xr-export", isDirectory: true)
+                try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                let url = dir.appendingPathComponent((n as NSString).lastPathComponent)
+                do { try d.write(to: url, options: .atomic) } catch { replyHandler(nil, "write failed"); return }
+                replyHandler(true, nil)
+                parent.onCommand("export", url.path)
             case "media":
                 if let n = body["name"] as? String, let s = body["data"] as? String, let d = Data(base64Encoded: s) {
                     resources.media[n] = d
@@ -175,6 +187,18 @@ struct EditorWebView: UIViewRepresentable {
                 parent.onCommand("log", body["m"] as? String ?? "")
             default:
                 replyHandler(nil, "unknown command")
+            }
+        }
+
+        /// Save As: the format picked in the app's list ('' = cancelled) goes back to xr-host.js, which converts the
+        /// copy and sends it as an "export" message.
+        func answerSaveAs(_ ext: String) {
+            let safe = ext.filter { $0.isLetter || $0.isNumber }
+            let js = "(function(){var f=document.querySelector('iframe');var w=f&&f.contentWindow;" +
+                "return w&&w.__xrSaveAs?w.__xrSaveAs('\(safe)'):'no editor frame';})()"
+            web?.evaluateJavaScript(js) { [weak self] result, error in
+                self?.parent.onCommand("log", "save as answer \(safe.isEmpty ? "(cancel)" : safe): " +
+                    ((result as? String) ?? error?.localizedDescription ?? "?"))
             }
         }
 
@@ -247,6 +271,7 @@ final class EditorController: ObservableObject {
     func syncAccount(_ json: String) {
         coordinator?.web?.evaluateJavaScript(EditorController.accountScript(json), completionHandler: nil)
     }
+    func answerSaveAs(_ ext: String) { coordinator?.answerSaveAs(ext) }
     func save(onlyIfModified: Bool = false, then done: (() -> Void)? = nil) {
         if let c = coordinator { c.requestSave(onlyIfModified: onlyIfModified, then: done) } else { done?() }
     }

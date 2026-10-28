@@ -64,7 +64,14 @@
     // language / share / account are in the app's own top bar on iOS: the editors' header cluster is not needed
     var css = '#xr-b-ctx,#xr-designs-launch,#xr-design-ov,#xr-hdr-btns,#xr-acct-menu{display:none!important}' +
               // File menu: recent files live on the app's home screen; "Suggest a Feature" opens a desktop form
-              '#fm-btn-recent,#fm-btn-suggest{display:none!important}';
+              '#fm-btn-recent,#fm-btn-suggest{display:none!important}' +
+              // File menu entries that would do nothing here (each checked in web-apps FileMenu + Desktop.js):
+              // Open sends 'editor:event file:open', which the app has no handler for (files open from the home
+              // screen); Print / Print preview call AscDesktopEditor.Print, a no-op without a printer bridge (M7b);
+              // Spreadsheets' "Export to PDF" asks for a PDF, which the on-device converter cannot write yet
+              '#fm-btn-local-open,#fm-btn-print,#fm-btn-print-with-preview,#fm-btn-export-pdf{display:none!important}' +
+              // PDFs are saved in place by the PDF editor (savePdf); a "copy as" of a PDF has no other format to offer
+              (/pdfeditor/.test(location.pathname) ? '#fm-btn-save-desktop{display:none!important}' : '');
     // phones: the status bar keeps what a finger needs (page/slide count, Present, zoom); the text-language picker,
     // spell-check toggle and fit-to-page/width icons go (pinch and the zoom buttons cover fitting)
     if (Math.min(screen.width, screen.height) < 600) {
@@ -216,7 +223,8 @@
     return new Promise(function (ok, fail) {
       var id = ++seq; waiting[id] = { ok: ok, fail: fail };
       worker.postMessage({ id: id, name: name, data: data, to: to, media: mediaList || [],
-                           changes: opts.changes || [], fromChanges: !!opts.fromChanges, fonts: opts.fonts || null });
+                           changes: opts.changes || [], fromChanges: !!opts.fromChanges, fonts: opts.fonts || null,
+                           formatTo: opts.formatTo || 0 });
     });
   }
   // the editors' font files as absolute URLs (for x2t when it has to draw text: PDF editing)
@@ -247,6 +255,42 @@
         });
       }).catch(function (e) { log('save failed', e && e.message || e); done(2); });
   }
+
+  // ---- Save As (File > Save As, Ctrl+Shift+S): a COPY in a format the user picks, handed to the share sheet; the
+  // original file is never touched. Only formats the on-device converter writes correctly are offered - checked by
+  // converting the EN + AR store samples to each one and back (all text kept; OOXML templates get their own content
+  // type only when x2t is told the format code). Left out on purpose: PDF / PDF/A / pictures / HTML / EPUB / FB2 / MD
+  // (x2t-wasm cannot write them yet), TXT and CSV (this WebAssembly build writes Arabic as broken single bytes), ODS /
+  // OTS (its writer drops header cells). Codes = Asc.c_oAscFileType = x2t's AVS_OFFICESTUDIO_FILE_* values.
+  var SAVE_AS = {
+    documenteditor: [['docx', 0x41], ['dotx', 0x4c], ['odt', 0x43], ['ott', 0x4f], ['rtf', 0x44]],
+    spreadsheeteditor: [['xlsx', 0x101], ['xltx', 0x106]],
+    presentationeditor: [['pptx', 0x81], ['potx', 0x87], ['ppsx', 0x84], ['odp', 0x83], ['otp', 0x8a]]
+  };
+  function saveAsFormats() {
+    var m = /\/(documenteditor|spreadsheeteditor|presentationeditor)\//.exec(location.pathname);
+    return m ? SAVE_AS[m[1]] : [];
+  }
+  var pendingCopy = null;                     // {bin, done} while the app asks which format
+  // The app answers 'saveas' with the chosen extension ('' = cancelled). The engine waits (its save action is open)
+  // until done() runs. done(1), never done(0): the document itself was NOT saved, so it must stay "modified".
+  window.__xrSaveAs = function (want) {
+    var p = pendingCopy; pendingCopy = null;
+    if (!p) return 'nothing pending';
+    var f = saveAsFormats().filter(function (x) { return x[0] === want; })[0];
+    if (!f) { log('save as: cancelled'); p.done(1); return 'cancelled'; }
+    if (!H.exportFile) { log('save as: host cannot export'); p.done(2); return 'no export'; }
+    var name = opened.name.replace(/\.[^.\/]+$/, '') + '.' + f[0], t0 = Date.now();
+    var list = Object.keys(media).map(function (n) { return { name: n, data: media[n].slice(0) }; });
+    x2t('Editor.bin', p.bin.buffer, 'out.' + f[0], list, { formatTo: f[1] }).then(function (r) {
+      if (r.data.byteLength < 8) throw new Error('empty ' + f[0]);
+      return H.exportFile(name, r.data).then(function () {
+        log('exported copy', name, r.data.byteLength, 'bytes in', Date.now() - t0, 'ms');
+        p.done(1);
+      });
+    }).catch(function (e) { log('save as failed', e && e.message || e); p.done(2); });
+    return 'ok';
+  };
 
   var A = {
     // ---- identity / capabilities
@@ -359,6 +403,18 @@
           b2.set(h, 0); b2.set(bin, h.length); bin = b2;
         }
       } catch (e) { log('save: serialize failed', e); return done(2); }
+      if (/saveas=true/.test(param || '')) {
+        // Save As: the desktop asks its native dialog for the format (fileType 0); here the app shows the formats.
+        // A format the editor already chose (fileType != 0) is used directly when it is one that really works.
+        var fmts = saveAsFormats();
+        if (!fmts.length) { log('save as: no formats here'); return done(1); }
+        if (pendingCopy) pendingCopy.done(1);
+        pendingCopy = { bin: bin, done: done };
+        var direct = fmts.filter(function (x) { return x[1] === fileType; })[0];
+        log('save as: asking for a format', fileType ? '(editor asked for ' + fileType + ')' : '');
+        if (direct) return window.__xrSaveAs(direct[0]);
+        return H.command && H.command('saveas', fmts.map(function (x) { return x[0]; }).join(','));
+      }
       var list = Object.keys(media).map(function (n) { return { name: n, data: media[n].slice(0) }; });
       x2t('Editor.bin', bin.buffer, 'out.' + opened.ext, list).then(function (r) {
         return H.saveFile(opened.name, r.data).then(function () {
