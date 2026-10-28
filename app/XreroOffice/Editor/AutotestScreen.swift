@@ -11,6 +11,7 @@ struct AutotestScreen: View {
     @State private var recovery = "none"                    // sticky: "recovered:edited" / "recovered:" / "too-large"
     @State private var recovered: RecoveryNotice?
     @State private var tooLarge = false
+    @State private var ended = 0                            // "web process ended" log lines seen (the delegate fired)
     @StateObject private var controller = EditorController()
     private let name: String
     private let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -55,7 +56,14 @@ struct AutotestScreen: View {
                 let kill = NSSelectorFromString("_killWebContentProcess")
                 if web.responds(to: kill) {
                     handle("log", "autotest: ending the web content process")
+                    let before = ended
                     _ = web.perform(kill)
+                    // if this WebKit ends the process without telling the delegate, still prove the recovery path
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+                        guard ended == before else { return }
+                        handle("log", "autotest: no termination callback within 5 s - running the recovery path directly")
+                        controller.coordinator?.recoverFromTermination()
+                    }
                 } else {
                     handle("log", "autotest: no kill hook in this WebKit - running the recovery path directly")
                     controller.coordinator?.recoverFromTermination()
@@ -90,6 +98,7 @@ struct AutotestScreen: View {
             let url = docs.appendingPathComponent("xr-log-" + name + ".txt")      // one log per test document
             if let h = try? FileHandle(forWritingTo: url) { h.seekToEndOfFile(); h.write(line); try? h.close() }
             else { try? line.write(to: url) }
+            if param.hasPrefix("web process ended") { ended += 1 }
             if param.hasPrefix("open failed") || param.hasPrefix("engine error") { state = "error: " + param }
         default: break
         }

@@ -135,6 +135,54 @@ final class EditorUITests: XCTestCase {
         XCTAssertTrue(saved.hasPrefix("saved"), "pdf save failed: \(saved)")
     }
 
+    /// Crash recovery (plan M12): when iOS ends the editor's web process, the last saved version comes back with
+    /// the "Recovered your document" capsule (+ "changes may be missing" once edited); a second end within 60 s
+    /// does not reload in a loop but shows "too large" with Share and Back.
+    func testCrashRecovery() {
+        let app = launch(["XR_KIND": "word", "XR_DOC_NAME": "xr-crash.docx"])
+        XCTAssertEqual(waitState(app, prefix: "ready", timeout: 120), "ready", "editor did not become ready")
+        let web = app.webViews.firstMatch
+        XCTAssertTrue(web.waitForExistence(timeout: 10))
+        web.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: UIDevice.current.userInterfaceIdiom == .pad ? 0.19 : 0.3)).tap()
+        sleep(2)
+        typeSlowly(app, "unsaved")                 // marks the document edited, never saved
+        sleep(2)
+
+        XCUIDevice.shared.system.open(URL(string: "xrero-autotest://crash")!)
+        let first = waitLabel(app, "xr-recovery", prefix: "recovered", timeout: 90)
+        shot(app, "40-crash-recovered")
+        XCTAssertTrue(first.hasPrefix("recovered"), "editor did not come back after its web process ended: \(first)")
+        XCTAssertEqual(first, "recovered:edited", "the capsule should warn that unsaved changes may be missing")
+        let capsule = app.staticTexts["xr-recovered"]
+        XCTAssertTrue(capsule.waitForExistence(timeout: 2), "recovered capsule not shown")
+        XCTAssertTrue(capsule.label.contains("Recovered") || capsule.label.contains("\u{0627}\u{0633}\u{062A}\u{0631}\u{062F}\u{0627}\u{062F}"),
+                      "capsule text: \(capsule.label)")
+        sleep(5)
+        XCTAssertFalse(app.staticTexts["xr-recovered"].exists, "capsule should hide after 3 s")
+
+        XCUIDevice.shared.system.open(URL(string: "xrero-autotest://crash")!)   // second end within 60 s
+        let second = waitLabel(app, "xr-recovery", prefix: "too-large", timeout: 30)
+        sleep(1)
+        shot(app, "41-crash-too-large")
+        XCTAssertEqual(second, "too-large", "a second end within 60 s must not reload in a loop")
+        XCTAssertTrue(app.buttons["xr-recovery-share"].exists, "Share missing on the too-large page")
+        let back = app.buttons["xr-recovery-back"]
+        XCTAssertTrue(back.exists, "Back missing on the too-large page")
+        back.tap()
+        XCTAssertEqual(waitState(app, prefix: "back", timeout: 5), "back", "Back did not leave the editor")
+    }
+
+    private func waitLabel(_ app: XCUIApplication, _ id: String, prefix: String, timeout: TimeInterval) -> String {
+        let label = app.staticTexts[id]
+        let end = Date().addingTimeInterval(timeout)
+        var last = ""
+        while Date() < end {
+            if label.exists { last = label.label; if last.hasPrefix(prefix) { return last } }
+            Thread.sleep(forTimeInterval: 0.5)
+        }
+        return last
+    }
+
     /// New spreadsheet and presentation open in their editors.
     func testSpreadsheetAndPresentationOpen() {
         for kind in ["cell", "slide"] {
