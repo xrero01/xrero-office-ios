@@ -85,7 +85,13 @@ struct EditorScreen: View {
         } else if cmd == "saveas" {
             saveAsFormats = param.split(separator: ",").map(String.init)
         } else if cmd == "export" {
-            share = ShareFile(url: URL(fileURLWithPath: param))    // the copy: Save to Files, AirDrop, Mail...
+            // only the bridge's own Save As copies: a script in the page can send any ui command through
+            // execCommand, so a path outside xr-export must never reach the share sheet
+            let dir = FileManager.default.temporaryDirectory.appendingPathComponent("xr-export", isDirectory: true)
+            let url = URL(fileURLWithPath: param).standardizedFileURL
+            guard url.deletingLastPathComponent().resolvingSymlinksInPath().path
+                    == dir.resolvingSymlinksInPath().path else { return }
+            share = ShareFile(url: url)    // the copy: Save to Files, AirDrop, Mail...
         } else if cmd == "xrero:share" {
             controller.save {
                 let url = FileManager.default.temporaryDirectory.appendingPathComponent(title)
