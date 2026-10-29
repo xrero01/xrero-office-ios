@@ -14,6 +14,7 @@ struct EditorScreen: View {
     @State private var recovered: RecoveryNotice?           // the editor was reopened after its web process ended
     @State private var tooLarge = false                     // ... twice within a minute: Share / Back instead
     @State private var toast: String?
+    @State private var pendingLang: String?                 // asked for in the globe menu, waiting for the confirmation
     @ObservedObject private var account = XreroAccount.shared
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dismiss) private var dismiss
@@ -37,12 +38,14 @@ struct EditorScreen: View {
                 // header buttons for them are hidden on iOS so the ribbon tabs get the whole width
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Menu {
-                        Button { handle("xrero:lang:en", "") } label: {
+                        Button { if lang != "en" { pendingLang = "en" } } label: {
                             Label("English", systemImage: lang == "en" ? "checkmark" : "")
                         }
-                        Button { handle("xrero:lang:ar", "") } label: {
+                        .accessibilityIdentifier("xr-nav-lang-en")
+                        Button { if lang != "ar" { pendingLang = "ar" } } label: {
                             Label("العربية", systemImage: lang == "ar" ? "checkmark" : "")
                         }
+                        .accessibilityIdentifier("xr-nav-lang-ar")
                     } label: { Image(systemName: "globe") }
                         .accessibilityLabel(lang == "ar" ? "اللغة" : "Language")
                         .accessibilityIdentifier("xr-nav-lang")
@@ -73,6 +76,22 @@ struct EditorScreen: View {
             }
             .animation(.easeInOut(duration: 0.2), value: toast)
             .saveAsCopy(formats: $saveAsFormats, lang: lang, controller: controller)
+            // the editor's page has to reopen in the other language, which clears its undo history: say so first, in
+            // the language being switched to (Home and this bar flip at once; the page follows after its save)
+            .confirmationDialog(pendingLang == "ar" ? "التبديل إلى العربية؟" : "Switch to English?",
+                                isPresented: Binding(get: { pendingLang != nil }, set: { if !$0 { pendingLang = nil } }),
+                                titleVisibility: .visible) {
+                Button(pendingLang == "ar" ? "حفظ والتبديل" : "Save and Switch") {
+                    if let new = pendingLang { handle("xrero:lang:" + new, "") }
+                    pendingLang = nil
+                }
+                .accessibilityIdentifier("xr-lang-confirm")
+                Button(pendingLang == "ar" ? "إلغاء" : "Cancel", role: .cancel) { pendingLang = nil }
+            } message: {
+                Text(pendingLang == "ar"
+                     ? "يُحفظ المستند ثم يُعاد فتحه بالعربية. لن يكون التراجع عن التعديلات السابقة متاحًا بعدها."
+                     : "The document is saved, then reopens in English. Earlier changes can't be undone after that.")
+            }
             .sheet(item: $share) { ShareSheet(items: [$0.url]) }
             .sheet(isPresented: $showAccount) { AccountView() }
             .onChange(of: account.info) { _, _ in controller.syncAccount(account.webValue) }

@@ -92,12 +92,56 @@ struct OfficeDocument: FileDocument {
     }
 }
 
-/// Interface language of the editors: the user's choice (EN/AR switch in the editor header), else the device's.
-enum AppLanguage {
+/// The interface language (EN/AR): ONE observable source for Home, the sheets and the separately hosted editor.
+///
+/// Decision (plan M9b): the in-app switch (Home > More > Language, the editor's globe menu) is the source of truth.
+/// Until the user picks one, the app follows iOS - and that already includes the per-app language from Settings >
+/// Xrero Office > Language (CFBundleLocalizations en + ar), which iOS reports as Locale.preferredLanguages.first. The
+/// bundle keeps both localisations because iOS itself shows the Arabic permission prompts from ar.lproj.
+///
+/// Reading it is cheap (a stored property): L.* and the editor read it on every render.
+final class AppLanguage: ObservableObject {
+    static let shared = AppLanguage()
     static let key = "xr.lang"
-    static var current: String {
+
+    /// "ar" or "en". Published so every view that observes `shared` re-renders when it changes.
+    @Published private(set) var code: String
+
+    private init() { code = AppLanguage.stored() }
+
+    static var current: String { shared.code }
+
+    /// Saves the choice and flips every observing screen at once (call on the main thread: UI actions only).
+    static func set(_ lang: String) {
+        let v = lang == "ar" ? "ar" : "en"
+        UserDefaults.standard.set(v, forKey: key)
+        if Thread.isMainThread { shared.code = v } else { DispatchQueue.main.async { shared.code = v } }
+    }
+
+    var isArabic: Bool { code == "ar" }
+    var layoutDirection: LayoutDirection { isArabic ? .rightToLeft : .leftToRight }
+    /// Dates and numbers follow the UAE variants of each language (plan M9b).
+    var locale: Locale { Locale(identifier: isArabic ? "ar-AE" : "en-AE") }
+
+    /// The UserDefaults value (UI tests pass "-xr.lang ar" in the launch arguments: argument domain, this launch only),
+    /// else the iOS language for this app.
+    private static func stored() -> String {
         if let v = UserDefaults.standard.string(forKey: key), v == "ar" || v == "en" { return v }
         return (Locale.preferredLanguages.first ?? "en").hasPrefix("ar") ? "ar" : "en"
     }
-    static func set(_ lang: String) { UserDefaults.standard.set(lang == "ar" ? "ar" : "en", forKey: key) }
+}
+
+/// Mirrors a screen as one piece and gives it the app's locale for dates and numbers. Applied at the WindowGroup AND at
+/// the editor's own UIHostingController root (EditorHost), which does not inherit the window's SwiftUI environment.
+struct AppLanguageEnvironment: ViewModifier {
+    @ObservedObject private var language = AppLanguage.shared
+    func body(content: Content) -> some View {
+        content
+            .environment(\.layoutDirection, language.layoutDirection)
+            .environment(\.locale, language.locale)
+    }
+}
+
+extension View {
+    func appLanguageEnvironment() -> some View { modifier(AppLanguageEnvironment()) }
 }

@@ -16,8 +16,15 @@ struct AccountView: View {
     @State private var askDelete = false
     @State private var deletePassword = ""
     @State private var deleted = false
+    @FocusState private var focus: Field?
+    @ObservedObject private var language = AppLanguage.shared
 
-    private var ar: Bool { L.ar }
+    /// The keyboard's Next / Go chain: name -> email -> password -> Continue.
+    private enum Field { case name, email, password }
+
+    private var ar: Bool { language.isArabic }
+
+    private var canSubmit: Bool { !busy && !email.isEmpty && !password.isEmpty && !(creating && name.isEmpty) }
 
     var body: some View {
         NavigationStack {
@@ -62,47 +69,78 @@ struct AccountView: View {
     @ViewBuilder private var signedOut: some View {
         Section {
             VStack(alignment: .leading, spacing: 6) {
-                Text(welcome ? (ar ? "أهلًا بك في Xrero Office" : "Welcome to Xrero Office") : (ar ? "حساب Xrero" : "Xrero account"))
-                    .font(.title3.bold())
-                Text(ar ? "سجّل الدخول بحساب Xrero نفسه المستخدم في Xrero Office على ويندوز. هذا اختياري - كل الميزات تعمل بدون حساب، ومستنداتك تبقى على جهازك."
-                        : "Sign in with the same Xrero account you use in Xrero Office for Windows. It is optional - everything works without an account, and your documents stay on your device.")
+                // the bar already says "Xrero account": the welcome card alone gets its own heading
+                if welcome {
+                    Text(ar ? "أهلًا بك في Xrero Office" : "Welcome to Xrero Office")
+                        .font(.title3.bold())
+                }
+                Text(ar ? "سجّل الدخول بحساب Xrero نفسه المستخدم في Xrero Office على ويندوز. الحساب اختياري، فكل الميزات تعمل بدونه، ومستنداتك تبقى على جهازك."
+                        : "Sign in with the same Xrero account you use in Xrero Office for Windows. It is optional — everything works without an account, and your documents stay on your device.")
                     .font(.subheadline).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.vertical, 4)
         }
         Section {
-            Picker("", selection: $creating) {
+            Picker(ar ? "الحساب" : "Account", selection: $creating) {
                 Text(ar ? "تسجيل الدخول" : "Sign in").tag(false)
                 Text(ar ? "إنشاء حساب" : "Create account").tag(true)
             }
             .pickerStyle(.segmented)
+            .accessibilityIdentifier("xr-acct-mode")
+            .onChange(of: creating) { _, _ in error = nil }
             if creating {
                 TextField(ar ? "الاسم الكامل" : "Full name", text: $name)
-                    .textContentType(.name).accessibilityIdentifier("xr-acct-name")
+                    .textContentType(.name)
+                    .submitLabel(.next)
+                    .focused($focus, equals: .name)
+                    .onSubmit { focus = .email }
+                    .accessibilityIdentifier("xr-acct-name")
             }
             TextField(ar ? "البريد الإلكتروني" : "Email", text: $email)
                 .textContentType(.emailAddress).keyboardType(.emailAddress)
                 .textInputAutocapitalization(.never).autocorrectionDisabled()
+                .submitLabel(.next)
+                .focused($focus, equals: .email)
+                .onSubmit { focus = .password }
                 .environment(\.layoutDirection, .leftToRight)
                 .accessibilityIdentifier("xr-acct-email")
             SecureField(creating ? (ar ? "كلمة المرور (8 أحرف على الأقل)" : "Password (at least 8 characters)") : (ar ? "كلمة المرور" : "Password"),
                         text: $password)
                 .textContentType(creating ? .newPassword : .password)
+                .submitLabel(.go)
+                .focused($focus, equals: .password)
+                .onSubmit { if canSubmit { Task { await submit() } } }
                 .accessibilityIdentifier("xr-acct-password")
-            if let error { Text(error).font(.footnote).foregroundStyle(.red) }
-            Button {
-                Task { await submit() }
-            } label: {
-                HStack {
-                    Spacer()
-                    if busy { ProgressView() } else { Text(creating ? (ar ? "إنشاء الحساب" : "Create account") : (ar ? "تسجيل الدخول" : "Sign in")).bold() }
-                    Spacer()
-                }
+            if let error {
+                Label(error, systemImage: "exclamationmark.circle")
+                    .font(.footnote).foregroundStyle(.red)
+                    .accessibilityIdentifier("xr-acct-error")
             }
-            .disabled(busy || email.isEmpty || password.isEmpty || (creating && name.isEmpty))
-            .accessibilityIdentifier("xr-acct-submit")
         } footer: {
             Link(ar ? "سياسة الخصوصية" : "Privacy Policy", destination: URL(string: "https://xrero.com/privacy")!)
+        }
+        // one big filled teal button (50 pt, full width): the sheet's single primary action
+        Section {
+            Button {
+                focus = nil
+                Task { await submit() }
+            } label: {
+                ZStack {
+                    if busy { ProgressView().tint(Color.xrOnTeal) }
+                    else { Text(ar ? "متابعة" : "Continue").font(.headline).foregroundStyle(Color.xrOnTeal) }
+                }
+                .frame(maxWidth: .infinity, minHeight: 50)
+                .background(Color.xrTeal, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .opacity(canSubmit || busy ? 1 : 0.45)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!canSubmit)
+            .accessibilityLabel(creating ? (ar ? "إنشاء الحساب" : "Create account") : (ar ? "تسجيل الدخول" : "Sign in"))
+            .accessibilityIdentifier("xr-acct-submit")
+            .listRowInsets(EdgeInsets())
+            .listRowBackground(Color.clear)
         }
         if welcome {
             Section {
@@ -117,9 +155,9 @@ struct AccountView: View {
         Section {
             HStack(spacing: 14) {
                 Text(initials(info))
-                    .font(.headline).foregroundStyle(.white)
+                    .font(.headline).foregroundStyle(Color.xrOnTeal)
                     .frame(width: 46, height: 46)
-                    .background(Circle().fill(Color(red: 0.12, green: 0.48, blue: 0.55)))
+                    .background(Circle().fill(Color.xrTeal))
                 VStack(alignment: .leading, spacing: 2) {
                     Text(info.name.isEmpty ? (ar ? "حساب Xrero" : "Xrero account") : info.name).font(.headline)
                     Text(info.email).font(.subheadline).foregroundStyle(.secondary)
@@ -127,7 +165,7 @@ struct AccountView: View {
                 }
             }
             .padding(.vertical, 4)
-            LabeledContent(ar ? "الخطة" : "Plan", value: info.plan == "pro" ? "Pro" : (ar ? "مجانية" : "Free"))
+            // no Plan row: there is nothing to buy or change in this app, so a plan would only raise questions
         } footer: {
             Text(ar ? "مستنداتك تبقى على هذا الجهاز. الحساب هو اسمك وبريدك الإلكتروني فقط على xrero.com."
                     : "Your documents stay on this device. The account is only your name and email on xrero.com.")

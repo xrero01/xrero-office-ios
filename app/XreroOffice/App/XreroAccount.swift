@@ -87,7 +87,7 @@ final class XreroAccount: ObservableObject {
     private struct HTTPFailure: Error { let status: Int; let message: String }
 
     private func finishSignIn(_ r: [String: Any], fallbackEmail: String) async throws {
-        guard let t = r["token"] as? String, !t.isEmpty else { throw Failure(message: "No token from xrero.com") }
+        guard let t = r["token"] as? String, !t.isEmpty else { throw Failure(message: Self.friendly(status: 0, server: "", disabled: false)) }
         saveToken(t)
         store(Info(name: r["name"] as? String ?? "", email: fallbackEmail.trimmingCharacters(in: .whitespaces).lowercased(), plan: "free"))
         await refresh()
@@ -109,9 +109,42 @@ final class XreroAccount: ObservableObject {
         let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
         let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
         if status == 200, json["ok"] as? Bool == true { return json }
-        let message = json["error"] as? String ?? (json["disabled"] as? Bool == true ? L.accountDisabled : "HTTP \(status)")
-        if path == "/office/api/validate" { throw HTTPFailure(status: status, message: message) }
-        throw Failure(message: message)
+        let server = json["error"] as? String ?? ""
+        if path == "/office/api/validate" { throw HTTPFailure(status: status, message: server) }
+        if path == "/office/api/delete" && status == 401 {         // the confirmation password, not a sign-in
+            throw Failure(message: L.ar ? "كلمة المرور غير صحيحة." : "That password isn't right.")
+        }
+        throw Failure(message: Self.friendly(status: status, server: server, disabled: json["disabled"] as? Bool == true))
+    }
+
+    /// The server answers in English developer wording ("Invalid email or password.", "HTTP 502"); the sheet shows
+    /// a short sentence in the app's language that says what to do next. Unknown answers get a general sentence, never
+    /// a status code. Server words (xrero_office_accounts: controllers/main.py, models/office_user.py) are matched
+    /// loosely so a small rewording there still maps.
+    static func friendly(status: Int, server: String, disabled: Bool) -> String {
+        let ar = L.ar
+        let s = server.lowercased()
+        if disabled || status == 403 || s.contains("disabled") { return L.accountDisabled }
+        if status == 401 || s.contains("invalid email or password") {
+            return ar ? "البريد الإلكتروني أو كلمة المرور غير صحيحة، تحقّق منهما وحاول مرة أخرى."
+                      : "That email and password don't match. Check them and try again."
+        }
+        if s.contains("already registered") {
+            return ar ? "هذا البريد مسجّل بالفعل، سجّل الدخول بدلًا من ذلك." : "This email already has an account — sign in instead."
+        }
+        if s.contains("valid email") {
+            return ar ? "اكتب بريدًا إلكترونيًا صحيحًا." : "Enter a valid email address."
+        }
+        if s.contains("password must") {
+            return ar ? "كلمة المرور قصيرة جدًا." : "That password is too short."
+        }
+        if s.contains("name and email") {
+            return ar ? "اكتب اسمك وبريدك الإلكتروني." : "Enter your name and email."
+        }
+        if status == 429 {
+            return ar ? "محاولات كثيرة، انتظر قليلًا ثم حاول مرة أخرى." : "Too many attempts — wait a moment and try again."
+        }
+        return ar ? "تعذّر الوصول إلى حسابك الآن، حاول مرة أخرى بعد قليل." : "Couldn't reach your account right now — try again in a moment."
     }
 
     // Keychain: one generic-password item, this device only

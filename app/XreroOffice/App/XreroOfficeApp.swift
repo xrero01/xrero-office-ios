@@ -7,7 +7,7 @@ struct XreroOfficeApp: App {
         // CI build only (configuration "Autotest"): opens a fresh document straight in the editor for the UI tests
         WindowGroup { AutotestScreen() }
         #else
-        WindowGroup { HomeScene() }           // start screen; documents open over it (HomeScene.swift, DocumentOpener.swift)
+        WindowGroup { HomeScene().appLanguageEnvironment() }   // start screen; documents open over it (HomeScene.swift, DocumentOpener.swift)
         #endif
     }
 }
