@@ -207,6 +207,47 @@ final class EditorUITests: XCTestCase {
         XCTAssertTrue(saved.hasPrefix("saved"), "sample save failed: \(saved)")
     }
 
+    /// File > Download As / Save As: only working entries and formats in the File menu (logged for check_saved.py);
+    /// the ODT tile exports ar_letter.odt, the app's own format list (Save As without a format) exports ar_letter.rtf;
+    /// the document's own file is not rewritten.
+    func testSaveAsCopy() throws {
+        guard let b64 = ProcessInfo.processInfo.environment["XR_SAMPLE_B64"],
+              let name = ProcessInfo.processInfo.environment["XR_SAMPLE_NAME"] else {
+            throw XCTSkip("no sample passed")
+        }
+        let app = launch(["XR_DOC_B64": b64, "XR_DOC_NAME": name])
+        let ready = waitState(app, prefix: "ready", timeout: 120)
+        sleep(3)
+        XCTAssertEqual(ready, "ready", "sample did not open")
+
+        // the File menu as the user sees it (it opens on "Download As"); the hook logs the visible entries + formats
+        XCUIDevice.shared.system.open(URL(string: "xrero-autotest://filemenu")!)
+        sleep(4)
+        shot(app, "40-file-menu")
+
+        // 1) the ODT tile in "Download As" (format 0x43): the copy is exported straight away
+        let base = (name as NSString).deletingPathExtension
+        XCUIDevice.shared.system.open(URL(string: "xrero-autotest://tile?f=67")!)
+        let first = waitState(app, prefix: "exported:" + base + ".odt", timeout: 60)
+        shot(app, "41-download-as-odt")
+        XCTAssertEqual(first, "exported:" + base + ".odt", "ODT copy not exported from the Download As tile")
+
+        // 2) Save As without a format (Ctrl+Shift+S / the desktop's Save As): the app's own list of formats
+        XCUIDevice.shared.system.open(URL(string: "xrero-autotest://saveas")!)
+        let rtf = app.buttons["xr-saveas-rtf"].firstMatch
+        XCTAssertTrue(rtf.waitForExistence(timeout: 30), "the Save As format list did not appear")
+        shot(app, "42-saveas-formats")
+        // formats the on-device converter cannot write (or corrupts) are not offered
+        for ext in ["pdf", "txt", "html", "epub", "docm"] {
+            XCTAssertFalse(app.buttons["xr-saveas-" + ext].exists, "\(ext) offered but not supported")
+        }
+        XCTAssertTrue(app.buttons["xr-saveas-docx"].firstMatch.exists && app.buttons["xr-saveas-odt"].firstMatch.exists)
+        rtf.tap()
+        let second = waitState(app, prefix: "exported:" + base + ".rtf", timeout: 60)
+        shot(app, "43-saveas-rtf-exported")
+        XCTAssertEqual(second, "exported:" + base + ".rtf", "RTF copy not exported from the Save As list")
+    }
+
     /// App Store screenshots: each sample from XR_STORE_SET ("name|lang|base64;...") opened in that UI language
     /// (portrait: XCUITest's landscape screenshots come out rotated/cropped on the iPad simulator).
     func testStoreScreenshots() throws {

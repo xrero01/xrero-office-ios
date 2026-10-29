@@ -15,6 +15,7 @@ struct AutotestScreen: View {
     @State private var modified = "0"                      // the engine's "document modified" mark (crash test)
     @State private var ended = 0                            // "web process ended" log lines seen (the delegate fired)
     @State private var clipCount = 0
+    @State private var saveAsFormats: [String] = []
     @StateObject private var controller = EditorController()
     private let name: String
     private let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -51,6 +52,9 @@ struct AutotestScreen: View {
             }
             .opacity(0.02)
         }
+        // the same Save As list as the real editor screen (the UI test taps a format in it)
+        .saveAsCopy(formats: $saveAsFormats, lang: ProcessInfo.processInfo.environment["XR_LANG"] ?? AppLanguage.current,
+                    controller: controller)
         // test-only trigger that needs no tapping: XCUIApplication.open(URL("xrero-autotest://save"))
         .onOpenURL { url in
             guard url.scheme == "xrero-autotest" else { return }
@@ -74,6 +78,38 @@ struct AutotestScreen: View {
                     handle("log", "autotest: no kill hook in this WebKit - running the recovery path directly")
                     controller.coordinator?.recoverFromTermination()
                 }
+            }
+            if url.host == "filemenu" {         // opens File and logs which entries are visible (check_saved.py)
+                let js = """
+                (function(){var f=document.querySelector('iframe');var w=f&&f.contentWindow;if(!w)return 'no frame';
+                 var d=w.document,p=d.getElementById('file-menu-panel'),t=d.querySelector('a[data-tab="file"]');
+                 if(t&&(!p||p.style.display==='none'))t.click();
+                 setTimeout(function(){var ids=[].slice.call(d.querySelectorAll('#file-menu-panel .panel-menu > li.fm-btn'))
+                   .filter(function(li){return w.getComputedStyle(li).display!=='none';}).map(function(li){return li.id;});
+                   var tiles=[].slice.call(d.querySelectorAll('#panel-saveas .format-item'))
+                   .filter(function(el){return w.getComputedStyle(el).display!=='none';})
+                   .map(function(el){var b=el.querySelector('.btn-doc-format');return b?b.getAttribute('format'):'?';});
+                   w.XreroHost.log('file menu visible: '+ids.join(' '));
+                   w.XreroHost.log('download as formats: '+tiles.join(' '));},1500);return 'ok';})()
+                """
+                controller.coordinator?.web?.evaluateJavaScript(js) { r, e in handle("log", "filemenu: \(r ?? e?.localizedDescription ?? "?")") }
+            }
+            if url.host == "tile" {             // taps a "Download As" format tile, e.g. xrero-autotest://tile?f=67 (ODT)
+                let f = (URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "f" }?.value ?? "")
+                    .filter(\.isNumber)
+                let js = """
+                (function(){var f=document.querySelector('iframe');var w=f&&f.contentWindow;if(!w)return 'no frame';
+                 var b=w.document.querySelector('#panel-saveas .btn-doc-format[format="\(f)"]');if(!b)return 'no tile';
+                 b.click();return 'ok';})()
+                """
+                controller.coordinator?.web?.evaluateJavaScript(js) { r, e in handle("log", "tile \(f): \(r ?? e?.localizedDescription ?? "?")") }
+            }
+            if url.host == "saveas" {           // the call File > Save As makes (fallback when the tap cannot reach it)
+                let js = """
+                (function(){var f=document.querySelector('iframe');var w=f&&f.contentWindow;var a=w&&(w.Asc&&w.Asc.editor||w.editor);
+                 if(!a)return 'no editor';a.asc_DownloadAs();return 'ok';})()
+                """
+                controller.coordinator?.web?.evaluateJavaScript(js) { r, e in handle("log", "saveas: \(r ?? e?.localizedDescription ?? "?")") }
             }
             if url.host == "pdfedit" {          // PDF editing test: rotate page 1, add a page, add a free-text box
                 let js = """
@@ -177,6 +213,12 @@ struct AutotestScreen: View {
         case "saved":
             try? document.data.write(to: docs.appendingPathComponent(name), options: .atomic)
             state = "saved:" + param
+        case "saveas": saveAsFormats = param.split(separator: ",").map(String.init)
+        case "export":                       // Save As copy -> Documents/<name> for the workflow to check
+            let src = URL(fileURLWithPath: param), dst = docs.appendingPathComponent(src.lastPathComponent)
+            try? FileManager.default.removeItem(at: dst)
+            try? FileManager.default.copyItem(at: src, to: dst)
+            state = "exported:" + src.lastPathComponent
         case "log":
             let line = (param + "\n").data(using: .utf8)!
             let url = docs.appendingPathComponent("xr-log-" + name + ".txt")      // one log per test document

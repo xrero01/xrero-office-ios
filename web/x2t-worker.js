@@ -2,7 +2,7 @@
    editors' internal format (Editor.bin), on the device, without a server.
    new Worker('x2t-worker.js?base=<url of folder holding x2t.js + x2t.wasm>')
    request : {id, name, data: ArrayBuffer, to: 'Editor.bin'|'out.docx'|..., media: [{name, data}],
-              changes: [{name, data}], fromChanges: bool, fonts: [url]}
+              changes: [{name, data}], fromChanges: bool, fonts: [url], formatTo: Asc.c_oAscFileType code (optional)}
              PDF editing: name 'origin.pdf' + to 'out.pdf' + fromChanges + changes [the PDF editor's compiled changes,
              starting with "%PDF"] -> x2t opens the original in edit mode (EditPdf) and applies them
              (AddToPdfFromBinary); fonts = the font files the edits may need (loaded once, kept in /fonts)
@@ -63,6 +63,8 @@ self.onmessage = function (e) {
       '<m_sFileFrom>/working/' + q.name + '</m_sFileFrom><m_sFileTo>/working/' + q.to + '</m_sFileTo>' +
       '<m_sFontDir>' + fontDir + '</m_sFontDir><m_sThemeDir>/working/themes</m_sThemeDir>' +
       (q.fromChanges ? '<m_bFromChanges>true</m_bFromChanges>' : '') +
+      // the exact target format (Save As): without it x2t writes e.g. a .dotx / .potx as a plain document
+      (q.formatTo ? '<m_nFormatTo>' + (q.formatTo | 0) + '</m_nFormatTo>' : '') +
       '<m_bIsNoBase64>true</m_bIsNoBase64></TaskQueueDataConvert>');
     var rc = Module.ccall('main1', 'number', ['string'], ['/working/params.xml']);
     if (rc !== 0 || !FS.analyzePath('/working/' + q.to).exists) throw new Error('x2t exit code ' + rc);
