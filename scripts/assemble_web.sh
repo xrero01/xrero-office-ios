@@ -8,6 +8,8 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 rm -rf "$OUT"; mkdir -p "$OUT"
 ditto -x -k "$ZIP" "$OUT" 2>/dev/null || unzip -q "$ZIP" -d "$OUT"
 cp "$ROOT/web/xr-host.js" "$OUT/xr-host.js"
+# the engine contract (what xr-host.js relies on): read by the Autotest build's "contract" check in the running editors
+cp "$ROOT/web/xr-contract.json" "$OUT/xr-contract.json"
 # Xrero's own Arabic blanks (scripts/make_blank_templates.py: right-to-left, Cairo, ar-AE) replace the package's
 # ar-SA ones, so a new file made while the app is in Arabic starts right-to-left; templates/en stay as packaged
 mkdir -p "$OUT/templates/ar"

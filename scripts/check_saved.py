@@ -5,7 +5,8 @@ xr-clip.docx must hold the ribbon Copy/Paste round trip (own copy twice + outsid
 ar_letter.docx must still hold the original Arabic letter after open + save; File > Save As must export ar_letter.odt
 (a real ODT with the letter) without rewriting the original, and the File menu must show no no-op entry;
 the Arabic blanks (xr-test-ar.*, made with the app in Arabic) must come back from the engine still right-to-left.
-Prints each editor log."""
+Every editor log must be free of 'missing AscDesktopEditor.*' lines (engine contract: a member the editors ask the
+shell for that xr-host.js does not define). Prints each editor log."""
 import os, re, sys, zipfile
 import xml.etree.ElementTree as ET
 
@@ -70,9 +71,16 @@ def text(p):
 for dev in sorted(os.listdir(root)) if os.path.isdir(root) else []:
     d = os.path.join(root, dev)
     print("==", dev, sorted(os.listdir(d)))
+    missing = set()
     for log in sorted(f for f in os.listdir(d) if f.startswith("xr-log")):
         print("--", log)
-        print("".join(open(os.path.join(d, log), encoding="utf-8", errors="replace").readlines()[-25:]))
+        lines = open(os.path.join(d, log), encoding="utf-8", errors="replace").readlines()
+        print("".join(lines[-25:]))
+        # engine contract (20.3 F0): the editors asked the shell for a member xr-host.js does not define
+        missing |= set(m for l in lines for m in re.findall(r"missing AscDesktopEditor\.(\S+)", l))
+    print("AscDesktopEditor members the editors asked for and xr-host.js lacks: %s"
+          % (" ".join(sorted(missing)) + " -> WRONG (add them to xr-host.js)" if missing else "none -> OK"))
+    ok &= not missing
     t = os.path.join(d, "xr-test.docx")
     if os.path.exists(t):
         s = text(t)

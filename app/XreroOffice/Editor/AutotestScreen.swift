@@ -48,6 +48,7 @@ struct AutotestScreen: View {
                 Text(state).font(.system(size: 6)).accessibilityIdentifier("xr-state")
                 Text(recovery).font(.system(size: 6)).accessibilityIdentifier("xr-recovery")
                 Text("modified:" + modified).font(.system(size: 6)).accessibilityIdentifier("xr-modified")
+                EditorStateProbe(state: controller.state)
                 Button("save") { controller.save() }.font(.system(size: 6)).accessibilityIdentifier("xr-save")
             }
             .opacity(0.02)
@@ -114,37 +115,32 @@ struct AutotestScreen: View {
                 """
                 controller.coordinator?.web?.evaluateJavaScript(js) { r, e in handle("log", "tile \(f): \(r ?? e?.localizedDescription ?? "?")") }
             }
+            // engine API calls go through controller.call (the editor frame), like the app's own controls
             if url.host == "saveas" {           // the call File > Save As makes (fallback when the tap cannot reach it)
-                let js = """
-                (function(){var f=document.querySelector('iframe');var w=f&&f.contentWindow;var a=w&&(w.Asc&&w.Asc.editor||w.editor);
-                 if(!a)return 'no editor';a.asc_DownloadAs();return 'ok';})()
-                """
-                controller.coordinator?.web?.evaluateJavaScript(js) { r, e in handle("log", "saveas: \(r ?? e?.localizedDescription ?? "?")") }
+                controller.call("var a=window.Asc&&Asc.editor||window.editor;if(!a)return 'no editor';a.asc_DownloadAs();return 'ok';") { r, e in
+                    handle("log", "saveas: \((r as? String) ?? e ?? "?")")
+                }
             }
             if url.host == "pdfedit" {          // PDF editing test: rotate page 1, add a page, add a free-text box
-                let js = """
-                (function(){var f=document.querySelector('iframe');var w=f&&f.contentWindow;var ed=w&&w.Asc&&w.Asc.editor;
-                 if(!ed)return 'no editor';ed.asc_RotatePage(90,[0]);ed.asc_AddPage(1);
-                 setTimeout(function(){try{ed.AddFreeTextAnnot(0);}catch(e){}},800);return 'ok';})()
-                """
-                controller.coordinator?.web?.evaluateJavaScript(js) { r, e in handle("log", "pdfedit: \(r ?? e?.localizedDescription ?? "?")") }
+                controller.call("""
+                var ed=window.Asc&&Asc.editor;if(!ed)return 'no editor';ed.asc_RotatePage(90,[0]);ed.asc_AddPage(1);
+                setTimeout(function(){try{ed.AddFreeTextAnnot(0);}catch(e){}},800);return 'ok';
+                """) { r, e in handle("log", "pdfedit: \((r as? String) ?? e ?? "?")") }
             }
             if url.host == "selectall" {        // clipboard test: select the document's text (selection is not under test)
-                let js = """
-                (function(){var f=document.querySelector('iframe');var w=f&&f.contentWindow;var ed=w&&w.Asc&&w.Asc.editor;
-                 if(!ed)return 'no editor';ed.asc_EditSelectAll();return 'ok';})()
-                """
-                controller.coordinator?.web?.evaluateJavaScript(js) { r, e in handle("log", "selectall: \(r ?? e?.localizedDescription ?? "?")") }
+                controller.call("var ed=window.Asc&&Asc.editor;if(!ed)return 'no editor';ed.asc_EditSelectAll();return 'ok';") { r, e in
+                    handle("log", "selectall: \((r as? String) ?? e ?? "?")")
+                }
             }
             if url.host == "addtext",           // clipboard test: the text to copy, without the keyboard (typing has its own tests)
                let t = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "t" })?.value {
                 let arg = String(data: (try? JSONSerialization.data(withJSONObject: [t])) ?? Data("[\"\"]".utf8), encoding: .utf8) ?? "[\"\"]"
-                let js = """
-                (function(){var f=document.querySelector('iframe');var w=f&&f.contentWindow;var ed=w&&w.Asc&&w.Asc.editor;
-                 if(!ed)return 'no editor';ed.asc_AddText(\(arg)[0]);return 'ok';})()
-                """
-                controller.coordinator?.web?.evaluateJavaScript(js) { r, e in handle("log", "addtext: \(r ?? e?.localizedDescription ?? "?")") }
+                controller.call("var ed=window.Asc&&Asc.editor;if(!ed)return 'no editor';ed.asc_AddText(\(arg)[0]);return 'ok';") { r, e in
+                    handle("log", "addtext: \((r as? String) ?? e ?? "?")")
+                }
             }
+            if url.host == "bridge" { checkBridge() }
+            if url.host == "contract" { checkContract() }
             if url.host == "openhome" {         // clipboard test: phones fold the ribbon - drop the Home panel so the
                                                 // test's tap on Copy / Paste lands on the button, never on the page
                 let js = """
@@ -209,6 +205,77 @@ struct AutotestScreen: View {
         .sheet(isPresented: $showAbout) { AboutSheet() }
     }
 
+    /// Bridge check (20.3 F0): a native call reaches the engine and the engine's answer comes back through the state
+    /// channel - Bold on, then off, through controller.call; EditorState must follow both, show undo after the typing
+    /// test, a text selection, and the channel's callbacks must stay within the typing budget (< 0.2 ms average).
+    /// Result in the state label: "bridge:ok (...)" or "bridge:fail <reasons> (...)".
+    private func checkBridge() {
+        state = "bridge:running"
+        let s = controller.state
+        func after(_ d: Double, _ f: @escaping () -> Void) { DispatchQueue.main.asyncAfter(deadline: .now() + d, execute: f) }
+        controller.call("__xrApi.put_TextPrBold(true);return 'ok';") { r1, e1 in
+            after(1.5) {
+                let boldOn = s.bold
+                controller.call("__xrApi.put_TextPrBold(false);return 'ok';") { r2, e2 in
+                    after(1.5) {
+                        let boldOff = !s.bold
+                        controller.call("return window.__xrState ? __xrState() : '';") { r3, e3 in
+                            var n = 0.0, ms = 0.0, mx = 0.0
+                            if let j = (r3 as? String)?.data(using: .utf8),
+                               let o = (try? JSONSerialization.jsonObject(with: j)) as? [String: Any] {
+                                n = (o["n"] as? Double) ?? 0; ms = (o["ms"] as? Double) ?? 0; mx = (o["max"] as? Double) ?? 0
+                            }
+                            let avg = n > 0 ? ms / n : 0
+                            var bad: [String] = []
+                            if (r1 as? String) != "ok" || (r2 as? String) != "ok" { bad.append("call failed: \(e1 ?? "-") / \(e2 ?? "-")") }
+                            if !boldOn { bad.append("Bold on did not reach the app") }
+                            if !boldOff { bad.append("Bold off did not reach the app") }
+                            if !s.canUndo { bad.append("no undo after typing") }
+                            if s.selection != .text { bad.append("selection \(s.selection.rawValue), not text") }
+                            if s.updates == 0 { bad.append("no state message") }
+                            if n == 0 { bad.append("no timed callbacks (\(e3 ?? "?"))") }
+                            if n >= 20 && avg >= 0.2 { bad.append(String(format: "callbacks %.3f ms on average (budget 0.2)", avg)) }
+                            let res = (bad.isEmpty ? "bridge:ok" : "bridge:fail " + bad.joined(separator: "; ")) +
+                                String(format: " (%@ callbacks=%.0f avg=%.4fms max=%.2fms)", s.summary, n, avg, mx)
+                            handle("log", res)
+                            state = res
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Engine-contract check (20.3 F0) in the running editor: every entry of the bundled xr-contract.json that
+    /// applies to this editor and device must exist (globals, API methods, DOM, controllers). The build step
+    /// (scripts/check_contract.py) checks the same names in the editors' code. Result: "contract:ok|fail ...".
+    private func checkContract() {
+        let url = Bundle.main.resourceURL!.appendingPathComponent("web/xr-contract.json")
+        guard let manifest = try? String(contentsOf: url, encoding: .utf8) else { state = "contract:fail no xr-contract.json"; return }
+        let js = """
+        var M=\(manifest), kind='\(document.kind.rawValue)', device=Math.min(screen.width,screen.height)>=600?'tablet':'phone';
+        var apps={word:'DE',cell:'SSE',slide:'PE',pdf:'PDFE'}, miss=[], n=0;
+        function get(o,p){var a=p.split('.');for(var i=0;i<a.length;i++){if(o==null)return undefined;o=o[a[i]];}return o;}
+        M.checks.forEach(function(c){
+          if(c.editors&&c.editors.indexOf(kind)<0)return; if(c.devices&&c.devices.indexOf(device)<0)return;
+          var ok, what;
+          if(c.kind==='global'){what=c.path;var v=get(window,c.path);ok=v!==undefined&&v!==null&&(!('equals' in c)||v===c.equals);}
+          else if(c.kind==='api'){what='api.'+c.name;ok=!!window.__xrApi&&typeof window.__xrApi[c.name]==='function';}
+          else if(c.kind==='dom'){what=c.selector;ok=!!document.querySelector(c.selector);}
+          else if(c.kind==='controller'){what=apps[kind]+'.'+c.name+(c.path?'.'+c.path:'');var app=window[apps[kind]],ctl=null;
+            try{ctl=app&&app.getController&&app.getController(c.name);}catch(e){}ok=!!ctl&&(!c.path||get(ctl,c.path)!=null);}
+          else return;
+          n++; if(!ok)miss.push(what);
+        });
+        return (miss.length?'contract:fail missing '+miss.join(', '):'contract:ok')+' ('+n+' checks, '+kind+', '+device+')';
+        """
+        controller.call(js) { r, e in
+            let res = (r as? String) ?? "contract:fail " + (e ?? "no result")
+            handle("log", res)
+            state = res
+        }
+    }
+
     private func handle(_ cmd: String, _ param: String) {
         switch cmd {
         case "ready": state = "ready"; tooLarge = false
@@ -240,6 +307,15 @@ struct AutotestScreen: View {
             if param.hasPrefix("copy: ") || param.hasPrefix("paste: ") { clipCount += 1; state = "clip\(clipCount) " + param }
         default: break
         }
+    }
+}
+
+/// The editor's state as one line for the UI tests (EditorState.summary); observes the state object itself, the way
+/// the app's own controls will.
+private struct EditorStateProbe: View {
+    @ObservedObject var state: EditorState
+    var body: some View {
+        Text(state.summary).font(.system(size: 6)).accessibilityIdentifier("xr-editor-state")
     }
 }
 #endif

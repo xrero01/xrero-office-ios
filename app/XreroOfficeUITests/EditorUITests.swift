@@ -68,6 +68,33 @@ final class EditorUITests: XCTestCase {
         continueAfterFailure = keep
     }
 
+    /// Engine contract (20.3 F0) in the running editor: every xr-contract.json entry for this editor and device
+    /// exists (globals, API methods, DOM, controllers). Recorded; the test goes on (later checks still report).
+    private func checkContract(_ app: XCUIApplication, _ name: String) {
+        XCUIDevice.shared.system.open(URL(string: "xrero-autotest://contract")!)
+        let c = waitState(app, prefix: "contract:", timeout: 20)
+        print("XR contract \(name): \(c)")
+        let keep = continueAfterFailure
+        continueAfterFailure = true
+        XCTAssertTrue(c.hasPrefix("contract:ok"), "engine contract (\(name)): \(c)")
+        continueAfterFailure = keep
+    }
+
+    /// Bridge (20.3 F0): Bold on / off through EditorController.call reaches the engine, and the engine's state comes
+    /// back to the app's EditorState through the coalesced state channel, within the callback budget. Recorded; the
+    /// test goes on.
+    private func checkBridge(_ app: XCUIApplication) {
+        XCUIDevice.shared.system.open(URL(string: "xrero-autotest://bridge")!)
+        let b = waitState(app, prefix: "bridge:ok", timeout: 25)
+        let probe = app.staticTexts["xr-editor-state"]
+        print("XR bridge: \(b) | probe: \(probe.exists ? probe.label : "missing")")
+        let keep = continueAfterFailure
+        continueAfterFailure = true
+        XCTAssertTrue(b.hasPrefix("bridge:ok"), "native bridge / state channel: \(b)")
+        XCTAssertTrue(probe.exists && probe.label.contains("undo:1"), "EditorState probe: \(probe.exists ? probe.label : "missing")")
+        continueAfterFailure = keep
+    }
+
     /// iPad: the right settings panel, opened in landscape, closes again when the window turns portrait (rotation).
     private func checkIPadRotation(_ app: XCUIApplication, _ name: String) {
         guard UIDevice.current.userInterfaceIdiom == .pad else { return }
@@ -127,7 +154,10 @@ final class EditorUITests: XCTestCase {
         let saved = save(app)
         shot(app, "03-word-saved")
         XCTAssertTrue(saved.hasPrefix("saved"), "save did not complete: \(saved)")
-        checkIPadLayout(app, "word")         // after the save, so a layout failure never hides the typing result
+        // after the save (nothing below is saved again), so these checks never touch the typing result
+        checkContract(app, "word")
+        checkBridge(app)
+        checkIPadLayout(app, "word")
         checkIPadRotation(app, "word")
     }
 
@@ -327,6 +357,7 @@ final class EditorUITests: XCTestCase {
         let saved = save(app)
         shot(app, "32-pdf-saved")
         XCTAssertTrue(saved.hasPrefix("saved"), "pdf save failed: \(saved)")
+        checkContract(app, "pdf")
         checkIPadLayout(app, "pdf")
     }
 
@@ -488,6 +519,7 @@ final class EditorUITests: XCTestCase {
             let tag = kind + (lang == "en" ? "" : "-" + lang)
             shot(app, "20-" + tag + "-ready")
             XCTAssertEqual(ready, "ready", "\(tag) editor did not become ready")
+            if lang == "en" { checkContract(app, tag) }
             checkIPadLayout(app, tag)
             app.terminate()
         }
