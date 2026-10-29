@@ -293,13 +293,15 @@
   (function neutralChrome() {
     var K = ':root body:is(.theme-white,.theme-night)';
     var css =
-      // light tokens (labels: iOS label / secondaryLabel; accents >= 4.5:1 on the bar for text, 3:1 for the underline)
+      // light tokens (labels: iOS label / secondaryLabel; accents >= 3:1 on the bar for the underline; every filled
+      // button's label >= 4.5:1 on its fill: white on the tint 5:1 / 6.7:1 (pressed), white on --xr-present 4.6:1;
+      // dark mode: BLACK labels on the light tints, 9:1 and more - white there was only 2.3:1)
       ':root body.theme-white{--xr-bar:#F9F9F9;--xr-canvas:#F2F2F7;--xr-label:#000;--xr-label2:rgba(60,60,67,.75);' +
         '--xr-sep:rgba(60,60,67,.29);--xr-tint:#1F7A8C;--xr-tint-hi:#196575;--xr-on-accent:#fff;' +
-        '--xr-doc:#2F6BD8;--xr-sheet:#1E9E5A;--xr-slide:#E0612F;--xr-pdf:#C62828}' +
+        '--xr-doc:#2F6BD8;--xr-sheet:#1E9E5A;--xr-slide:#E0612F;--xr-present:#C4502A;--xr-pdf:#C62828}' +
       ':root body.theme-night{--xr-bar:#1C1C1E;--xr-canvas:#000;--xr-label:#fff;--xr-label2:rgba(235,235,245,.7);' +
         '--xr-sep:rgba(84,84,88,.65);--xr-tint:#5CB8C9;--xr-tint-hi:#7ACBD8;--xr-on-accent:#000;' +
-        '--xr-doc:#7AA7F0;--xr-sheet:#4CC38A;--xr-slide:#FF8A65;--xr-pdf:#FF6B6B}' +
+        '--xr-doc:#7AA7F0;--xr-sheet:#4CC38A;--xr-slide:#FF8A65;--xr-present:#FF8A65;--xr-pdf:#FF6B6B}' +
       K + '{' +
         ['document', 'spreadsheet', 'presentation', 'pdf', 'visio'].map(function (k) { return '--toolbar-header-' + k + ':var(--xr-bar)!important'; }).join(';') + ';' +
         [['document', 'doc'], ['spreadsheet', 'sheet'], ['presentation', 'slide'], ['pdf', 'pdf'], ['visio', 'doc']].map(function (k) {
@@ -323,20 +325,27 @@
       K + ' .toolbar .tabs .ribtab>a{font-weight:500!important;color:var(--xr-label2)!important}' +
       K + ' .toolbar .tabs .ribtab.active>a{color:var(--xr-label)!important}' +
       // Slides' Present (the Windows build paints it Office red with a 6 px radius): the editor's single primary
-      // action = the Slides accent as a true capsule; dark label on the light dark-mode accent (contrast)
-      K + ' .xr-present-btn{background:var(--xr-slide)!important;border-radius:18px!important;height:36px!important;' +
+      // action = the Slides accent as a true capsule (a deeper shade of it in light mode, so the white label reaches
+      // 4.5:1); dark label on the light dark-mode accent (contrast)
+      K + ' .xr-present-btn{background:var(--xr-present)!important;border-radius:18px!important;height:36px!important;' +
         'display:inline-flex!important;align-items:center}' +
-      K + ' .xr-present-btn:hover{background:var(--xr-slide)!important;filter:brightness(.92)}' +
+      K + ' .xr-present-btn:hover{background:var(--xr-present)!important;filter:brightness(.92)}' +
       K + ' .xr-present-label{color:var(--xr-on-accent)!important;font-family:inherit!important}' +
       K + ' .xr-present-btn .dropdown-toggle .caret{border-top-color:var(--xr-on-accent)!important}' +
-      // touch: no < > scroll arrows on the tab row - it scrolls under the finger, with a soft fade at both ends.
+      // primary dialog buttons (OK / Insert / Replace ...) on the teal tint: the engine's label is --text-inverse
+      // (white in both themes) - the label follows the tint instead (black on the light dark-mode teal)
+      K + ' .btn.primary,' + K + ' .btn.primary:hover,' + K + ' .btn.primary:active,' + K + ' .btn.primary.active{color:var(--xr-on-accent)!important}' +
+      // the editor's own theme picker (Settings > Appearance): the app follows iOS and sets the theme on every open,
+      // so a choice there would not stick - not offered (tab style / background are fixed in xr-editor.html)
+      K + ' #panel-settings :is(tr.appearance,tr.themes,tr.tab-style,tr.tab-background,tr.divider-group:has(+tr.appearance)){display:none!important}' +
+      // touch: no < > scroll arrows on the tab row - it scrolls under the finger, with a soft 24 px fade at both ends.
       // (a trackpad / mouse keeps the arrows: any-pointer:fine)
       '@media not all and (any-pointer:fine){' +
         '.toolbar .tabs .scroll{display:none!important}' +
         '.toolbar .tabs>ul{overflow-x:auto!important;overflow-y:hidden!important;scrollbar-width:none;' +
           'padding-left:12px!important;padding-right:12px!important;' +
-          '-webkit-mask-image:linear-gradient(to right,transparent 0,#000 16px,#000 calc(100% - 16px),transparent 100%);' +
-          'mask-image:linear-gradient(to right,transparent 0,#000 16px,#000 calc(100% - 16px),transparent 100%)}' +
+          '-webkit-mask-image:linear-gradient(to right,transparent 0,#000 24px,#000 calc(100% - 24px),transparent 100%);' +
+          'mask-image:linear-gradient(to right,transparent 0,#000 24px,#000 calc(100% - 24px),transparent 100%)}' +
         '.toolbar .tabs>ul::-webkit-scrollbar{display:none}}';
     var add = function () {
       if (document.getElementById('xr-chrome-css')) return;

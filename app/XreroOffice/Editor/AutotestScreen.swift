@@ -183,9 +183,13 @@ struct AutotestScreen: View {
                                                 // tabs, Xrero kind accent on the tab underline, iOS bar colour on the tab
                                                 // row, system font, canvas colour, no tab arrows on touch. Also reports
                                                 // the tab row (web view points) and its scroll position for the swipe test.
+                                                // Also: a primary dialog button's label contrast (>= 4.5:1, opened and
+                                                // closed here), the editor instance (inst=: same id = no reload), undo
+                                                // still available (undo=) and, with has=, the typed text still there.
                 let q = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
                 let want = q.first { $0.name == "want" }?.value == "dark" ? "dark" : "light"
                 let tag = "chrome" + (q.first { $0.name == "n" }?.value ?? "").filter(\.isNumber) + ":"    // this run's answer
+                let has = (q.first { $0.name == "has" }?.value ?? "").filter { $0.isLetter || $0.isNumber || $0 == " " }
                 let js = """
                 (function(){var f=document.querySelector('iframe');var w=f&&f.contentWindow;var d=w&&w.document;if(!d||!d.body)return '\(tag)fail no editor';
                 var want='\(want)',bad=[],b=d.body,cs=w.getComputedStyle(b),p=w.location.pathname;
@@ -202,9 +206,17 @@ struct AutotestScreen: View {
                 var coarse=!w.matchMedia('(any-pointer:fine)').matches;var arrows=[].slice.call(d.querySelectorAll('.toolbar .tabs .scroll')).filter(function(e){return e.offsetParent;}).length;if(coarse&&arrows)bad.push('tab arrows '+arrows);
                 if(kind==='presentation'){var pb=d.querySelector('.xr-present-btn');if(pb&&pb.offsetParent){var pr=pb.getBoundingClientRect(),pc=w.getComputedStyle(pb).backgroundColor;
                  var hx=function(c){return 'rgb('+parseInt(c.substr(1,2),16)+', '+parseInt(c.substr(3,2),16)+', '+parseInt(c.substr(5,2),16)+')';};
-                 if(pc!==hx(acc))bad.push('present '+pc);if(pr.height<35||pr.height>37)bad.push('present height '+Math.round(pr.height));}}
+                 if(pc!==hx(want==='dark'?'#ff8a65':'#c4502a'))bad.push('present '+pc);if(pr.height<35||pr.height>37)bad.push('present height '+Math.round(pr.height));}
+                 else bad.push('present button missing');}
+                var lum=function(c){var v=(String(c).match(/[0-9.]+/g)||[]).slice(0,3).map(function(x){x=x/255;return x<=0.03928?x/12.92:Math.pow((x+0.055)/1.055,2.4);});return v.length<3?-1:0.2126*v[0]+0.7152*v[1]+0.0722*v[2];};
+                var U=w.Common&&w.Common.UI,dlg=null,dinfo='none';try{dlg=U&&U.info?U.info({msg:'Xrero',buttons:['ok']}):null;}catch(e){bad.push('dialog '+e);}
+                if(dlg){var db=dlg.$window&&dlg.$window.find('.dlg-btn.primary')[0];if(!db)bad.push('dialog: no primary button');else{var dc=w.getComputedStyle(db),l1=lum(dc.color),l2=lum(dc.backgroundColor),cr=(Math.max(l1,l2)+0.05)/(Math.min(l1,l2)+0.05);
+                 dinfo=cr.toFixed(2);if(l1<0||l2<0||cr<4.5)bad.push('dialog button '+dc.color+' on '+dc.backgroundColor+' = '+dinfo);}try{dlg.close();}catch(e){}}else bad.push('dialog did not open');
+                if(!w.__xrInst)w.__xrInst=Math.random().toString(36).slice(2,8);
+                var api=(w.Asc&&w.Asc.editor)||w.editor,undo='-',txt='-';try{undo=api&&api.asc_getCanUndo&&api.asc_getCanUndo()?'1':'0';}catch(e){}
+                var has='\(has)';if(has){try{var ld=api.WordControl&&api.WordControl.m_oLogicDocument;txt=ld&&ld.GetText&&ld.GetText().indexOf(has)>=0?'1':'0';}catch(e){txt='0';}}
                 var r=ul&&ul.getBoundingClientRect(),o=f.getBoundingClientRect();
-                var info=want+' '+kind+' tabs='+(r?Math.round(o.left+r.left)+','+Math.round(o.left+r.right)+','+Math.round(o.top+r.top+r.height/2)+','+Math.round(Math.abs(ul.scrollLeft))+','+(ul.scrollWidth-ul.clientWidth):'none');
+                var info=want+' '+kind+' inst='+w.__xrInst+' undo='+undo+' text='+txt+' dialog='+dinfo+' tabs='+(r?Math.round(o.left+r.left)+','+Math.round(o.left+r.right)+','+Math.round(o.top+r.top+r.height/2)+','+Math.round(Math.abs(ul.scrollLeft))+','+(ul.scrollWidth-ul.clientWidth):'none');
                 return bad.length?'\(tag)fail '+bad.join('; ')+' ('+info+')':'\(tag)ok ('+info+')';})()
                 """
                 controller.coordinator?.web?.evaluateJavaScript(js) { r, e in

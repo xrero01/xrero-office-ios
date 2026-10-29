@@ -31,9 +31,13 @@ struct EditorWebView: UIViewRepresentable {
         web.backgroundColor = .systemGroupedBackground
         web.scrollView.backgroundColor = .systemGroupedBackground
         // live light / dark (M6): the editors follow iOS without a reload (a reload would lose undo and selection)
-        web.registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (view: WKWebView, _: UITraitCollection) in
-            c.appearanceChanged(dark: view.traitCollection.userInterfaceStyle == .dark)
+        web.registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (_: WKWebView, _: UITraitCollection) in
+            c.syncTheme()
         }
+        // iOS flips the appearance of a backgrounded app to snapshot it for the app switcher (both looks): those
+        // flips are ignored (syncTheme only acts while active) and the real appearance is checked on return
+        c.activeObserver = NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification,
+                                                                  object: nil, queue: .main) { [weak c] _ in c?.syncTheme() }
         web.scrollView.contentInsetAdjustmentBehavior = .never
         web.scrollView.bounces = false
         web.scrollView.isScrollEnabled = false        // the editors scroll their own canvas
@@ -70,8 +74,13 @@ struct EditorWebView: UIViewRepresentable {
         weak var web: WKWebView?
         var offsetLock: NSKeyValueObservation?
         var loadedLang = ""
-        /// "light" / "dark": the appearance the open editor was given (at load or by the last live switch)
+        /// "light" / "dark": the appearance the open editor really has (set at load, then only when the editor
+        /// confirmed a live switch - so a switch that could not be delivered is retried, never lost)
         var loadedTheme = ""
+        /// the live switch sent to the editor and not answered yet (no second refresh for the same change)
+        private var themeInFlight = ""
+        var activeObserver: NSObjectProtocol?
+        deinit { if let o = activeObserver { NotificationCenter.default.removeObserver(o) } }
         private var pickReply: ((Any?, String?) -> Void)?
         var onSaved: (() -> Void)?
 
@@ -110,6 +119,7 @@ struct EditorWebView: UIViewRepresentable {
             armWatchdog()
             loadedLang = parent.lang
             loadedTheme = web.traitCollection.userInterfaceStyle == .dark ? "dark" : "light"
+            themeInFlight = ""
             resources.media.removeAll()
             web.configuration.userContentController.removeAllUserScripts()
             let ucc = web.configuration.userContentController
@@ -201,7 +211,7 @@ struct EditorWebView: UIViewRepresentable {
                 let c = body["c"] as? String ?? ""
                 let p = body["p"] as? String ?? ""
                 if c == "modified" { edited = p == "1" }          // O(1): this can arrive while typing
-                if c == "ready" { ready = true; watchdog?.cancel() }
+                if c == "ready" { ready = true; watchdog?.cancel(); syncTheme() }   // a switch during loading
                 if c == "copied" { copied(p); return }
                 if c == "paste" { paste(); return }
                 parent.onCommand(c, p)
@@ -223,18 +233,27 @@ struct EditorWebView: UIViewRepresentable {
             }
         }
 
-        /// iOS switched light / dark: tell the editor frame the way the desktop shell does (Desktop.js
-        /// 'renderervars:changed' -> Themes.refreshTheme, which swaps the theme in place). Once per real change only;
-        /// never on the keystroke path.
-        func appearanceChanged(dark: Bool) {
-            let t = dark ? "dark" : "light"
-            guard t != loadedTheme, let web else { return }
-            loadedTheme = t
+        /// iOS switched light / dark (or the app came back / the editor became ready): tell the editor frame the way
+        /// the desktop shell does (Desktop.js 'renderervars:changed' -> Themes.refreshTheme, which swaps the theme in
+        /// place). Only while the app is active and the editor is ready, once per real change; never on the
+        /// keystroke path.
+        func syncTheme() {
+            guard let web, ready else { return }
+            let active = MainActor.assumeIsolated { UIApplication.shared.applicationState == .active }
+            guard active else { return }
+            let t = web.traitCollection.userInterfaceStyle == .dark ? "dark" : "light"
+            guard t != loadedTheme, t != themeInFlight else { return }
+            themeInFlight = t
             let js = "(function(){var f=document.querySelector('iframe');var w=f&&f.contentWindow;" +
                 "if(!w||!w.on_native_message)return 'no editor frame';" +
                 "w.on_native_message('renderervars:changed',JSON.stringify({theme:{system:'\(t)'}}));return 'ok';})()"
             web.evaluateJavaScript(js) { [weak self] result, error in
-                self?.parent.onCommand("log", "appearance \(t): " + ((result as? String) ?? error?.localizedDescription ?? "?"))
+                guard let self else { return }
+                let r = (result as? String) ?? error?.localizedDescription ?? "?"
+                if self.themeInFlight == t { self.themeInFlight = "" }
+                if r == "ok" { self.loadedTheme = t }          // otherwise the next trait change / ready retries
+                self.parent.onCommand("log", "appearance \(t): " + r)
+                if r == "ok" { self.syncTheme() }              // the appearance flipped again meanwhile
             }
         }
 
