@@ -14,6 +14,7 @@ struct AutotestScreen: View {
     @State private var tooLarge = false
     @State private var modified = "0"                      // the engine's "document modified" mark (crash test)
     @State private var ended = 0                            // "web process ended" log lines seen (the delegate fired)
+    @State private var clipCount = 0
     @StateObject private var controller = EditorController()
     private let name: String
     private let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -29,7 +30,7 @@ struct AutotestScreen: View {
         } else {
             let kind = OfficeKind(rawValue: env["XR_KIND"] ?? "") ?? .word
             _document = State(initialValue: OfficeDocument(kind: kind))
-            name = env["XR_DOC_NAME"] ?? ("xr-test." + kind.fileExtension)
+            name = env["XR_DOC_NAME"] ?? env["XR_NEW_NAME"] ?? ("xr-test." + kind.fileExtension)     // own file per test (crash, clipboard tests)
         }
         try? FileManager.default.removeItem(at: docs.appendingPathComponent("xr-log-" + name + ".txt"))
     }
@@ -82,6 +83,36 @@ struct AutotestScreen: View {
                 """
                 controller.coordinator?.web?.evaluateJavaScript(js) { r, e in handle("log", "pdfedit: \(r ?? e?.localizedDescription ?? "?")") }
             }
+            if url.host == "selectall" {        // clipboard test: select the document's text (selection is not under test)
+                let js = """
+                (function(){var f=document.querySelector('iframe');var w=f&&f.contentWindow;var ed=w&&w.Asc&&w.Asc.editor;
+                 if(!ed)return 'no editor';ed.asc_EditSelectAll();return 'ok';})()
+                """
+                controller.coordinator?.web?.evaluateJavaScript(js) { r, e in handle("log", "selectall: \(r ?? e?.localizedDescription ?? "?")") }
+            }
+            if url.host == "addtext",           // clipboard test: the text to copy, without the keyboard (typing has its own tests)
+               let t = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "t" })?.value {
+                let arg = String(data: (try? JSONSerialization.data(withJSONObject: [t])) ?? Data("[\"\"]".utf8), encoding: .utf8) ?? "[\"\"]"
+                let js = """
+                (function(){var f=document.querySelector('iframe');var w=f&&f.contentWindow;var ed=w&&w.Asc&&w.Asc.editor;
+                 if(!ed)return 'no editor';ed.asc_AddText(\(arg)[0]);return 'ok';})()
+                """
+                controller.coordinator?.web?.evaluateJavaScript(js) { r, e in handle("log", "addtext: \(r ?? e?.localizedDescription ?? "?")") }
+            }
+            if url.host == "openhome" {         // clipboard test: phones fold the ribbon - drop the Home panel so the
+                                                // test's tap on Copy / Paste lands on the button, never on the page
+                let js = """
+                (function(){var f=document.querySelector('iframe');var d=f&&f.contentDocument;if(!d)return 'no editor';
+                 var bar=d.querySelector('.toolbar.folded');if(!bar)return 'not folded';if(bar.classList.contains('expanded'))return 'open';
+                 var a=d.querySelector('.ribtab > a[data-tab="home"]');if(!a)return 'no home tab';
+                 a.parentNode.classList.remove('active');a.parentNode.click();return 'opened';})()
+                """
+                controller.coordinator?.web?.evaluateJavaScript(js) { r, e in handle("log", "openhome: \(r ?? e?.localizedDescription ?? "?")") }
+            }
+            if url.host == "pbset",             // clipboard test: text "from another app" (written in-app: no Allow Paste prompt)
+               let t = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "t" })?.value {
+                UIPasteboard.general.string = t
+            }
         }
         .sheet(isPresented: $showAbout) { AboutSheet() }
     }
@@ -107,6 +138,8 @@ struct AutotestScreen: View {
             else { try? line.write(to: url) }
             if param.hasPrefix("web process ended") { ended += 1 }
             if param.hasPrefix("open failed") || param.hasPrefix("engine error") { state = "error: " + param }
+            // clipboard test: each finished Copy / Paste shows (numbered, so the test sees every new one)
+            if param.hasPrefix("copy: ") || param.hasPrefix("paste: ") { clipCount += 1; state = "clip\(clipCount) " + param }
         default: break
         }
     }

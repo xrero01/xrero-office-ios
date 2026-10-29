@@ -180,6 +180,8 @@ struct EditorWebView: UIViewRepresentable {
                 let p = body["p"] as? String ?? ""
                 if c == "modified" { edited = p == "1" }          // O(1): this can arrive while typing
                 if c == "ready" { ready = true; watchdog?.cancel() }
+                if c == "copied" { copied(p); return }
+                if c == "paste" { paste(); return }
                 parent.onCommand(c, p)
                 if c == "ready", let r = pendingRecovery {       // the reopened document is on screen again
                     pendingRecovery = nil
@@ -248,6 +250,41 @@ struct EditorWebView: UIViewRepresentable {
             parent.onCommand("log", "web process ended (app active=\(active), unsaved edits=\(lostEdits)) - reopening the last saved version")
             pendingRecovery = (lostEdits, pendingRecovery?.since ?? now)
             load()
+        }
+
+        // MARK: clipboard (the editors' Cut / Copy / Paste, see "clipboard" in xr-host.js)
+
+        /// After Copy / Cut: WebKit normally wrote the pasteboard itself (text + HTML). When it could not
+        /// (ok == false), the plain text goes there from here so the copy still reaches other apps and Paste.
+        private func copied(_ json: String) {
+            guard let d = json.data(using: .utf8),
+                  let o = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] else { return }
+            let ok = (o["ok"] as? Bool) ?? false
+            let text = (o["text"] as? String) ?? ""
+            if !ok && !text.isEmpty { UIPasteboard.general.string = text }
+            parent.onCommand("log", "copy: " + (ok ? "pasteboard written by the editor" : (text.isEmpty ? "nothing selected" : "plain text written by the app")))
+        }
+
+        /// Paste: the pasteboard is read only here, on the user's own Paste tap - never on launch or on becoming
+        /// active - so iOS shows its "Allow Paste" question only when the user really pastes from another app.
+        /// Phase 1: plain text (Xrero's own copies come back with full formatting from the editor's internal format).
+        private func paste() {
+            let pb = UIPasteboard.general
+            guard pb.hasStrings, let text = pb.string, !text.isEmpty else { pasteDone("empty"); return }
+            // the text as a JS string literal (JSON-escaped inside a one-element array)
+            let arg = String(data: (try? JSONSerialization.data(withJSONObject: [text])) ?? Data("[null]".utf8), encoding: .utf8) ?? "[null]"
+            let js = """
+            (function(){var f=document.querySelector('iframe');var w=f&&f.contentWindow;
+             if(!w||!w.__xrPaste)return 'no editor';return w.__xrPaste(\(arg)[0]);})()
+            """
+            web?.evaluateJavaScript(js) { [weak self] result, error in
+                self?.pasteDone((result as? String) ?? (error.map { "js error: \($0.localizedDescription)" } ?? "?"))
+            }
+        }
+
+        private func pasteDone(_ result: String) {
+            parent.onCommand("log", "paste: " + result)
+            if result != "internal" && result != "text" { parent.onCommand("paste-failed", result) }
         }
 
         // MARK: pictures

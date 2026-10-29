@@ -248,6 +248,61 @@
       }).catch(function (e) { log('save failed', e && e.message || e); done(2); });
   }
 
+  // ---------------------------------------------------------------- clipboard (Cut / Copy / Paste)
+  // The desktop sdkjs hands the ribbon's / context menu's Cut, Copy and Paste to the shell
+  // (asc_desktop_copypaste -> AscDesktopEditor.Copy/Cut/Paste); without these the buttons threw and did nothing.
+  // Copy / Cut: sdkjs' own BROWSER path does the work (it writes text/plain + text/html to the system pasteboard
+  // through the copy event and keeps its internal format for Xrero-to-Xrero pastes). It only takes that path when
+  // no desktop shell is present, so the shell is hidden for the length of that one synchronous call - still inside
+  // the user's tap, which WebKit requires for execCommand('copy').
+  // Paste: WebKit gives a page no pasteboard access, so the app reads UIPasteboard on this tap only and hands the
+  // text to __xrPaste below. Never on the keystroke path.
+  var clipText = null;                        // plain text of Xrero's own last copy (recognised again on paste)
+  function squash(s) { return String(s == null ? '' : s).replace(/[\s ​-‏‪-‮⁦-⁩]+/g, ''); }
+  function webClipboard(method) {
+    var api = window.__xrApi, fn = api && (api[method] || api['asc_' + method]);  // Word/Slides: Copy, Cells: asc_Copy
+    if (typeof fn !== 'function') return false;
+    var shell = window.AscDesktopEditor, r = false;
+    window.AscDesktopEditor = undefined;
+    try { r = fn.call(api); } catch (e) { log('clipboard', method, 'failed', e && e.message || e); }
+    finally { window.AscDesktopEditor = shell; }
+    return r;
+  }
+  function copyCut(cut) {
+    var api = window.__xrApi, text = '';
+    try { text = (api && api.asc_GetSelectedText && api.asc_GetSelectedText()) || ''; } catch (e) {}   // before a cut
+    var C = window.AscCommon && AscCommon.g_clipboardBase;
+    if (C) C.LastCopyBinary = null;           // refilled by the engine only when it really copied something
+    var ok = !!webClipboard(cut ? 'Cut' : 'Copy') && !(C && !C.LastCopyBinary);
+    clipText = text;
+    // ok=false: WebKit did not write the pasteboard - the app writes the plain text itself
+    H.command && H.command('copied', JSON.stringify({ ok: ok, text: String(text) }));
+  }
+  // Called by the app (EditorWebView.paste) with the pasteboard's plain text. Xrero's own copy (the pasteboard
+  // still holds the text it wrote) goes back in with full formatting; anything else is inserted as plain text.
+  window.__xrPaste = function (text) {
+    var api = window.__xrApi, C = window.AscCommon && AscCommon.g_clipboardBase;
+    if (!api || !api.asc_PasteData) return 'no editor';
+    if (text == null || text === '') return 'empty';
+    var F = (window.AscCommon && AscCommon.c_oAscClipboardDataFormat) || { Text: 1, Internal: 4 };
+    try {
+      if (C && C.IsWorking && C.IsWorking()) return 'busy';
+      if (api.asc_enableKeyEvents) api.asc_enableKeyEvents(true, true);
+      var internal = null, own = null;
+      ((C && C.LastCopyBinary) || []).forEach(function (b) {
+        if (b.type === F.Internal) internal = b.data; else if (b.type === F.Text) own = b.data;
+      });
+      var t = squash(text);
+      if (internal == null || (t !== squash(own) && t !== squash(clipText))) log('paste detail: plain text (internal copy ' + (internal == null ? 'absent' : 'differs') + ')');
+      if (internal != null && t && (t === squash(own) || t === squash(clipText))) {
+        api.asc_PasteData(F.Internal, internal, null, own != null ? own : text);
+        return 'internal';
+      }
+      api.asc_PasteData(F.Text, String(text));
+      return 'text';
+    } catch (e) { return 'error: ' + (e && e.message || e); }
+  };
+
   var A = {
     // ---- identity / capabilities
     IsLocalFile: function () { return true; },
@@ -399,6 +454,9 @@
       if (cmd === 'go:folder' || (cmd === 'title:button' && /"home"/.test(param || ''))) return H.command && H.command('close', '');
       H.command && H.command(cmd, param || '');
     },
+    Copy: function () { copyCut(false); },
+    Cut: function () { copyCut(true); },
+    Paste: function () { H.command && H.command('paste', ''); },
     sendSystemMessage: noop,
     CallInAllWindows: noop,
     SpellCheck: noop,

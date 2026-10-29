@@ -12,6 +12,7 @@ struct EditorScreen: View {
     @State private var showAccount = false
     @State private var recovered: RecoveryNotice?           // the editor was reopened after its web process ended
     @State private var tooLarge = false                     // ... twice within a minute: Share / Back instead
+    @State private var toast: String?
     @ObservedObject private var account = XreroAccount.shared
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dismiss) private var dismiss
@@ -55,6 +56,21 @@ struct EditorScreen: View {
                         .accessibilityIdentifier("xr-nav-account")
                 }
             }
+            .overlay(alignment: .bottom) {
+                // short failure notice (paste): a capsule above the editor's bottom bar, gone after 2 s
+                if let toast {
+                    Text(toast)
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 18)
+                        .frame(height: 36)
+                        .background(.regularMaterial, in: Capsule())   // solid under Reduce Transparency
+                        .padding(.bottom, 72)
+                        .transition(.opacity)
+                        .allowsHitTesting(false)
+                        .accessibilityIdentifier("xr-toast")
+                }
+            }
+            .animation(.easeInOut(duration: 0.2), value: toast)
             .sheet(item: $share) { ShareSheet(items: [$0.url]) }
             .sheet(isPresented: $showAccount) { AccountView() }
             .onChange(of: account.info) { _, _ in controller.syncAccount(account.webValue) }
@@ -100,6 +116,8 @@ struct EditorScreen: View {
             tooLarge = false                    // the editor came back after all (e.g. reopened in the other language)
         } else if cmd == "xrero:account" || cmd == "xrero:signin" {
             showAccount = true
+        } else if cmd == "paste-failed" {
+            showToast(L.cannotPaste)
         } else if cmd == "xrero:signout" {
             account.signOut()
         } else if cmd == "xrero:share" {
@@ -110,6 +128,14 @@ struct EditorScreen: View {
             AppLanguage.set(new)
             controller.save { lang = new }                       // reopen the editor in the other language
         }
+    }
+}
+
+extension EditorScreen {
+    fileprivate func showToast(_ text: String) {
+        toast = text
+        UIAccessibility.post(notification: .announcement, argument: text)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { if toast == text { toast = nil } }
     }
 }
 

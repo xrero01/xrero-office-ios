@@ -79,6 +79,76 @@ final class EditorUITests: XCTestCase {
         XCTAssertTrue(saved.hasPrefix("saved"), "save did not complete: \(saved)")
     }
 
+    /// Runs a Home-tab ribbon command by its exact name ("Copy", not "Copy style") and waits until the app reports
+    /// it done (the Autotest state turns "clip<n> ..."). Phones fold the ribbon, and a tap on a button of a folded
+    /// panel lands on the page (it moves the caret and drops the selection) - so the Home panel is opened through
+    /// the Autotest hook first, every time; the tap itself is a real tap on the button.
+    private func ribbonCommand(_ app: XCUIApplication, _ name: String) -> String? {
+        let pred = NSPredicate(format: "label == %@ OR label BEGINSWITH %@", name, name + " (")
+        let state = app.staticTexts["xr-state"]
+        for _ in 0..<2 {
+            autotest("openhome")
+            let before = state.exists ? state.label : ""
+            let b = app.webViews.buttons.matching(pred).firstMatch
+            guard b.exists && b.isHittable else { continue }
+            b.tap()
+            let end = Date().addingTimeInterval(6)
+            while Date() < end {
+                let allow = app.buttons["Allow Paste"]           // iOS asks before reading another app's text
+                if allow.exists { allow.tap() }
+                if state.exists && state.label != before && state.label.hasPrefix("clip") { return state.label }
+                Thread.sleep(forTimeInterval: 0.3)
+            }
+        }
+        print("XR web buttons: '\(name)' did not run -", app.webViews.buttons.allElementsBoundByIndex.prefix(40).map { "\($0.label)/\($0.isEnabled)" })
+        return nil
+    }
+
+    private func autotest(_ host: String, _ text: String? = nil) {
+        var c = URLComponents(); c.scheme = "xrero-autotest"; c.host = host
+        if let text { c.queryItems = [URLQueryItem(name: "t", value: text)] }
+        XCUIDevice.shared.system.open(c.url!)                 // routed to the running app, no tapping
+        sleep(2)
+    }
+
+    /// Clipboard (20.2 M2): the ribbon's Copy + Paste round-trip mixed English/Arabic text (Xrero's own copy, full
+    /// formatting), then Paste brings in plain text another app put on the pasteboard. The text is inserted without
+    /// the keyboard (typing has its own tests). Named to run last, after the typing tests. check_saved.py reads
+    /// xr-clip.docx: "Hello مرحبا" twice (inserted once + pasted) and the outside text once.
+    func testZClipboardCopyPasteAndSave() {
+        let app = launch(["XR_KIND": "word", "XR_NEW_NAME": "xr-clip.docx"])
+        let ready = waitState(app, prefix: "ready", timeout: 120)
+        XCTAssertEqual(ready, "ready", "editor did not become ready")
+        XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 10))
+        sleep(2)
+        autotest("addtext", "Hello \u{0645}\u{0631}\u{062D}\u{0628}\u{0627}")      // Hello مرحبا
+        autotest("openhome")
+        autotest("selectall")
+
+        let copy = ribbonCommand(app, "Copy")
+        print("XR clip copy:", copy ?? "-")
+        shot(app, "40-clip-copied")
+        XCTAssertNotNil(copy, "ribbon Copy did not run")
+        // the first Paste replaces the selection with the copy, the second one adds it after: two in the file
+        let p1 = ribbonCommand(app, "Paste"); sleep(1)
+        let p2 = ribbonCommand(app, "Paste"); sleep(1)
+        print("XR clip paste:", p1 ?? "-", "|", p2 ?? "-")
+        shot(app, "41-clip-pasted")
+        XCTAssertTrue((p1 ?? "").hasSuffix("paste: internal") && (p2 ?? "").hasSuffix("paste: internal"),
+                      "own copy did not paste with its formatting: \(p1 ?? "-") / \(p2 ?? "-")")
+
+        // text from "another app": arrives as plain text
+        autotest("pbset", "Outside text 42")
+        let p3 = ribbonCommand(app, "Paste"); sleep(1)
+        print("XR clip outside paste:", p3 ?? "-")
+        shot(app, "42-clip-outside-pasted")
+        XCTAssertTrue((p3 ?? "").hasSuffix("paste: text"), "outside text did not paste: \(p3 ?? "-")")
+
+        let saved = save(app)
+        shot(app, "43-clip-saved")
+        XCTAssertTrue(saved.hasPrefix("saved"), "clipboard document save failed: \(saved)")
+    }
+
     /// Opens the Arabic sample passed by the workflow, adds a word, saves it.
     func testOpenArabicSampleAndSave() throws {
         guard let b64 = ProcessInfo.processInfo.environment["XR_SAMPLE_B64"],

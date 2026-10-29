@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """check_saved.py <out/saved> - verifies what the UI tests saved on each simulator (iPhone, iPad):
 xr-test.docx must contain the English (and, if the keyboard could type it, the Arabic) test text;
+xr-clip.docx must hold the ribbon Copy/Paste round trip (own copy twice + outside plain text);
 ar_letter.docx must still hold the original Arabic letter after open + save. Prints each editor log."""
 import os, re, sys, zipfile
 
@@ -24,6 +25,18 @@ for dev in sorted(os.listdir(root)) if os.path.isdir(root) else []:
         ok &= en
     else:
         print("xr-test.docx: MISSING"); ok = False
+    c = os.path.join(d, "xr-clip.docx")       # clipboard test: ribbon Copy + Paste x2, then outside plain text
+    if os.path.exists(c):
+        s = text(c)
+        flat = re.sub(r"[\s‎‏]+", "", s)
+        pasted = flat.count("Helloمرحبا")
+        outside = "Outside text 42" in s
+        good = pasted >= 2 and outside
+        print("xr-clip.docx: own copy pasted=%s (Hello+Arabic x%d)  outside text pasted=%s  text=%r -> %s"
+              % (pasted >= 2, pasted, outside, s[:200], "OK" if good else "WRONG"))
+        ok &= good
+    else:
+        print("xr-clip.docx: MISSING (clipboard copy/paste + save)"); ok = False
     a = os.path.join(d, "ar_letter.docx")
     if os.path.exists(a):
         s = text(a)
