@@ -59,6 +59,16 @@ struct AutotestScreen: View {
         .onOpenURL { url in
             guard url.scheme == "xrero-autotest" else { return }
             if url.host == "save" { controller.save() }
+            if url.host == "caret" {            // typing tests: where the new page's first line is (the editor's own text
+                                                // cursor, which sits there after open) - a fixed tap point drifts when
+                                                // the ribbon height changes and then lands in the page margin
+                let js = """
+                (function(){var f=document.querySelector('iframe');var w=f&&f.contentWindow;var d=w&&w.document;
+                 var e=d&&d.getElementById('id_target_cursor');if(!e)return 'caret:none';var r=e.getBoundingClientRect(),o=f.getBoundingClientRect();
+                 if(r.height<4)return 'caret:none';return 'caret:'+Math.round(o.left+r.left)+','+Math.round(o.top+r.top+r.height/2);})()
+                """
+                controller.coordinator?.web?.evaluateJavaScript(js) { r, _ in state = (r as? String) ?? "caret:none" }
+            }
             if url.host == "about" { showAbout = true }      // About & Licences over the open editor
             if url.host == "crash" {            // crash recovery test: end the editor's web process the way iOS does
                 guard let web = controller.coordinator?.web else { return }

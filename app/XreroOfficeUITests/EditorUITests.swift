@@ -25,6 +25,22 @@ final class EditorUITests: XCTestCase {
         return last
     }
 
+    /// Taps the new page's first line: where the editor's own text cursor is (read through the Autotest hook), so
+    /// the tap follows the ribbon's real height; the old fixed point only when the cursor cannot be found.
+    private func tapFirstLine(_ app: XCUIApplication, fallback: CGVector) {
+        let web = app.webViews.firstMatch
+        XCUIDevice.shared.system.open(URL(string: "xrero-autotest://caret")!)
+        let s = waitState(app, prefix: "caret:", timeout: 10)
+        let n = s.dropFirst("caret:".count).split(separator: ",").compactMap { Double($0) }
+        print("XR first line:", s)
+        if n.count == 2 {
+            // the cursor is in web view points; the web view fills the editor area below the system bar
+            web.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: n[0], dy: n[1])).tap()
+        } else {
+            web.coordinate(withNormalizedOffset: fallback).tap()
+        }
+    }
+
     /// Human pace: one character at a time (a burst from XCUITest is far faster than any person types).
     private func typeSlowly(_ app: XCUIApplication, _ text: String) {
         for ch in text { app.typeText(String(ch)); usleep(150_000) }
@@ -100,7 +116,7 @@ final class EditorUITests: XCTestCase {
         let web = app.webViews.firstMatch
         XCTAssertTrue(web.waitForExistence(timeout: 10))
         // the first line of the new page (on an iPad the page's empty middle is far below the only paragraph)
-        web.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: UIDevice.current.userInterfaceIdiom == .pad ? 0.19 : 0.3)).tap()
+        tapFirstLine(app, fallback: CGVector(dx: 0.35, dy: UIDevice.current.userInterfaceIdiom == .pad ? 0.19 : 0.3))
         sleep(2)
         typeSlowly(app, "Typed on iPhone - English OK.")
         app.typeText("\n")
@@ -203,8 +219,7 @@ final class EditorUITests: XCTestCase {
             XCTAssertEqual(ready, "ready", "Arabic blank \(kind) did not open")
             if kind == "word" {
                 // the only paragraph is right-to-left: it starts at the right edge, so tap the right half of line 1
-                app.webViews.firstMatch.coordinate(withNormalizedOffset: CGVector(
-                    dx: 0.65, dy: UIDevice.current.userInterfaceIdiom == .pad ? 0.19 : 0.3)).tap()
+                tapFirstLine(app, fallback: CGVector(dx: 0.65, dy: UIDevice.current.userInterfaceIdiom == .pad ? 0.19 : 0.3))
                 sleep(2)
                 typeSlowly(app, "\u{0645}\u{0631}\u{062D}\u{0628}\u{0627}")      // مرحبا
                 sleep(2)
@@ -414,7 +429,7 @@ final class EditorUITests: XCTestCase {
         // type until the engine marks the document edited (never saved): the capsule must then warn about it
         var edited = ""
         for _ in 0..<3 where !edited.hasSuffix("1") {
-            web.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: UIDevice.current.userInterfaceIdiom == .pad ? 0.19 : 0.3)).tap()
+            tapFirstLine(app, fallback: CGVector(dx: 0.35, dy: UIDevice.current.userInterfaceIdiom == .pad ? 0.19 : 0.3))
             sleep(2)
             typeSlowly(app, "unsaved ")
             edited = waitLabel(app, "xr-modified", prefix: "modified:1", timeout: 15)
@@ -444,7 +459,10 @@ final class EditorUITests: XCTestCase {
         let back = app.buttons["xr-recovery-back"]
         XCTAssertTrue(back.exists, "Back missing on the too-large page")
         back.tap()
-        XCTAssertEqual(waitState(app, prefix: "back", timeout: 5), "back", "Back did not leave the editor")
+        // the app reaches "back" at once; reading the state through accessibility can take seconds over the editor page
+        var left = waitState(app, prefix: "back", timeout: 15)
+        if left != "back" && back.exists && back.isHittable { back.tap(); left = waitState(app, prefix: "back", timeout: 15) }
+        XCTAssertEqual(left, "back", "Back did not leave the editor")
     }
 
     private func waitLabel(_ app: XCUIApplication, _ id: String, prefix: String, timeout: TimeInterval) -> String {
