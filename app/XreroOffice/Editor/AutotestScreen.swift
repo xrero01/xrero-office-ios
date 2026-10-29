@@ -295,7 +295,8 @@ private struct ProbeLabel: View {
      var bar=d.querySelector('.toolbar.folded');r.fold=bar?(bar.classList.contains('expanded')?'open':'closed'):'none';
      r.menu=[].slice.call(d.querySelectorAll('.dropdown-menu')).filter(function(m){return w.getComputedStyle(m).display!=='none'&&m.getBoundingClientRect().height>4;}).length;
      r.btn={};['bold','select-all'].forEach(function(k){var e=[].slice.call(d.querySelectorAll('[id="id-toolbar-btn-'+k+'"]')).filter(function(x){var q=x.getBoundingClientRect();return x.offsetParent&&q.width>4&&q.height>4;})[0],b=e&&e.getBoundingClientRect();
-      if(b)r.btn[k]=[Math.round(o.left+b.left+b.width/2),Math.round(o.top+b.top+b.height/2)];});
+      if(!b)return;var z=1;for(var x=e;x&&x!==d.documentElement;x=x.parentElement)z*=parseFloat(w.getComputedStyle(x).zoom)||1;
+      r.btn[k]=[Math.round(o.left+(b.left+b.width/2)*z),Math.round(o.top+(b.top+b.height/2)*z)];});
      if(A&&!w.__xrLat){var L=w.__xrLat=[],pend=false;var on=function(){if(pend)return;pend=true;var t0=w.performance.now();
       w.requestAnimationFrame(function(){w.requestAnimationFrame(function(){L.push(w.performance.now()-t0);pend=false;});});};
       A.addEventListener('keydown',on,true);A.addEventListener('input',on,true);}
@@ -313,8 +314,16 @@ private struct ProbeLabel: View {
                 ?? ["err": e?.localizedDescription ?? "no result"]
             o["fr"] = Self.holdsFirstResponder(web)
             o["kb"] = keyboardUp
-            let json = (try? JSONSerialization.data(withJSONObject: o)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-            probe = "t=\(Int64(Date().timeIntervalSince1970 * 1000))|" + json
+            let line = "t=\(Int64(Date().timeIntervalSince1970 * 1000))|"
+                + ((try? JSONSerialization.data(withJSONObject: o)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}")
+            // the simulator shares the Mac's file system: a file the test reads costs no accessibility query (each one
+            // walks the whole editor page and times out on the iPad); the label stays as the fallback
+            if let f = ProcessInfo.processInfo.environment["XR_PROBE_FILE"],
+               (try? Data(line.utf8).write(to: URL(fileURLWithPath: f), options: .atomic)) != nil {
+                if probe != "file" { probe = "file" }
+            } else {
+                probe = line
+            }
         }
     }
 

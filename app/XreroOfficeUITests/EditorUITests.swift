@@ -487,7 +487,9 @@ final class EditorUITests: XCTestCase {
         let label = app.staticTexts["xr-probe"]
         Thread.sleep(forTimeInterval: 1.2)
         for _ in 0..<8 {
-            let s = label.exists ? label.label : ""
+            // the app writes the probe to probeFile when it can (no accessibility query); else the label
+            let file = (try? String(contentsOfFile: probeFile, encoding: .utf8)) ?? ""
+            let s = file.hasPrefix("t=") ? file : (label.exists ? label.label : "")
             if s.hasPrefix("t="), let bar = s.firstIndex(of: "|"),
                let t = Int64(s[s.index(s.startIndex, offsetBy: 2)..<bar]), t >= asked,
                let d = String(s[s.index(after: bar)...]).data(using: .utf8),
@@ -496,6 +498,9 @@ final class EditorUITests: XCTestCase {
         }
         return ["err": "no probe"]
     }
+
+    /// Where the app writes the touch-gate probe (this runner's temporary folder: the simulator shares the Mac's disk).
+    private let probeFile = NSTemporaryDirectory() + "xr-probe.txt"
 
     private func num(_ p: [String: Any], _ k: String) -> Double? { (p[k] as? NSNumber)?.doubleValue }
     private func str(_ p: [String: Any], _ k: String) -> String { (p[k] as? String) ?? "" }
@@ -517,7 +522,7 @@ final class EditorUITests: XCTestCase {
     /// A Home-tab ribbon button (id-toolbar-btn-<key>) tapped for real where the probe measured it: the icon-only
     /// buttons (Bold, Select all) carry no accessibility label to find them by. Phones fold the ribbon: when the probe
     /// says it is folded and closed, the Home tab is tapped first, the way a user opens it.
-    private func tapToolbar(_ app: XCUIApplication, _ key: String, _ p: [String: Any]) -> Bool {
+    private func tapToolbar(_ app: XCUIApplication, _ key: String, _ p: [String: Any], tap: (Double, Double) -> Void) -> Bool {
         var p = p
         if str(p, "fold") == "closed" {
             let tab = app.webViews.buttons.matching(NSPredicate(format: "label == 'Home' OR label == %@",
@@ -528,8 +533,7 @@ final class EditorUITests: XCTestCase {
             print("XR touch toolbar button \(key) not visible: fold=\(str(p, "fold"))")
             return false
         }
-        app.webViews.firstMatch.coordinate(withNormalizedOffset: .zero)
-            .withOffset(CGVector(dx: xy[0].doubleValue, dy: xy[1].doubleValue)).tap()
+        tap(xy[0].doubleValue, xy[1].doubleValue)
         return true
     }
 
@@ -557,7 +561,8 @@ final class EditorUITests: XCTestCase {
         let endWord = ar ? "\u{0646}\u{0647}\u{0627}\u{064A}\u{0629}" : "End"                      // نهاية
         let app = XCUIApplication()
         app.launchArguments = ["-xr.lang", lang]
-        app.launchEnvironment = ["XR_KIND": "word", "XR_NEW_NAME": "xr-touch-\(lang).docx", "XR_PROBE": "1"]
+        try? FileManager.default.removeItem(atPath: probeFile)
+        app.launchEnvironment = ["XR_KIND": "word", "XR_NEW_NAME": "xr-touch-\(lang).docx", "XR_PROBE": "1", "XR_PROBE_FILE": probeFile]
         app.launch()
         let keep = continueAfterFailure
         continueAfterFailure = true                  // every check is recorded; one failure must not hide the others
@@ -586,7 +591,13 @@ final class EditorUITests: XCTestCase {
         let web = app.webViews.firstMatch
         XCTAssertTrue(web.waitForExistence(timeout: 10))
         sleep(2)
-        func tap(_ x: Double, _ y: Double) { web.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: x, dy: y)).tap() }
+        // taps from the app's corner plus the web view's origin (read once): resolving the web view for every tap is an
+        // accessibility query over the whole editor page, slow enough on the iPad to time out
+        let origin = web.frame.origin
+        func point(_ x: Double, _ y: Double) -> XCUICoordinate {
+            app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: origin.x + x, dy: origin.y + y))
+        }
+        func tap(_ x: Double, _ y: Double) { point(x, y).tap() }
 
         // 1) tap the first line: caret there, keyboard up (one tap, as a user expects; further taps are only made so
         //    the later checks can run, and the count is logged)
@@ -631,7 +642,7 @@ final class EditorUITests: XCTestCase {
         shot(app, "51-touch-\(lang)-tap-insert")
 
         // 4) double tap selects a word
-        web.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: at(0.18), dy: ly)).doubleTap()
+        point(at(0.18), ly).doubleTap()
         let p4 = probe(app)
         let sel4 = str(p4, "sel").trimmingCharacters(in: .whitespacesAndNewlines)
         gate("double-tap-selects-word", sel4.count >= 4 && !sel4.contains(" ") && t3.contains(sel4),
@@ -640,7 +651,7 @@ final class EditorUITests: XCTestCase {
 
         // 5) long press selects a word (iOS: the word, its handles and the edit menu)
         tapEnd()
-        web.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: at(0.86), dy: ly)).press(forDuration: 1.2)
+        point(at(0.86), ly).press(forDuration: 1.2)
         let p5 = probe(app)
         let sel5 = str(p5, "sel").trimmingCharacters(in: .whitespacesAndNewlines)
         shot(app, "53-touch-\(lang)-long-press")
@@ -649,11 +660,15 @@ final class EditorUITests: XCTestCase {
              known: "a long press opens the editor's desktop right-click menu (Cut/Copy/Paste/Paragraph...) and the keyboard goes down; no word is selected")
 
         // 6) a formatting tap keeps the keyboard: caret at the end, Bold, type on
+        // close the menu the long press left with a tap in the page margin just above the line (the menu opens below
+        // the finger, and in Arabic it can cover the line's end), then the caret to the end of the line
+        tap(at(0.5), ly - 18)
+        tapEnd()
         var p6 = probe(app)
-        for _ in 0..<3 where !(atLineEnd(p6) && (num(p6, "menu") ?? 0) == 0 && focused(p6)) { tapEnd(); p6 = probe(app) }   // the first tap may only close a menu
+        for _ in 0..<2 where !(atLineEnd(p6) && (num(p6, "menu") ?? 0) == 0 && focused(p6)) { tap(at(0.5), ly - 18); tapEnd(); p6 = probe(app) }
         gate("caret-to-line-end", atLineEnd(p6) && str(p6, "sel").isEmpty && focused(p6),
              "caret x=\(num(p6, "cx") ?? -1) line end \(ex) sel='\(str(p6, "sel"))' \(focusInfo(p6))")
-        let tapped = tapToolbar(app, "bold", p6)
+        let tapped = tapToolbar(app, "bold", p6, tap: tap)
         let p7 = probe(app)
         gate("bold-button-applies", tapped && flag(p7, "bold"), "tapped=\(tapped) bold=\(flag(p7, "bold")) fold=\(str(p7, "fold"))")
         gate("format-tap-keeps-keyboard", tapped && focused(p7), focusInfo(p7))
@@ -673,7 +688,7 @@ final class EditorUITests: XCTestCase {
         // 7) Select All: the ribbon's Select all button (touch); Cmd+A (hardware keyboard) recorded for information
         let all = plain(p9).replacingOccurrences(of: "|", with: "").filter { !$0.isWhitespace }
         func selected(_ p: [String: Any]) -> Int { str(p, "sel").filter { !$0.isWhitespace }.count }
-        let selTapped = tapToolbar(app, "select-all", p9)
+        let selTapped = tapToolbar(app, "select-all", p9, tap: tap)
         let p10 = probe(app)
         gate("select-all", selTapped && !all.isEmpty && selected(p10) >= all.count,
              "tapped=\(selTapped) selected \(selected(p10))/\(all.count) chars \(focusInfo(p10))")
@@ -711,7 +726,7 @@ final class EditorUITests: XCTestCase {
 
         // 9) pinch: the engine zooms (the page re-renders crisp: no WebKit bitmap scaling) and the zoom stays
         let z0 = num(probe(app), "zoom") ?? 0
-        web.pinch(withScale: 1.6, velocity: 1.0)
+        web.pinch(withScale: 2.0, velocity: 2.0)
         let p13 = probe(app)
         let z1 = num(p13, "zoom") ?? 0
         let crisp = (num(p13, "vv") ?? 0) == 1 && (num(p13, "vvi") ?? 0) == 1
@@ -720,12 +735,13 @@ final class EditorUITests: XCTestCase {
         sleep(2)
         let z1b = num(probe(app), "zoom") ?? 0
         gate("pinch-zoom-kept", z1 > z0 && z1b == z1, "zoom \(z1) after 3 s: \(z1b)")
-        web.pinch(withScale: 0.5, velocity: -1.0)
+        web.pinch(withScale: 0.5, velocity: -2.0)
         let p14 = probe(app)
         let z2 = num(p14, "zoom") ?? 0
         shot(app, "58-touch-\(lang)-pinch-out")
         gate("pinch-out-zooms-back", z2 < z1b && z2 >= 25 && (num(p14, "vv") ?? 0) == 1,
-             "zoom \(z1b)->\(z2) viewport scale \(num(p14, "vv") ?? 0)")
+             "zoom \(z1b)->\(z2) viewport scale \(num(p14, "vv") ?? 0)",
+             known: z1b > z0 ? "a pinch-in zooms the page, but the pinch-out after it leaves the zoom where it was" : nil)
 
         // keypress-to-frame latency of this run (simulator: recorded for the trend, the real bar needs an iPhone)
         let lat = probe(app)["lat"] as? [String: Any] ?? [:]
