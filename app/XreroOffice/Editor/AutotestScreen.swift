@@ -7,6 +7,7 @@ import SwiftUI
 struct AutotestScreen: View {
     @State private var document: OfficeDocument
     @State private var state = "loading"
+    @State private var showAbout = false
     @StateObject private var controller = EditorController()
     private let name: String
     private let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -42,6 +43,7 @@ struct AutotestScreen: View {
         .onOpenURL { url in
             guard url.scheme == "xrero-autotest" else { return }
             if url.host == "save" { controller.save() }
+            if url.host == "about" { showAbout = true }      // About & Licences over the open editor
             if url.host == "pdfedit" {          // PDF editing test: rotate page 1, add a page, add a free-text box
                 let js = """
                 (function(){var f=document.querySelector('iframe');var w=f&&f.contentWindow;var ed=w&&w.Asc&&w.Asc.editor;
@@ -51,6 +53,7 @@ struct AutotestScreen: View {
                 controller.coordinator?.web?.evaluateJavaScript(js) { r, e in handle("log", "pdfedit: \(r ?? e?.localizedDescription ?? "?")") }
             }
         }
+        .sheet(isPresented: $showAbout) { AboutSheet() }
     }
 
     private func handle(_ cmd: String, _ param: String) {

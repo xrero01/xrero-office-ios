@@ -27,6 +27,13 @@ struct AccountView: View {
                 } else {
                     signedOut
                 }
+                // the editor's top bar opens this sheet too: About & Licences is reachable from inside a document
+                Section {
+                    NavigationLink { AboutView() } label: {
+                        Label(ar ? "حول التطبيق والتراخيص" : "About & Licences", systemImage: "info.circle")
+                    }
+                    .accessibilityIdentifier("xr-acct-about")
+                }
             }
             .navigationTitle(ar ? "حساب Xrero" : "Xrero account")
             .navigationBarTitleDisplayMode(.inline)
