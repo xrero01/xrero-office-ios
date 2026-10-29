@@ -78,7 +78,8 @@ jobs:
               # let the app (and the system's file index for its folder) start once before any file appears there
               xcrun simctl launch $DEV com.xrero.office; sleep 12; xcrun simctl terminate $DEV com.xrero.office; sleep 3
               cp store/samples/sales_en.xlsx store/samples/deck_en.pptx "$C/Documents/"
-              # that preparation launch is not the user's first launch: show the one-time welcome card again
+              # that preparation launch is not the user's first launch. It cannot answer the Home account card (only
+              # Not now or signing in does), but clear the flag anyway so the recording always starts like a first launch
               xcrun simctl spawn $DEV defaults delete "$C/Library/Preferences/com.xrero.office" xr.welcomeShown || true; xcrun simctl spawn $DEV defaults read "$C/Library/Preferences/com.xrero.office" || true ;;
           esac
           ls -la "$C/Documents"

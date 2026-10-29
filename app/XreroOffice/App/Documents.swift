@@ -69,6 +69,7 @@ enum L {
     static var ar: Bool { AppLanguage.current == "ar" }
     static var new: String { ar ? "جديد" : "New" }
     static var cancel: String { ar ? "إلغاء" : "Cancel" }
+    static var ok: String { ar ? "حسناً" : "OK" }
     static var documents: String { ar ? "المستندات" : "Documents" }
     static var cannotOpen: String { ar ? "تعذّر فتح الملف" : "Couldn't open the file" }
     static var cannotCreate: String { ar ? "تعذّر إنشاء الملف" : "Couldn't create the file" }

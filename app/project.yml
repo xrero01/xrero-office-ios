@@ -34,6 +34,8 @@ targets:
         PRODUCT_NAME: XreroOffice
         INFOPLIST_FILE: XreroOffice/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # Xrero teal (Assets.xcassets/AccentColor) as the app-wide tint instead of system blue
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         SUPPORTS_MACCATALYST: NO
         SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: YES
         SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD: NO

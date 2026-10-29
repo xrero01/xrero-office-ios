@@ -7,11 +7,13 @@ struct HomeScene: View {
     @StateObject private var opener = DocumentOpener()
     @ObservedObject private var recents = RecentFiles.shared
     @ObservedObject private var account = XreroAccount.shared
-    @AppStorage("xr.welcomeShown") private var welcomeShown = false
+    /// The optional account has been offered and answered: "Not now" on the Home card, signing in, or (20.1) the
+    /// first-launch sheet. The key is the 20.1 one, so an update does not offer the account a second time.
+    @AppStorage("xr.welcomeShown") private var accountOffered = false
     @State private var showAccount = false
-    @State private var welcome = false
     @State private var missing: String?
     @Environment(\.horizontalSizeClass) private var hsc
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var ar: Bool { L.ar }
 
@@ -20,6 +22,7 @@ struct HomeScene: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
                     header
+                    if !accountOffered && !account.isSignedIn { accountCard }
                     tiles
                     browseButton
                     recentSection
@@ -43,23 +46,19 @@ struct HomeScene: View {
         }
         .background(PresenterAnchor(opener: opener).frame(width: 0, height: 0))
         .environment(\.layoutDirection, ar ? .rightToLeft : .leftToRight)
-        .sheet(isPresented: $showAccount) { AccountView(welcome: welcome) }
-        .onChange(of: showAccount) { _, shown in if !shown { welcome = false } }
+        .sheet(isPresented: $showAccount) { AccountView() }
+        .onChange(of: account.isSignedIn) { _, signedIn in if signedIn { accountOffered = true } }
         .alert(ar ? "تعذّر العثور على الملف" : "File not found", isPresented: Binding(
             get: { missing != nil }, set: { if !$0 { missing = nil } })) {
-            Button("OK", role: .cancel) {}
+            Button(L.ok, role: .cancel) {}
         } message: { Text(missing ?? "") }
         .onOpenURL { url in
             if url.isFileURL { opener.openExternal(url) }        // "Open in Xrero Office" from Files / Share
         }
         .task {
+            // no sign-in wall: the account is optional and never presented by itself (the Home card offers it)
             await XreroAccount.shared.refresh()
-            NSLog("XR start welcomeShown=%ld signedIn=%ld", welcomeShown ? 1 : 0, XreroAccount.shared.isSignedIn ? 1 : 0)
-            if !welcomeShown && !XreroAccount.shared.isSignedIn {    // once: the optional Xrero account
-                welcomeShown = true
-                welcome = true
-                showAccount = true
-            }
+            NSLog("XR start accountOffered=%ld signedIn=%ld", accountOffered ? 1 : 0, XreroAccount.shared.isSignedIn ? 1 : 0)
         }
     }
 
@@ -81,6 +80,48 @@ struct HomeScene: View {
                 .foregroundStyle(.secondary)
         }
         .padding(.top, 4)
+    }
+
+    /// The optional Xrero account, offered inline until answered, so new users reach their documents at once.
+    private var accountCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "person.crop.circle")
+                    .font(.system(size: 28))
+                    .foregroundStyle(Color.xrTeal)
+                    .accessibilityHidden(true)
+                Text(ar ? "تستخدم Xrero على ويندوز؟ سجّل الدخول بنفس الحساب. اختياري."
+                        : "Use Xrero on Windows? Sign in to use the same account. Optional.")
+                    .font(.subheadline)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            HStack(spacing: 8) {
+                Button { showAccount = true } label: {
+                    Text(ar ? "تسجيل الدخول" : "Sign in")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Color.xrOnTeal)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier("xr-home-signin")
+                Button {
+                    withAnimation(reduceMotion ? nil : Animation.default) { accountOffered = true }
+                } label: {
+                    Text(ar ? "ليس الآن" : "Not now")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("xr-home-signin-later")
+            }
+            .controlSize(.large)                                     // 44 pt+ touch targets
+        }
+        .tint(Color.xrTeal)
+        .padding(14)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("xr-home-account-card")
     }
 
     private var tiles: some View {
@@ -165,16 +206,16 @@ struct HomeTile: Identifiable {
     let title: (en: String, ar: String)
     let detail: (en: String, ar: String)
 
-    // Xrero's own colours and generic symbols: the kinds are told apart at a glance without Microsoft's Office colours,
-    // icons or product names (the subtitles name the file format only)
+    // Xrero's own colours (Assets.xcassets Kind*, Color+Xrero.swift) and generic symbols: the kinds are told apart at a
+    // glance without Microsoft's Office colours, icons or product names (the subtitles name the file format only)
     static let all: [HomeTile] = [
-        HomeTile(id: "word", kind: .word, color: Color(red: 0.231, green: 0.420, blue: 0.851), symbol: "doc.text.fill",
+        HomeTile(id: "word", kind: .word, color: .xrDocument, symbol: "doc.text.fill",
                  title: ("New document", "مستند جديد"), detail: ("Document · .docx", "مستند · ‎.docx")),
-        HomeTile(id: "cell", kind: .cell, color: Color(red: 0.122, green: 0.588, blue: 0.396), symbol: "tablecells.fill",
+        HomeTile(id: "cell", kind: .cell, color: .xrSpreadsheet, symbol: "tablecells.fill",
                  title: ("New spreadsheet", "جدول بيانات جديد"), detail: ("Spreadsheet · .xlsx", "جدول · ‎.xlsx")),
-        HomeTile(id: "slide", kind: .slide, color: Color(red: 0.863, green: 0.369, blue: 0.188), symbol: "rectangle.stack.fill",
+        HomeTile(id: "slide", kind: .slide, color: .xrPresentation, symbol: "rectangle.stack.fill",
                  title: ("New presentation", "عرض تقديمي جديد"), detail: ("Presentation · .pptx", "عرض · ‎.pptx")),
-        HomeTile(id: "pdf", kind: .pdf, color: Color(red: 0.820, green: 0.235, blue: 0.235), symbol: "doc.richtext.fill",
+        HomeTile(id: "pdf", kind: .pdf, color: .xrPDF, symbol: "doc.richtext.fill",
                  title: ("Open a PDF", "فتح ملف PDF"), detail: ("View, fill, annotate", "عرض وتعبئة وتعليق")),
     ]
 

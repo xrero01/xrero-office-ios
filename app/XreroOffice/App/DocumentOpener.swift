@@ -44,7 +44,7 @@ final class DocumentOpener: NSObject, ObservableObject, UIDocumentBrowserViewCon
         browser.allowsDocumentCreation = false
         browser.allowsPickingMultipleItems = false
         browser.delegate = self
-        browser.view.tintColor = UIColor(red: 0.12, green: 0.48, blue: 0.55, alpha: 1)
+        browser.view.tintColor = .xrTeal
         let done = UIBarButtonItem(systemItem: .close, primaryAction: UIAction { [weak browser] _ in
             browser?.dismiss(animated: true)
         })
@@ -156,7 +156,7 @@ final class DocumentOpener: NSObject, ObservableObject, UIDocumentBrowserViewCon
     private func alert(_ title: String, _ message: String) {
         guard let root else { return }
         let a = UIAlertController(title: title, message: message, preferredStyle: .alert)
-        a.addAction(UIAlertAction(title: "OK", style: .default))
+        a.addAction(UIAlertAction(title: L.ok, style: .default))
         top(of: root).present(a, animated: true)
     }
 }
