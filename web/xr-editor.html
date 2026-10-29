@@ -8,8 +8,10 @@
   <title>Xrero Office</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <style>
-    html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; background: #f7f7f7; }
-    @media (prefers-color-scheme: dark) { html, body { background: #333333; } }
+    /* the iOS bar colour of the editor's status bar (xr-host.js neutralChrome): the strip under the home indicator
+       and the first frame before the editor draws match it in light and dark */
+    html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; background: #F9F9F9; }
+    @media (prefers-color-scheme: dark) { html, body { background: #1C1C1E; } }
     /* the editor ends ABOVE the home indicator (its status bar was half under it); the strip below has the status
        bar's colour */
     #wrap { position: absolute; left: env(safe-area-inset-left); right: env(safe-area-inset-right); top: 0;
@@ -27,7 +29,6 @@
     });
     var phone = Math.min(screen.width, screen.height) < 600;
     var lang = q.lang === 'ar' ? 'ar' : 'en';
-    var dark = q.theme ? q.theme === 'dark' : (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches);
     var ext = (/\.([a-z0-9]+)$/i.exec(q.title || '') || [0, 'docx'])[1].toLowerCase();
     var key = 'xr' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
     window.docEditor = new DocsAPI.DocEditor('placeholder', {
@@ -44,7 +45,10 @@
         region: lang === 'ar' ? 'ar-AE' : 'en-US',
         user: { id: 'xr-ios', name: lang === 'ar' ? 'أنا' : 'Me' },
         customization: {
-          uiTheme: dark ? 'theme-dark' : 'theme-light',
+          // follows iOS (the theme really comes from RendererProcessVariable in xr-host.js: desktop mode ignores this)
+          uiTheme: 'theme-system',
+          // line tabs on the toolbar surface (no coloured tab slab); fixed, so an old setting cannot bring the slab back
+          features: { tabStyle: { mode: 'line', change: false }, tabBackground: { mode: 'toolbar', change: false } },
           // ONLYOFFICE: -1 = fit the whole page / slide, -2 = fit the page WIDTH (Main.js zoomFitToPage / zoomFitToWidth).
           // Slides: the whole slide everywhere. Word / PDF on phones and portrait iPads: page width (fit-page shrank the
           // text to ~4 pt once the keyboard took half the height). Landscape iPad 100%, spreadsheets on iPad 120%.

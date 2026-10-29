@@ -173,6 +173,43 @@ struct AutotestScreen: View {
                     }
                 }
             }
+            if url.host == "appearance" {       // M6: switch the editor to dark / back to light the way iOS does (a trait
+                                                // change on the web view -> the live switch, no reload)
+                let dark = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "dark" }?.value == "1"
+                controller.coordinator?.web?.overrideUserInterfaceStyle = dark ? .dark : .light
+                handle("log", "autotest: appearance " + (dark ? "dark" : "light"))
+            }
+            if url.host == "chrome" {           // M6 gate: neutral editor chrome - theme follows the appearance, line
+                                                // tabs, Xrero kind accent on the tab underline, iOS bar colour on the tab
+                                                // row, system font, canvas colour, no tab arrows on touch. Also reports
+                                                // the tab row (web view points) and its scroll position for the swipe test.
+                let q = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+                let want = q.first { $0.name == "want" }?.value == "dark" ? "dark" : "light"
+                let tag = "chrome" + (q.first { $0.name == "n" }?.value ?? "").filter(\.isNumber) + ":"    // this run's answer
+                let js = """
+                (function(){var f=document.querySelector('iframe');var w=f&&f.contentWindow;var d=w&&w.document;if(!d||!d.body)return '\(tag)fail no editor';
+                var want='\(want)',bad=[],b=d.body,cs=w.getComputedStyle(b),p=w.location.pathname;
+                var th=b.classList.contains('theme-night')?'dark':b.classList.contains('theme-white')?'light':'other';if(th!==want)bad.push('theme '+th+' ('+b.className.slice(0,80)+')');
+                var S=w.Common&&w.Common.Utils&&w.Common.Utils.InternalSettings;var ts=S&&S.get('settings-tab-style');if(ts!=='line')bad.push('tab style '+ts);
+                var kind=/spreadsheeteditor/.test(p)?'spreadsheet':/presentationeditor/.test(p)?'presentation':/pdfeditor/.test(p)?'pdf':'document';
+                var acc={light:{document:'#2f6bd8',spreadsheet:'#1e9e5a',presentation:'#e0612f',pdf:'#c62828'},dark:{document:'#7aa7f0',spreadsheet:'#4cc38a',presentation:'#ff8a65',pdf:'#ff6b6b'}}[want][kind];
+                var tok=function(n){var v=cs.getPropertyValue(n).trim().toLowerCase();var m=/^var\(--([\w-]+)\)$/.exec(v);return m?cs.getPropertyValue('--'+m[1]).trim().toLowerCase():v;};
+                var u=tok('--highlight-toolbar-tab-underline-'+kind);if(u!==acc)bad.push('accent '+u+' want '+acc);
+                var cv=tok('--canvas-background');if(cv!==(want==='dark'?'#000':'#f2f2f7'))bad.push('canvas '+cv);
+                var ul=d.querySelector('.toolbar .tabs > ul'),bgOf=function(e){while(e&&e.nodeType===1){var c=w.getComputedStyle(e).backgroundColor;if(c&&c!=='transparent'&&!/, 0\)$/.test(c))return c;e=e.parentNode;}return 'none';};
+                var bg=ul?bgOf(ul):'no tabs';if(bg!==(want==='dark'?'rgb(28, 28, 30)':'rgb(249, 249, 249)'))bad.push('tab row '+bg);
+                var a=d.querySelector('.toolbar .tabs .ribtab > a');var ff=a?w.getComputedStyle(a).fontFamily:'';if(!/apple-system|system-ui/.test(ff))bad.push('font '+ff.slice(0,40));
+                var coarse=!w.matchMedia('(any-pointer:fine)').matches;var arrows=[].slice.call(d.querySelectorAll('.toolbar .tabs .scroll')).filter(function(e){return e.offsetParent;}).length;if(coarse&&arrows)bad.push('tab arrows '+arrows);
+                var r=ul&&ul.getBoundingClientRect(),o=f.getBoundingClientRect();
+                var info=want+' '+kind+' tabs='+(r?Math.round(o.left+r.left)+','+Math.round(o.left+r.right)+','+Math.round(o.top+r.top+r.height/2)+','+Math.round(Math.abs(ul.scrollLeft))+','+(ul.scrollWidth-ul.clientWidth):'none');
+                return bad.length?'\(tag)fail '+bad.join('; ')+' ('+info+')':'\(tag)ok ('+info+')';})()
+                """
+                controller.coordinator?.web?.evaluateJavaScript(js) { r, e in
+                    let res = (r as? String) ?? tag + "fail " + (e?.localizedDescription ?? "no result")
+                    handle("log", res)
+                    state = res
+                }
+            }
             if url.host == "geom" {             // iPad layout gate (M3): status bar, sheet tabs, ribbon, settings panel
                 // Inside the editor frame: visible status-bar controls must not overlap, no empty label pills, nothing
                 // under the window-resize corner (28 pt), spreadsheets show at least one sheet tab, ribbon buttons and

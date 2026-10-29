@@ -17,6 +17,20 @@ mkdir -p "$OUT/x2t"
 cp "$ROOT/web/x2t-worker.js" "$ROOT/vendor/x2t-wasm/x2t.js" "$ROOT/vendor/x2t-wasm/x2t.wasm" "$OUT/x2t/"
 cp -R "$ROOT/fonts-gen" "$OUT/fonts-gen"
 python3 "$ROOT/scripts/patch_amd_deps.py" "$OUT/editors/web-apps"
+# 20.3 (M6): the Windows build paints its modern-theme header in the Office kind colours with white text
+# (/*XR-HEADER*/ ... /*XR-HEADER-END*/ in each editor's app.css). The iPhone / iPad chrome is neutral, with Xrero's
+# own kind accents (xr-host.js neutralChrome) - drop that block from this bundle only; Windows is unchanged.
+python3 - "$OUT/editors/web-apps/apps" <<'PY'
+import glob, re, sys
+n = 0
+for f in glob.glob(sys.argv[1] + '/*/main/resources/css/*.css'):
+    s = open(f, encoding='utf-8').read()
+    t = re.sub(r'/\*XR-HEADER\*/.*?/\*XR-HEADER-END\*/', '', s, flags=re.S)
+    if t != s:
+        open(f, 'w', encoding='utf-8').write(t); n += 1
+    assert 'XR-HEADER' not in t, f
+print('Office-coloured header block removed from', n, 'stylesheets')
+PY
 rm -f "$OUT/editors/sdkjs/common/AllFonts.js"          # the app serves fonts-gen/AllFonts.js in its place
 cp "$ROOT/fonts-src/LICENSES.md" "$OUT/fonts-gen/LICENSES.md"
 test -f "$OUT/editors/web-apps/apps/documenteditor/main/index.html"

@@ -25,8 +25,15 @@ struct EditorWebView: UIViewRepresentable {
         #if DEBUG
         if #available(iOS 16.4, *) { web.isInspectable = true }
         #endif
+        // the editor's canvas colour (#F2F2F7 light / #000000 dark = systemGroupedBackground), so opening and the
+        // light/dark switch show no white flash
         web.isOpaque = false
-        web.backgroundColor = .systemBackground
+        web.backgroundColor = .systemGroupedBackground
+        web.scrollView.backgroundColor = .systemGroupedBackground
+        // live light / dark (M6): the editors follow iOS without a reload (a reload would lose undo and selection)
+        web.registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (view: WKWebView, _: UITraitCollection) in
+            c.appearanceChanged(dark: view.traitCollection.userInterfaceStyle == .dark)
+        }
         web.scrollView.contentInsetAdjustmentBehavior = .never
         web.scrollView.bounces = false
         web.scrollView.isScrollEnabled = false        // the editors scroll their own canvas
@@ -63,6 +70,8 @@ struct EditorWebView: UIViewRepresentable {
         weak var web: WKWebView?
         var offsetLock: NSKeyValueObservation?
         var loadedLang = ""
+        /// "light" / "dark": the appearance the open editor was given (at load or by the last live switch)
+        var loadedTheme = ""
         private var pickReply: ((Any?, String?) -> Void)?
         var onSaved: (() -> Void)?
 
@@ -100,6 +109,7 @@ struct EditorWebView: UIViewRepresentable {
             edited = false
             armWatchdog()
             loadedLang = parent.lang
+            loadedTheme = web.traitCollection.userInterfaceStyle == .dark ? "dark" : "light"
             resources.media.removeAll()
             web.configuration.userContentController.removeAllUserScripts()
             let ucc = web.configuration.userContentController
@@ -210,6 +220,21 @@ struct EditorWebView: UIViewRepresentable {
                 parent.onCommand("log", body["m"] as? String ?? "")
             default:
                 replyHandler(nil, "unknown command")
+            }
+        }
+
+        /// iOS switched light / dark: tell the editor frame the way the desktop shell does (Desktop.js
+        /// 'renderervars:changed' -> Themes.refreshTheme, which swaps the theme in place). Once per real change only;
+        /// never on the keystroke path.
+        func appearanceChanged(dark: Bool) {
+            let t = dark ? "dark" : "light"
+            guard t != loadedTheme, let web else { return }
+            loadedTheme = t
+            let js = "(function(){var f=document.querySelector('iframe');var w=f&&f.contentWindow;" +
+                "if(!w||!w.on_native_message)return 'no editor frame';" +
+                "w.on_native_message('renderervars:changed',JSON.stringify({theme:{system:'\(t)'}}));return 'ok';})()"
+            web.evaluateJavaScript(js) { [weak self] result, error in
+                self?.parent.onCommand("log", "appearance \(t): " + ((result as? String) ?? error?.localizedDescription ?? "?"))
             }
         }
 

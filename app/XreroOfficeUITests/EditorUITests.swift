@@ -68,6 +68,58 @@ final class EditorUITests: XCTestCase {
         continueAfterFailure = keep
     }
 
+    /// Neutral editor chrome gate (design item M6), iPhone and iPad: the editor opens in the modern light theme with
+    /// line tabs, the Xrero kind accent on the tab underline, the iOS bar colour on the tab row, the system font and
+    /// no tab arrows on touch; a swipe scrolls the tab row when it overflows (phones); switching the app to dark mode
+    /// swaps the editor to the dark set live (no reload: the editor stays ready) and back. Recorded, not fatal, so one
+    /// editor's failure never hides the later results. Runs after the typing / save steps of each test.
+    private var chromeRun = 0
+    /// Runs the Autotest "chrome" probe and waits for THIS run's answer ("chrome<n>:ok ..." / "chrome<n>:fail ...").
+    private func chromeProbe(_ app: XCUIApplication, _ want: String) -> String {
+        chromeRun += 1
+        XCUIDevice.shared.system.open(URL(string: "xrero-autotest://chrome?want=\(want)&n=\(chromeRun)")!)
+        return waitState(app, prefix: "chrome\(chromeRun):", timeout: 20)
+    }
+    private func checkChrome(_ app: XCUIApplication, _ name: String) {
+        let keep = continueAfterFailure
+        continueAfterFailure = true
+        defer { continueAfterFailure = keep }
+        let light = chromeProbe(app, "light")
+        print("XR chrome \(name) light: \(light)")
+        XCTAssertTrue(light.contains(":ok"), "editor chrome (\(name), light): \(light)")
+        // tabs=<left>,<right>,<centre y>,<scrollLeft>,<overflow> in web view points
+        func tabs(_ s: String) -> [Double] {
+            guard let m = s.range(of: "tabs=") else { return [] }
+            return s[m.upperBound...].prefix { $0 != ")" && $0 != " " }.split(separator: ",").compactMap { Double($0) }
+        }
+        let n = tabs(light)
+        if n.count == 5 && n[4] > 8 {                     // the tab row overflows (phones): it must scroll by finger
+            let o = app.webViews.firstMatch.coordinate(withNormalizedOffset: .zero)
+            let rtl = name.hasSuffix("-ar")                // right-to-left: the hidden tabs are on the left
+            let from = o.withOffset(CGVector(dx: rtl ? n[0] + 40 : n[1] - 40, dy: n[2]))
+            let to = o.withOffset(CGVector(dx: rtl ? n[1] - 40 : n[0] + 40, dy: n[2]))
+            from.press(forDuration: 0.1, thenDragTo: to)
+            sleep(1)
+            let after = chromeProbe(app, "light")
+            print("XR chrome \(name) tab swipe: \(after)")
+            shot(app, "07-\(name)-tabs-swiped")
+            let a = tabs(after)
+            XCTAssertTrue(a.count == 5 && a[3] > 0, "the tab row did not scroll under a swipe (\(name)): \(after)")
+        }
+        shot(app, "06-\(name)-chrome-light")
+        XCUIDevice.shared.system.open(URL(string: "xrero-autotest://appearance?dark=1")!)
+        sleep(3)
+        let dark = chromeProbe(app, "dark")
+        print("XR chrome \(name) dark: \(dark)")
+        shot(app, "06-\(name)-chrome-dark")
+        XCTAssertTrue(dark.contains(":ok"), "editor chrome (\(name), dark): \(dark)")
+        XCUIDevice.shared.system.open(URL(string: "xrero-autotest://appearance?dark=0")!)
+        sleep(3)
+        let back = chromeProbe(app, "light")
+        print("XR chrome \(name) back to light: \(back)")
+        XCTAssertTrue(back.contains(":ok"), "editor chrome (\(name), back to light): \(back)")
+    }
+
     /// iPad: the right settings panel, opened in landscape, closes again when the window turns portrait (rotation).
     private func checkIPadRotation(_ app: XCUIApplication, _ name: String) {
         guard UIDevice.current.userInterfaceIdiom == .pad else { return }
@@ -129,6 +181,7 @@ final class EditorUITests: XCTestCase {
         XCTAssertTrue(saved.hasPrefix("saved"), "save did not complete: \(saved)")
         checkIPadLayout(app, "word")         // after the save, so a layout failure never hides the typing result
         checkIPadRotation(app, "word")
+        checkChrome(app, "word")
     }
 
     /// Runs a Home-tab ribbon command by its exact name ("Copy", not "Copy style") and waits until the app reports
@@ -328,6 +381,7 @@ final class EditorUITests: XCTestCase {
         shot(app, "32-pdf-saved")
         XCTAssertTrue(saved.hasPrefix("saved"), "pdf save failed: \(saved)")
         checkIPadLayout(app, "pdf")
+        checkChrome(app, "pdf")
     }
 
     /// Swipes until `e` is on screen (lists are lazy: rows below the fold are not in the tree yet).
@@ -489,6 +543,7 @@ final class EditorUITests: XCTestCase {
             shot(app, "20-" + tag + "-ready")
             XCTAssertEqual(ready, "ready", "\(tag) editor did not become ready")
             checkIPadLayout(app, tag)
+            checkChrome(app, tag)
             app.terminate()
         }
     }
