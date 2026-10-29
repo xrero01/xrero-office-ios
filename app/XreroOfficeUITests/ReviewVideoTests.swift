@@ -315,9 +315,12 @@ final class ReviewVideoTests: XCTestCase {
             XCTAssertTrue(row.exists, "search did not find the recent document")
             XCTAssertFalse(app.buttons.matching(identifier: "xr-home-word").firstMatch.exists, "search kept the create row")
             shot("04b-search")
-            let cancel = app.buttons.matching(NSPredicate(format: "label == 'Cancel'")).firstMatch
-            if cancel.exists { cancel.tap() } else { search.buttons.firstMatch.tap() }
+            // leave search: "Cancel" (iOS 17/18) or the round close button next to the field (iOS 26)
+            let cancel = app.buttons.matching(NSPredicate(format: "label IN {'Cancel', 'Close'}")).firstMatch
+            if cancel.exists && cancel.isHittable { cancel.tap() } else { search.buttons.firstMatch.tap() }
             pause(1)
+            XCTAssertTrue(app.buttons.matching(identifier: "xr-home-word").firstMatch.waitForExistence(timeout: 5),
+                          "the create row did not come back after search")
         } else { XCTFail("no search field over Recent"); dump("search") }
 
         row.press(forDuration: 1.3)
@@ -327,8 +330,11 @@ final class ReviewVideoTests: XCTestCase {
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label == 'Remove from Recent'")).firstMatch.exists,
                       "no Remove from Recent in the context menu")
         shot("04c-context-menu")
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.06)).tap()     // closes the menu, taps nothing
-        pause(1)
+        // a tap on the dimmed background beside the preview closes the menu and reaches nothing under it (the status
+        // bar, tried first, does not close it)
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.45)).tap()
+        pause(1.5)
+        XCTAssertFalse(show.exists, "the context menu did not close")
 
         if row.waitForExistence(timeout: 5) {
             row.swipeLeft()
