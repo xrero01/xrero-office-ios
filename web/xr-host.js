@@ -43,10 +43,49 @@
   var TABLET = Math.min(screen.width, screen.height) >= 600 &&
     ((navigator.maxTouchPoints || 0) > 1 || /xrtouch/.test((function () { try { return top.location.search; } catch (e) { return ''; } })()));
 
-  // portrait iPads: the settings panel on the right takes a third of the width - start every document with it closed
-  // (the editors remember "closed by the user" per editor; the panel's side button still opens it)
-  if (TABLET && window.innerWidth < 1000) {
+  // portrait (or narrow) iPads: the settings panel on the right takes a third of the width - start every document
+  // with it closed (the editors remember "closed by the user" per editor; the panel's side button still opens it).
+  // Orientation, not a width: the 13-inch iPad Pro is 1032 pt wide in PORTRAIT, so the old "< 1000" kept it open.
+  // Same rule as hideRightMenu in xr-editor.html.
+  var narrowWindow = function () { return window.innerWidth < window.innerHeight || window.innerWidth < 1100; };
+  if (TABLET && narrowWindow()) {
     try { ['de', 'pe', 'sse', 'pdfe'].forEach(function (p) { localStorage.setItem(p + '-hide-right-settings', 'true'); }); } catch (e) {}
+  }
+  // ...and when the window turns portrait / narrow later (rotation, Split View), close it again through the panel's
+  // own button (the editor's controller then keeps its state and the remembered setting in step). Only on a WIDTH
+  // change: the keyboard changes the height alone, and a panel the user opened must not shut while they type.
+  if (TABLET) {
+    var lastW = window.innerWidth, rmTimer = 0;
+    window.addEventListener('resize', function () {
+      clearTimeout(rmTimer);
+      rmTimer = setTimeout(function () {
+        var w = window.innerWidth;
+        if (w === lastW) return;
+        lastW = w;
+        if (!narrowWindow()) return;
+        closeRightPanel();
+      }, 300);
+    });
+  }
+  // Collapse the right settings panel to its button column through the editor's RightMenu controller (the same
+  // clearSelection the editors call themselves) and remember it like a user's close. Fallback: the active side button.
+  function closeRightPanel() {
+    var btn = document.querySelector('#right-menu .btn.active');      // only the editor frame has the panel
+    if (!btn || !btn.offsetParent) return;                            // already closed / not an editor frame
+    var apps = { de: window.DE, pe: window.PE, sse: window.SSE, pdfe: window.PDFE };
+    for (var p in apps) {
+      var ctl = null;
+      try { ctl = apps[p] && apps[p].getController && apps[p].getController('RightMenu'); } catch (e) {}
+      if (ctl && ctl.rightmenu && ctl.rightmenu.clearSelection) {
+        try {
+          ctl.rightmenu.clearSelection();
+          Common.localStorage.setItem(p + '-hide-right-settings', 1);
+          Common.Utils.InternalSettings.set(p + '-hide-right-settings', true);
+          return;
+        } catch (e) { log('right panel', e); }
+      }
+    }
+    try { btn.click(); } catch (e) { log('right panel', e); }
   }
 
   // 20.2: earlier versions stored a zoom the editors read before the configured one (de-/pe-/pdfe-/sse- settings-zoom
@@ -129,7 +168,9 @@
         // Excel: bigger sheet tabs
         '#statusbar #status-sheets-bar li>span,#statusbar #status-sheets-bar li a{line-height:40px!important;height:40px!important;font-size:15px!important;padding:0 14px!important}';
     } else if (TABLET) {
-      // iPad: the full ribbon fits; rows and the status bar get touch-sized (40 / 44 pt) in the same iOS style
+      // iPad: the full ribbon fits; rows and the status bar get touch-sized (40 pt rows, 50 pt status bar, 44 pt
+      // buttons) in the same iOS style
+      var SSE = /spreadsheeteditor/.test(location.pathname);
       css += '#app-title,#box-document-title{height:40px!important}' +
         '#box-document-title .btn{min-width:42px!important;height:36px!important;margin:2px!important;border-radius:9px!important}' +
         '#box-document-title .btn .icon{transform:scale(1.2)}' +
@@ -139,21 +180,55 @@
         '.toolbar .tabs a{outline:none!important}' +
         '.toolbar .tabs .scroll{line-height:40px!important;height:40px!important;background:transparent!important}' +
         '.toolbar .box-controls .btn-toolbar{min-width:30px}' +
+        // the ribbon's own height rule is "tabs row + controls row" with the stock 28 / 32 px tabs row (a less constant,
+        // not a variable). The 40 pt tabs above took 8-12 px from the controls row, so the bottom of "Edit PDF" and
+        // the second row of small icons were cut off: give the box the 40 pt row plus the full controls row
+        // (fitRibbon below makes the layout reserve the same height, so nothing lies over the page)
+        '.toolbar:not(.folded),.top-title>.toolbar:not(.folded),.toolbar.folded.expanded,.top-title>.toolbar.folded.expanded{' +
+          'height:calc(40px + var(--toolbar-height-controls,66px))!important}' +
+        '.toolbar.folded:not(.expanded),.top-title>.toolbar.folded:not(.expanded){height:40px!important}' +
         '#statusbar #btn-cnt-lang,#statusbar #btn-doc-lang,#statusbar #btn-doc-spell,#statusbar #btn-zoom-topage,' +
           '#statusbar #btn-zoom-towidth,#statusbar #status-btn-select-tool,#statusbar #status-btn-hand-tool{display:none!important}' +
-        '#statusbar .status-group.cnt-flex-center{justify-content:flex-end;flex:1 1 auto}' +
-        'body{--statusbar-height:44px!important}' +
-        '#statusbar{height:44px!important;border-top:.5px solid rgba(0,0,0,.12)!important}' +
-        '#statusbar>.statusbar{height:44px!important;align-items:center!important;padding:0 12px!important;box-sizing:border-box}' +
-        '#statusbar .status-group{display:flex;align-items:center;height:44px!important;gap:6px}' +
+        // labels the editors leave empty (the "action" label, a blank page counter) drew as empty grey pills
+        // (:empty only - the same labels carry real status text, e.g. a save or recalculation message, when set)
+        '#statusbar label:empty{display:none!important}' +
+        'body{--statusbar-height:50px!important}' +
+        '#statusbar{height:50px!important;border-top:.5px solid rgba(0,0,0,.12)!important}' +
+        // the iPadOS window-resize corner sits at the bottom RIGHT (in Arabic too): keep 28 pt free there. The bar is
+        // made the positioning box so the spreadsheet's absolutely placed zoom / sheet boxes respect that margin.
+        '#statusbar>.statusbar{height:50px!important;align-items:center!important;padding:0 12px!important;box-sizing:border-box;' +
+          'position:relative;margin-right:28px!important}' +
         '#statusbar .separator{display:none!important}' +
-        '#statusbar .btn-toolbar{min-width:38px!important;height:34px!important;border-radius:10px!important;' +
+        '#statusbar .btn-toolbar{min-width:44px!important;height:44px!important;border-radius:10px!important;' +
           'align-items:center;justify-content:center}' +
         '#statusbar .btn-toolbar .icon{transform:scale(1.2)}' +
-        '#statusbar label{font-size:14px!important;font-weight:600!important;line-height:32px!important;height:32px!important;' +
-          'padding:0 12px!important;border-radius:16px;background:rgba(127,127,127,.12);margin:0!important}' +
-        '#statusbar #slot-status-btn-preview .btn:not(.dropdown-toggle){height:34px!important;border-radius:17px!important;' +
-          'padding:0 14px!important;font-size:14px!important;font-weight:600!important}';
+        '#statusbar #slot-status-btn-preview .btn:not(.dropdown-toggle){height:40px!important;border-radius:20px!important;' +
+          'padding:0 14px!important;font-size:14px!important;font-weight:600!important}' +
+        (!SSE ?
+          // Word / Slides / PDF: flex groups, the count pill at the start, zoom at the end
+          '#statusbar .status-group{display:flex;align-items:center;height:50px!important;gap:6px}' +
+          '#statusbar .status-group.cnt-flex-center{justify-content:flex-end;flex:1 1 auto}' +
+          '#statusbar label{font-size:14px!important;font-weight:600!important;line-height:34px!important;height:34px!important;' +
+            'padding:0 12px!important;border-radius:17px;background:rgba(127,127,127,.12);margin:0!important}'
+        :
+          // Spreadsheets lay their status bar out themselves: the sheet tabs sit in an absolutely placed box between
+          // the tab buttons and the zoom box, its offsets measured from those boxes' widths. Growing the boxes
+          // (flex:1 like the other editors) pushed the tabs to zero width and the zoom box over + / list.
+          // So: no flex growth here; the scroll arrows go (tabs scroll by swiping) with a zero width the measurement
+          // reads; + and the sheet list are 44 pt; tabs 40 pt with 15 px text and a 2 pt underline on the active one.
+          // (a trackpad / mouse keeps the arrows: any-pointer:fine; VoiceOver uses the sheet list button)
+          '@media not all and (any-pointer:fine){#statusbar #status-tabs-scroll{display:none!important;width:0!important;padding:0!important}}' +
+          '#statusbar #status-addtabs-box{display:flex!important;align-items:center;gap:4px;padding:0 6px!important;flex:0 0 auto!important;' +
+            'height:50px!important}' +
+          '#statusbar #status-zoom-box{display:flex!important;align-items:center;gap:6px;height:50px!important}' +
+          '#statusbar #status-zoom-box .btn-toolbar{margin:0!important}' +
+          '#statusbar #status-label-zoom{font-size:14px!important;font-weight:600!important;line-height:34px!important;height:34px!important;' +
+            'padding:0 12px!important;border-radius:17px;background:rgba(127,127,127,.12);margin:0!important;display:inline-block}' +
+          '#statusbar #status-sheets-bar li>span{font-size:15px!important;line-height:40px!important;height:40px!important;' +
+            'margin-top:5px!important;padding-top:0!important;padding-bottom:0!important}' +
+          '#statusbar #status-sheets-bar li:not(.icon-visible)>span{padding-left:14px!important;padding-right:14px!important}' +
+          '#statusbar #status-sheets-bar li.active>span,#statusbar #status-sheets-bar li.selected>span{' +
+            'box-shadow:inset 0 -2px 0 var(--toolbar-header-spreadsheet,#3A8056)!important}');
     }
     var add = function () {
       if (document.getElementById('xr-host-css')) return;
@@ -519,8 +594,31 @@
     M.prototype.resizeToolbar.__xr = true;
   }
 
+  // iPad: the layout reserves "toolbar-height-normal" for the ribbon. phoneHeights sets it before the viewport is built
+  // when it wins the race with the editor's start-up, but the controls row's real height is only known once the touch
+  // CSS applies. So, once the ribbon exists: measure the tabs row and the controls row, store the real values and,
+  // if the layout reserved less (the bottom of the ribbon was cut off), give the ribbon its height and re-lay out.
+  function fitRibbon() {
+    var S = window.Common && Common.Utils && Common.Utils.InternalSettings;
+    if (!TABLET || !S) return;
+    var tb = document.querySelector('#toolbar .toolbar'), tabs = tb && tb.querySelector('.box-tabs'),
+      bc = tb && tb.querySelector('.box-controls');
+    if (!tb || !tabs || !bc || !bc.offsetHeight || tb.classList.contains('folded')) return;
+    var app = window.DE || window.PE || window.SSE || window.PDFE, vl = null;
+    try { vl = app && app.getController('Viewport').viewport.vlayout; } catch (e) {}
+    var item = vl && vl.getItem && vl.getItem('toolbar');
+    if (!item) return;
+    var ctrl = bc.offsetHeight, normal = tabs.offsetHeight + ctrl;
+    if (S.get('toolbar-height-controls') !== ctrl) S.set('toolbar-height-controls', ctrl);
+    if (S.get('toolbar-height-normal') !== normal) S.set('toolbar-height-normal', normal);
+    if (item.height >= normal) return;
+    item.height = normal;
+    try { Common.NotificationCenter.trigger('layout:changed', 'toolbar'); } catch (e) { log('ribbon', e); }
+  }
+
   function patchEngine() {
     phoneHeights();
+    fitRibbon();
     phoneRibbon();
     // fonts: the desktop loads "ascdesktop://fonts/<id>"; the host maps ids to its bundled files
     if (window.AscFonts && AscFonts.CFontFileLoader) {

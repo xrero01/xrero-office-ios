@@ -113,6 +113,52 @@ struct AutotestScreen: View {
                let t = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "t" })?.value {
                 UIPasteboard.general.string = t
             }
+            if url.host == "rpopen" {           // rotation test (M3): open the right settings panel the way a user does
+                let js = """
+                (function(){var f=document.querySelector('iframe');var d=f&&f.contentWindow&&f.contentWindow.document;if(!d)return 'no editor';
+                var b=[].slice.call(d.querySelectorAll('#right-menu .tool-menu-btns .btn')).filter(function(e){return e.offsetParent&&!e.classList.contains('disabled')&&!e.disabled;})[0];
+                if(!b)return 'no button';if(!b.classList.contains('active'))b.click();return 'clicked';})()
+                """
+                controller.coordinator?.web?.evaluateJavaScript(js) { r, _ in
+                    handle("log", "rpopen: \(r ?? "?")")
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                        let wjs = "(function(){var f=document.querySelector('iframe');var d=f&&f.contentWindow&&f.contentWindow.document;var rm=d&&d.querySelector('#right-menu');return 'rp:'+(rm?Math.round(rm.getBoundingClientRect().width):0);})()"
+                        controller.coordinator?.web?.evaluateJavaScript(wjs) { r2, _ in state = (r2 as? String) ?? "rp:0" }
+                    }
+                }
+            }
+            if url.host == "geom" {             // iPad layout gate (M3): status bar, sheet tabs, ribbon, settings panel
+                // Inside the editor frame: visible status-bar controls must not overlap, no empty label pills, nothing
+                // under the window-resize corner (28 pt), spreadsheets show at least one sheet tab, ribbon buttons and
+                // their captions end inside the toolbar, and the right settings panel is closed in portrait.
+                let js = """
+                (function(){var f=document.querySelector('iframe');var w=f&&f.contentWindow;var d=w&&w.document;if(!d||!d.querySelector('#statusbar'))return 'geom:fail no editor';
+                var bad=[],vis=function(e){if(!e)return false;var r=e.getBoundingClientRect(),s=w.getComputedStyle(e);return r.width>1&&r.height>1&&s.visibility!=='hidden'&&s.display!=='none';};
+                var R=function(e){var r=e.getBoundingClientRect();return {l:r.left,t:r.top,r:r.right,b:r.bottom};};
+                var sb=d.querySelector('#statusbar');var items=[].slice.call(sb.querySelectorAll('.btn-toolbar,label,#status-sheets-bar li>span')).filter(vis).filter(function(e){return !e.closest('.dropdown-menu')&&!(e.tagName==='LABEL'&&e.closest('.btn-toolbar'));});
+                var clip=d.querySelector('#status-sheets-bar-box');var cb=clip&&R(clip);
+                items=items.map(function(e){var r=R(e);if(cb&&clip.contains(e)){r.l=Math.max(r.l,cb.l);r.r=Math.min(r.r,cb.r);}return {e:e,r:r};}).filter(function(o){return o.r.r-o.r.l>1;});
+                for(var i=0;i<items.length;i++)for(var j=i+1;j<items.length;j++){var a=items[i],b=items[j];if(a.e.contains(b.e)||b.e.contains(a.e))continue;
+                 var ox=Math.min(a.r.r,b.r.r)-Math.max(a.r.l,b.r.l),oy=Math.min(a.r.b,b.r.b)-Math.max(a.r.t,b.r.t);if(ox>2&&oy>2)bad.push('overlap '+(a.e.id||a.e.textContent.trim().slice(0,10))+'/'+(b.e.id||b.e.textContent.trim().slice(0,10)));}
+                [].slice.call(sb.querySelectorAll('label')).filter(vis).forEach(function(l){if(!l.textContent.trim())bad.push('empty label '+l.id);});
+                var maxR=0;items.forEach(function(o){maxR=Math.max(maxR,o.r.r);});if(maxR>w.innerWidth-28)bad.push('under resize corner '+Math.round(maxR)+'/'+w.innerWidth);
+                if(/spreadsheeteditor/.test(w.location.pathname)){var tabs=items.filter(function(o){return clip&&clip.contains(o.e)&&o.r.r-o.r.l>20;});if(!tabs.length)bad.push('no sheet tab visible');}
+                var bc=d.querySelector('.toolbar .box-controls'),tb=d.querySelector('#toolbar'),tx=d.querySelector('#toolbar .toolbar');if(vis(bc)&&tb&&tx){var lim=Math.min(R(tb).b,R(tx).b)+1;
+                 if(R(bc).b>lim)bad.push('ribbon row cut '+Math.round(R(bc).b)+'>'+Math.round(lim));
+                 var mid=d.querySelector('#viewport-vbox-layout > .layout-item.middle');if(mid&&R(mid).t<R(tb).b-1)bad.push('ribbon over page '+Math.round(R(mid).t)+'<'+Math.round(R(tb).b));
+                 [].slice.call(bc.querySelectorAll('.panel.active .btn-toolbar, .panel.static .btn-toolbar, .panel.active .btn-toolbar .caption, .panel.static .btn-toolbar .caption')).filter(vis).forEach(function(e){var b=R(e).b,own=e.classList.contains('caption')&&e.closest('.btn-toolbar');
+                  if(b>lim||b>R(bc).b+1)bad.push('ribbon clipped '+(e.id||e.textContent.trim().slice(0,12))+' '+Math.round(b)+'>'+Math.round(Math.min(lim,R(bc).b+1)));
+                  else if(own&&b>R(own).b+6)bad.push('caption below button '+e.textContent.trim().slice(0,12)+' '+Math.round(b)+'>'+Math.round(R(own).b));});}
+                var rm=d.querySelector('#right-menu');var rmw=rm?Math.round(rm.getBoundingClientRect().width):0;if(w.innerWidth<w.innerHeight&&rmw>100)bad.push('right panel open in portrait '+rmw);
+                var S=w.Common&&w.Common.Utils&&w.Common.Utils.InternalSettings;var info='w='+w.innerWidth+'x'+w.innerHeight+' items='+items.length+' rm='+rmw+(bc&&tb?' bc='+Math.round(R(bc).t)+'-'+Math.round(R(bc).b)+' tb='+Math.round(R(tb).t)+'-'+Math.round(R(tb).b):'')+(tx?' tx='+Math.round(R(tx).b):'')+(S?' ctrl='+S.get('toolbar-height-controls')+' normal='+S.get('toolbar-height-normal'):'');
+                return bad.length?'geom:fail '+bad.slice(0,6).join('; ')+' ('+info+')':'geom:ok ('+info+')';})()
+                """
+                controller.coordinator?.web?.evaluateJavaScript(js) { r, e in
+                    let res = (r as? String) ?? "geom:fail " + (e?.localizedDescription ?? "no result")
+                    handle("log", res)
+                    state = res
+                }
+            }
         }
         .sheet(isPresented: $showAbout) { AboutSheet() }
     }

@@ -37,6 +37,40 @@ final class EditorUITests: XCTestCase {
         add(a)
     }
 
+    /// iPad layout gate (design item M3): asks the Autotest screen to measure the editor's DOM - status-bar controls
+    /// do not overlap, no empty pills, nothing under the window-resize corner, sheet tabs visible in spreadsheets,
+    /// ribbon controls inside the toolbar, settings panel closed in portrait. iPad only (the phone layout differs).
+    private func checkIPadLayout(_ app: XCUIApplication, _ name: String) {
+        guard UIDevice.current.userInterfaceIdiom == .pad else { return }
+        XCUIDevice.shared.system.open(URL(string: "xrero-autotest://geom")!)
+        let g = waitState(app, prefix: "geom:", timeout: 20)
+        print("XR geom \(name): \(g)")
+        // recorded, but the test goes on: one editor's layout failure must not hide the later editors' results
+        let keep = continueAfterFailure
+        continueAfterFailure = true
+        XCTAssertTrue(g.hasPrefix("geom:ok"), "iPad layout (\(name)): \(g)")
+        continueAfterFailure = keep
+    }
+
+    /// iPad: the right settings panel, opened in landscape, closes again when the window turns portrait (rotation).
+    private func checkIPadRotation(_ app: XCUIApplication, _ name: String) {
+        guard UIDevice.current.userInterfaceIdiom == .pad else { return }
+        let keep = continueAfterFailure
+        continueAfterFailure = true
+        defer { XCUIDevice.shared.orientation = .portrait; continueAfterFailure = keep }
+        XCUIDevice.shared.orientation = .landscapeLeft
+        sleep(4)
+        XCUIDevice.shared.system.open(URL(string: "xrero-autotest://rpopen")!)
+        let rp = waitState(app, prefix: "rp:", timeout: 15)
+        print("XR rotate \(name) landscape panel: \(rp)")
+        shot(app, "04-\(name)-landscape-panel")
+        XCTAssertGreaterThan(Int(rp.dropFirst(3)) ?? 0, 100, "right panel did not open in landscape: \(rp)")
+        XCUIDevice.shared.orientation = .portrait
+        sleep(4)
+        shot(app, "05-\(name)-rotated-portrait")
+        checkIPadLayout(app, name + "-rotated")       // asserts the panel is closed (rm<=100) in portrait
+    }
+
     /// Save the way a user does: the editor's own Save button; then Cmd+S; then the test hook.
     private func save(_ app: XCUIApplication) -> String {
         let labels = app.webViews.buttons.allElementsBoundByIndex.prefix(25).map { $0.label }
@@ -77,6 +111,8 @@ final class EditorUITests: XCTestCase {
         let saved = save(app)
         shot(app, "03-word-saved")
         XCTAssertTrue(saved.hasPrefix("saved"), "save did not complete: \(saved)")
+        checkIPadLayout(app, "word")         // after the save, so a layout failure never hides the typing result
+        checkIPadRotation(app, "word")
     }
 
     /// Runs a Home-tab ribbon command by its exact name ("Copy", not "Copy style") and waits until the app reports
@@ -203,6 +239,7 @@ final class EditorUITests: XCTestCase {
         let saved = save(app)
         shot(app, "32-pdf-saved")
         XCTAssertTrue(saved.hasPrefix("saved"), "pdf save failed: \(saved)")
+        checkIPadLayout(app, "pdf")
     }
 
     /// Swipes until `e` is on screen (lists are lazy: rows below the fold are not in the tree yet).
@@ -348,14 +385,19 @@ final class EditorUITests: XCTestCase {
         return last
     }
 
-    /// New spreadsheet and presentation open in their editors.
+    /// New spreadsheet and presentation open in their editors (iPad: also in Arabic, where the spreadsheet's status
+    /// bar mirrors its absolutely placed boxes), and pass the iPad layout gate.
     func testSpreadsheetAndPresentationOpen() {
-        for kind in ["cell", "slide"] {
-            let app = launch(["XR_KIND": kind])
+        var runs = [("cell", "en"), ("slide", "en")]
+        if UIDevice.current.userInterfaceIdiom == .pad { runs.insert(("cell", "ar"), at: 1) }
+        for (kind, lang) in runs {
+            let app = launch(["XR_KIND": kind, "XR_LANG": lang])
             let ready = waitState(app, prefix: "ready", timeout: 120)
             sleep(2)
-            shot(app, "20-" + kind + "-ready")
-            XCTAssertEqual(ready, "ready", "\(kind) editor did not become ready")
+            let tag = kind + (lang == "en" ? "" : "-" + lang)
+            shot(app, "20-" + tag + "-ready")
+            XCTAssertEqual(ready, "ready", "\(tag) editor did not become ready")
+            checkIPadLayout(app, tag)
             app.terminate()
         }
     }

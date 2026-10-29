@@ -54,8 +54,9 @@
           compactToolbar: phone,
           compactHeader: phone,
           hideRulers: phone,
-          // phones and portrait iPads: the settings panel on the right starts closed (its side button opens it)
-          hideRightMenu: phone || window.innerWidth < 1000,
+          // phones and portrait / narrow iPads: the settings panel on the right starts closed (its side button opens
+          // it). Orientation, not only a width: a 13-inch iPad Pro is 1032 pt wide in portrait (same rule in xr-host.js)
+          hideRightMenu: phone || window.innerWidth < window.innerHeight || window.innerWidth < 1100,
           // phones: no speaker-notes pane under the slide (View > Notes brings it back)
           hideNotes: phone,
           // phones: the page gets the whole width (side icon columns hidden; their features stay in the tabs)
