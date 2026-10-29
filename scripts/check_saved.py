@@ -4,7 +4,10 @@ xr-test.docx must contain the English (and, if the keyboard could type it, the A
 xr-clip.docx must hold the ribbon Copy/Paste round trip (own copy twice + outside plain text);
 ar_letter.docx must still hold the original Arabic letter after open + save; File > Save As must export ar_letter.odt
 (a real ODT with the letter) without rewriting the original, and the File menu must show no no-op entry;
-the Arabic blanks (xr-test-ar.*, made with the app in Arabic) must come back from the engine still right-to-left.
+the Arabic blanks (xr-test-ar.*, made with the app in Arabic) must come back from the engine still right-to-left;
+the touch / typing gate (plan M14 + F1, EditorUITests.testTouchGateCaretSelectionPinchFocus) must log every check as
+PASS for EN and AR, and its saved xr-touch-<lang>.docx must hold the sentence with the tapped-in letter inside it,
+the word typed after the Bold tap in a bold run, and the 5 Enter presses.
 Prints each editor log."""
 import os, re, sys, zipfile
 import xml.etree.ElementTree as ET
@@ -62,6 +65,60 @@ def arabic_blank_other(p):
     return rtl, "master title right-aligned rtl=%s" % rtl
 
 
+TOUCH = {   # what EditorUITests.touchGate types per language: sentence, tapped-in letter, word typed after Bold, last word
+    "en": ("Extraordinary Wonderful Typewriter", "Q", "Bold", "End"),
+    "ar": ("المستشفيات والمؤسسات الإماراتية", "ق", "عريض", "نهاية"),
+}
+# the checks every language must log (a missing line means the test stopped early: that is a failure too)
+TOUCH_CHECKS = ("editor-ready", "tap-places-caret-first-line", "typing", "line-direction", "tap-moves-caret-into-text",
+                "tap-then-type-inserts-there", "double-tap-selects-word", "long-press-selects-word", "caret-to-line-end",
+                "bold-button-applies", "format-tap-keeps-keyboard", "type-after-format", "enter-x5", "select-all",
+                "sheet-opens-and-closes", "sheet-return-keyboard", "sheet-return-caret", "pinch-in-zooms-page",
+                "pinch-zoom-kept", "pinch-out-zooms-back", "save", "reopen-keeps-text")
+
+
+def touch_gate(d, lang):
+    """the gate lines the UI test logged + the saved document; returns ok"""
+    good = True
+    lg = os.path.join(d, "xr-log-xr-touch-%s.docx.txt" % lang)
+    log = open(lg, encoding="utf-8", errors="replace").read() if os.path.exists(lg) else ""
+    res = {}
+    for m in re.finditer(r"^touch-gate %s ([\w-]+): (PASS|FAIL|INFO)\s*(.*)$" % lang, log, re.M):
+        res[m.group(1)] = (m.group(2), m.group(3))
+    print("Touch gate (%s):" % lang.upper())
+    for name in TOUCH_CHECKS + tuple(k for k in res if k not in TOUCH_CHECKS):
+        st, why = res.get(name, ("NOT LOGGED", ""))
+        print("  %-30s %-10s %s" % (name, st, why[:160]))
+        if name in TOUCH_CHECKS and st != "PASS":
+            good = False
+    sentence, marker, bold_word, end_word = TOUCH[lang]
+    p = os.path.join(d, "xr-touch-%s.docx" % lang)
+    if not os.path.exists(p):
+        print("  xr-touch-%s.docx: MISSING" % lang)
+        return False
+    try:
+        doc = ET.fromstring(zipfile.ZipFile(p).read("word/document.xml"))
+    except Exception as e:
+        print("  xr-touch-%s.docx: cannot read: %s" % (lang, e))
+        return False
+    paras = ["".join(t.text or "" for t in q.iter(W + "t")) for q in doc.iter(W + "p")]
+    first = next((s for s in paras if marker in s or sentence[:6] in s), "")
+    inside = first.replace(marker, "").strip().startswith(sentence) and marker in first \
+        and not first.startswith(marker) and sentence in first.replace(marker, "")
+    bold = False
+    for r in doc.iter(W + "r"):
+        if bold_word in "".join(t.text or "" for t in r.iter(W + "t")):
+            rpr = r.find(W + "rPr")
+            bold |= rpr is not None and (on(rpr.find(W + "b")) or on(rpr.find(W + "bCs")))
+    end_at = max((i for i, s in enumerate(paras) if end_word in s), default=-1)
+    word_at = max((i for i, s in enumerate(paras) if bold_word in s), default=-1)
+    enters = end_at >= 0 and word_at >= 0 and end_at - word_at >= 5
+    saved = inside and bold and enters
+    print("  xr-touch-%s.docx: letter tapped in inside the sentence=%s  word after Bold is bold=%s  5x Enter=%s  first line=%r -> %s"
+          % (lang, inside, bold, enters, first[:80], "OK" if saved else "WRONG"))
+    return good and saved
+
+
 root = sys.argv[1]
 ok = True
 def text(p):
@@ -94,6 +151,8 @@ for dev in sorted(os.listdir(root)) if os.path.isdir(root) else []:
         ok &= good
     else:
         print("xr-clip.docx: MISSING (clipboard copy/paste + save)"); ok = False
+    for lang in ("en", "ar"):                     # touch / typing gate (plan M14 + F1)
+        ok &= touch_gate(d, lang)
     for ext in ("docx", "xlsx", "pptx"):          # Arabic-first blanks (EditorUITests.testArabicBlanksStartRightToLeft)
         b = os.path.join(d, "xr-test-ar." + ext)
         if not os.path.exists(b):

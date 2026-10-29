@@ -476,6 +476,262 @@ final class EditorUITests: XCTestCase {
         return last
     }
 
+    // MARK: - Touch interaction gate (plan M14) + typing safety gate (plan F1)
+
+    /// The editor's latest probe (AutotestScreen polls it every 0.5 s with XR_PROBE=1): waits for one taken after this
+    /// call. Reading a label opens no hook URL, so the probe itself never moves the keyboard focus it measures.
+    private func probe(_ app: XCUIApplication) -> [String: Any] {
+        let label = app.staticTexts["xr-probe"]
+        func read() -> (Int, String) {
+            guard label.exists else { return (-1, "") }
+            let s = label.label
+            guard s.hasPrefix("n="), let bar = s.firstIndex(of: "|") else { return (-1, s) }
+            return (Int(s[s.index(s.startIndex, offsetBy: 2)..<bar]) ?? -1, String(s[s.index(after: bar)...]))
+        }
+        let start = read().0
+        let end = Date().addingTimeInterval(20)
+        while Date() < end {
+            let (n, body) = read()
+            if n >= start + 2, let d = body.data(using: .utf8),
+               let o = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any], o["err"] == nil { return o }
+            Thread.sleep(forTimeInterval: 0.3)
+        }
+        return ["err": "no probe"]
+    }
+
+    private func num(_ p: [String: Any], _ k: String) -> Double? { (p[k] as? NSNumber)?.doubleValue }
+    private func str(_ p: [String: Any], _ k: String) -> String { (p[k] as? String) ?? "" }
+    private func flag(_ p: [String: Any], _ k: String) -> Bool { (p[k] as? NSNumber)?.boolValue ?? false }
+
+    /// The document text without the direction marks the engine may add and with the paragraphs joined by "|".
+    private func plain(_ p: [String: Any]) -> String {
+        String(str(p, "text").unicodeScalars.filter { $0.value != 0x200E && $0.value != 0x200F })
+    }
+
+    /// Keyboard focus as the user feels it: the web view holds first responder (the keyboard) AND the editor's own
+    /// input field is the focused element (where the keyboard's text goes).
+    private func focused(_ p: [String: Any]) -> Bool { flag(p, "fr") && flag(p, "area") }
+
+    private func focusInfo(_ p: [String: Any]) -> String {
+        "fr=\(flag(p, "fr")) area=\(flag(p, "area")) focus=\(str(p, "focus")) hasFocus=\(flag(p, "hasFocus")) kb=\(flag(p, "kb"))"
+    }
+
+    /// A Home-tab ribbon button tapped for real (EN or AR label). Phones fold the ribbon: when the probe says it is
+    /// folded and closed, the Home tab is tapped first, the way a user opens it.
+    private func tapRibbon(_ app: XCUIApplication, _ names: [String], fold: String) -> Bool {
+        if fold == "closed" {
+            let tab = NSPredicate(format: "label == 'Home' OR label == %@", "\u{0627}\u{0644}\u{0631}\u{0626}\u{064A}\u{0633}\u{064A}\u{0629}")   // الرئيسية
+            for type in [XCUIElement.ElementType.link, .button, .staticText] {
+                let t = app.webViews.descendants(matching: type).matching(tab).firstMatch
+                if t.exists && t.isHittable { t.tap(); sleep(1); break }
+            }
+        }
+        var preds: [NSPredicate] = []
+        for n in names { preds.append(NSPredicate(format: "label == %@ OR label BEGINSWITH %@", n, n + " (")) }
+        let b = app.webViews.buttons.matching(NSCompoundPredicate(orPredicateWithSubpredicates: preds)).firstMatch
+        guard b.waitForExistence(timeout: 5), b.isHittable else {
+            print("XR touch web buttons:", app.webViews.buttons.allElementsBoundByIndex.prefix(40).map { $0.label })
+            return false
+        }
+        b.tap()
+        return true
+    }
+
+    /// Touch gate (M14) + typing gate (F1) in a new Word document, in English and in Arabic (app in that language,
+    /// so the Arabic document is the right-to-left blank): tap places the caret, a tap inside the text puts the next
+    /// letter there, double tap and long press select a word, a formatting tap (Bold) keeps the keyboard, 5x Enter,
+    /// Select All, a native sheet returns the keyboard and the caret, pinch zooms the page through the engine (crisp,
+    /// not a magnified bitmap) and the zoom stays, then Save + reopen keeps the text. Taps are placed from the
+    /// caret's measured position, never fixed screen points. Every result goes to the editor log as a
+    /// "touch-gate <lang> <check>: PASS|FAIL" line for check_saved.py, which also checks the saved xr-touch-<lang>.docx.
+    func testTouchGateCaretSelectionPinchFocus() {
+        for lang in ["en", "ar"] { touchGate(lang) }
+    }
+
+    private func touchGate(_ lang: String) {
+        let ar = lang == "ar"
+        // three long words: taps at 18% / 54% / 86% of the line land inside the first / second / third word
+        let sentence = ar ? "\u{0627}\u{0644}\u{0645}\u{0633}\u{062A}\u{0634}\u{0641}\u{064A}\u{0627}\u{062A} \u{0648}\u{0627}\u{0644}\u{0645}\u{0624}\u{0633}\u{0633}\u{0627}\u{062A} \u{0627}\u{0644}\u{0625}\u{0645}\u{0627}\u{0631}\u{0627}\u{062A}\u{064A}\u{0629}"   // المستشفيات والمؤسسات الإماراتية
+                          : "Extraordinary Wonderful Typewriter"
+        let marker = ar ? "\u{0642}" : "Q"                                                        // ق
+        let boldWord = ar ? "\u{0639}\u{0631}\u{064A}\u{0636}" : "Bold"                           // عريض
+        let endWord = ar ? "\u{0646}\u{0647}\u{0627}\u{064A}\u{0629}" : "End"                      // نهاية
+        let app = XCUIApplication()
+        app.launchArguments = ["-xr.lang", lang]
+        app.launchEnvironment = ["XR_KIND": "word", "XR_NEW_NAME": "xr-touch-\(lang).docx", "XR_PROBE": "1"]
+        app.launch()
+        let keep = continueAfterFailure
+        continueAfterFailure = true                  // every check is recorded; one failure must not hide the others
+        var notes: [String] = []
+        func gate(_ name: String, _ ok: Bool, _ detail: String) {
+            let line = "touch-gate \(lang) \(name): \(ok ? "PASS" : "FAIL") \(detail)"
+            print("XR " + line)
+            notes.append(line.replacingOccurrences(of: "\n", with: " "))
+            XCTAssertTrue(ok, line)
+        }
+        defer {
+            // the results into the editor log (one URL at the very end: a hook URL mid-test could move the focus)
+            autotest("note", notes.joined(separator: "\n"))
+            app.terminate()
+            continueAfterFailure = keep
+        }
+        let ready = waitState(app, prefix: "ready", timeout: 120)
+        gate("editor-ready", ready == "ready", ready)
+        guard ready == "ready" else { return }
+        let web = app.webViews.firstMatch
+        XCTAssertTrue(web.waitForExistence(timeout: 10))
+        sleep(2)
+        func tap(_ x: Double, _ y: Double) { web.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: x, dy: y)).tap() }
+
+        // 1) tap the first line: caret there, keyboard up
+        tapFirstLine(app, fallback: CGVector(dx: ar ? 0.65 : 0.35, dy: UIDevice.current.userInterfaceIdiom == .pad ? 0.19 : 0.3))
+        sleep(2)
+        let p0 = probe(app)
+        let x0 = num(p0, "cx"), y0 = num(p0, "cy")
+        gate("tap-places-caret-first-line", x0 != nil && focused(p0), "caret=\(x0 ?? -1),\(y0 ?? -1) \(focusInfo(p0))")
+        shot(app, "50-touch-\(lang)-caret")
+
+        // 2) typing (F1): the sentence arrives
+        typeSlowly(app, sentence)
+        sleep(1)
+        let p1 = probe(app)
+        gate("typing", plain(p1).contains(sentence), "text=\(plain(p1).prefix(80))")
+        guard let sx = x0, let ex = num(p1, "cx"), let ly = num(p1, "cy"), abs(ex - sx) > 60 else {
+            gate("line-measured", false, "line start/end not measurable: start=\(x0 ?? -1) end=\(num(p1, "cx") ?? -1)")
+            return
+        }
+        let dir: Double = ex > sx ? 1 : -1                  // the line runs left-to-right (EN) or right-to-left (AR)
+        gate("line-direction", ar ? dir < 0 : dir > 0, "start=\(sx) end=\(ex)")
+        func at(_ f: Double) -> Double { sx + (ex - sx) * f }
+        func tapEnd() { tap(ex + dir * 30, ly) }           // past the line's end: caret to the end, selection dropped
+
+        // 3) a tap inside the text moves the caret there; the next letter goes in there
+        tap(at(0.54), ly)
+        sleep(1)
+        let p2 = probe(app)
+        let cx2 = num(p2, "cx") ?? -1
+        gate("tap-moves-caret-into-text", cx2 > min(sx, ex) + 4 && cx2 < max(sx, ex) - 4 && str(p2, "sel").isEmpty && focused(p2),
+             "caret x=\(cx2) line \(sx)...\(ex) sel='\(str(p2, "sel"))' \(focusInfo(p2))")
+        typeSlowly(app, marker)
+        sleep(1)
+        let p3 = probe(app)
+        let t3 = plain(p3).components(separatedBy: "|").first ?? ""
+        let inside = t3.hasPrefix(String(sentence.prefix(4))) && t3.replacingOccurrences(of: marker, with: "") == sentence
+            && !t3.hasPrefix(marker) && !t3.hasSuffix(marker)
+        gate("tap-then-type-inserts-there", inside, "line='\(t3)'")
+        shot(app, "51-touch-\(lang)-tap-insert")
+
+        // 4) double tap selects a word
+        web.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: at(0.18), dy: ly)).doubleTap()
+        sleep(1)
+        let p4 = probe(app)
+        let sel4 = str(p4, "sel").trimmingCharacters(in: .whitespacesAndNewlines)
+        gate("double-tap-selects-word", sel4.count >= 4 && !sel4.contains(" ") && t3.contains(sel4),
+             "sel='\(sel4)' menu=\(num(p4, "menu") ?? 0) \(focusInfo(p4))")
+        shot(app, "52-touch-\(lang)-double-tap")
+
+        // 5) long press selects a word
+        tapEnd(); sleep(1)
+        web.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: at(0.86), dy: ly)).press(forDuration: 1.2)
+        sleep(1)
+        let p5 = probe(app)
+        let sel5 = str(p5, "sel").trimmingCharacters(in: .whitespacesAndNewlines)
+        shot(app, "53-touch-\(lang)-long-press")
+        gate("long-press-selects-word", sel5.count >= 4 && !sel5.contains(" ") && t3.contains(sel5),
+             "sel='\(sel5)' web menu=\(num(p5, "menu") ?? 0) native menu=\(app.menuItems.count) \(focusInfo(p5))")
+
+        // 6) a formatting tap keeps the keyboard: caret at the end, Bold, type on
+        tapEnd(); sleep(1)
+        if app.menuItems.count > 0 || (num(probe(app), "menu") ?? 0) > 0 { tapEnd(); sleep(1) }    // drop a menu the long press left
+        let p6 = probe(app)
+        gate("caret-to-line-end", str(p6, "sel").isEmpty && focused(p6), "sel='\(str(p6, "sel"))' \(focusInfo(p6))")
+        let tapped = tapRibbon(app, ["Bold", "\u{0633}\u{0645}\u{064A}\u{0643}"], fold: str(p6, "fold"))   // سميك
+        sleep(1)
+        let p7 = probe(app)
+        gate("bold-button-applies", tapped && flag(p7, "bold"), "tapped=\(tapped) bold=\(flag(p7, "bold"))")
+        gate("format-tap-keeps-keyboard", focused(p7), focusInfo(p7))
+        shot(app, "54-touch-\(lang)-bold")
+        if !focused(p7) { tap(num(p7, "cx") ?? ex, ly); sleep(1) }       // so the later checks still run (logged above)
+        typeSlowly(app, " " + boldWord)
+        sleep(1)
+        let p8 = probe(app)
+        gate("type-after-format", plain(p8).contains(boldWord) && flag(p8, "bold"), "bold=\(flag(p8, "bold")) text=\(plain(p8).prefix(80))")
+        let paras8 = Int(num(p8, "paras") ?? 0)
+        for _ in 0..<5 { app.typeText("\n"); usleep(300_000) }
+        typeSlowly(app, endWord)
+        sleep(1)
+        let p9 = probe(app)
+        let paras9 = Int(num(p9, "paras") ?? 0)
+        gate("enter-x5", paras9 >= paras8 + 5 && plain(p9).hasSuffix(endWord), "paragraphs \(paras8)->\(paras9)")
+
+        // 7) Select All (hardware-keyboard shortcut; on iPad / with a keyboard attached)
+        app.typeKey("a", modifierFlags: .command)
+        sleep(1)
+        let p10 = probe(app)
+        let all = plain(p10).replacingOccurrences(of: "|", with: "").filter { !$0.isWhitespace }
+        let sel10 = str(p10, "sel").filter { !$0.isWhitespace && $0 != "\r" && $0 != "\n" }
+        gate("select-all", !all.isEmpty && sel10.count >= all.count, "selected \(sel10.count)/\(all.count) chars")
+        tapEnd(); sleep(1)
+
+        // 8) a native sheet over the editor: closing it brings back the keyboard and the caret where they were
+        let p11 = probe(app)
+        let caret11 = (num(p11, "cx") ?? -1, num(p11, "cy") ?? -1)
+        let up11 = focused(p11)
+        let open = app.buttons["xr-open-about"]
+        XCTAssertTrue(open.waitForExistence(timeout: 5), "no native control to open a sheet")
+        open.tap()
+        let version = app.staticTexts["xr-about-version"]
+        let shown = version.waitForExistence(timeout: 20)
+        shot(app, "55-touch-\(lang)-sheet")
+        if shown { app.buttons["xr-about-done"].tap() }
+        for _ in 0..<20 where version.exists { usleep(500_000) }
+        sleep(1)
+        let p12 = probe(app)
+        let caret12 = (num(p12, "cx") ?? -2, num(p12, "cy") ?? -2)
+        gate("sheet-opens-and-closes", shown && !version.exists, "shown=\(shown)")
+        gate("sheet-return-keyboard", !up11 || focused(p12), "before: \(focusInfo(p11)) after: \(focusInfo(p12))")
+        gate("sheet-return-caret", abs(caret12.0 - caret11.0) <= 2 && abs(caret12.1 - caret11.1) <= 2,
+             "caret \(caret11) -> \(caret12)")
+        shot(app, "56-touch-\(lang)-sheet-closed")
+        if !focused(p12) { if caret11.0 > 0 { tap(caret11.0, caret11.1) } else { tapEnd() }; sleep(1) }
+
+        // 9) pinch: the engine zooms (the page re-renders crisp: no WebKit bitmap scaling) and the zoom stays
+        let z0 = num(probe(app), "zoom") ?? 0
+        web.pinch(withScale: 2.0, velocity: 2.0)
+        sleep(2)
+        let p13 = probe(app)
+        let z1 = num(p13, "zoom") ?? 0
+        let crisp = (num(p13, "vv") ?? 0) == 1 && (num(p13, "vvi") ?? 0) == 1
+        shot(app, "57-touch-\(lang)-pinch-in")
+        gate("pinch-in-zooms-page", z1 > z0 * 1.15 && crisp, "zoom \(z0)->\(z1) viewport scale \(num(p13, "vv") ?? 0)/\(num(p13, "vvi") ?? 0)")
+        sleep(3)
+        let z1b = num(probe(app), "zoom") ?? 0
+        gate("pinch-zoom-kept", z1 > z0 && z1b == z1, "zoom \(z1) after 3 s: \(z1b)")
+        web.pinch(withScale: 0.5, velocity: -2.0)
+        sleep(2)
+        let p14 = probe(app)
+        let z2 = num(p14, "zoom") ?? 0
+        shot(app, "58-touch-\(lang)-pinch-out")
+        gate("pinch-out-zooms-back", z2 < z1b && z2 >= 25 && (num(p14, "vv") ?? 0) == 1,
+             "zoom \(z1b)->\(z2) viewport scale \(num(p14, "vv") ?? 0)")
+
+        // keypress-to-frame latency of this run (simulator: recorded for the trend, the real bar needs an iPhone)
+        let lat = probe(app)["lat"] as? [String: Any] ?? [:]
+        notes.append("touch-gate \(lang) typing-latency: INFO n=\(num(lat, "n") ?? 0) median=\(num(lat, "med") ?? -1) ms p95=\(num(lat, "p95") ?? -1) ms (simulator)")
+
+        // 10) Save, open again from the saved file: the text is all there
+        let saved = save(app)
+        gate("save", saved.hasPrefix("saved"), saved)
+        autotest("reopen")
+        let again = waitState(app, prefix: "ready", timeout: 120)
+        sleep(2)
+        let p15 = probe(app)
+        let back = plain(p15)
+        gate("reopen-keeps-text", again == "ready" && back.contains(t3) && back.contains(boldWord) && back.contains(endWord),
+             "\(again) text=\(back.prefix(100))")
+        shot(app, "59-touch-\(lang)-reopened")
+    }
+
     /// New spreadsheet and presentation open in their editors (iPad: also in Arabic, where the spreadsheet's status
     /// bar mirrors its absolutely placed boxes), and pass the iPad layout gate.
     func testSpreadsheetAndPresentationOpen() {

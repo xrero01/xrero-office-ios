@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 #if XR_AUTOTEST
 /// CI only (build configuration "Autotest"). Opens one document straight in the editor so XCUITest can type into
@@ -16,6 +17,10 @@ struct AutotestScreen: View {
     @State private var ended = 0                            // "web process ended" log lines seen (the delegate fired)
     @State private var clipCount = 0
     @State private var saveAsFormats: [String] = []
+    @State private var probe = "n=0|{}"                     // touch gate: the editor's caret / selection / zoom / focus
+    @State private var probeSeq = 0
+    @State private var probing = false
+    @State private var keyboardUp = false
     @StateObject private var controller = EditorController()
     private let name: String
     private let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -49,9 +54,20 @@ struct AutotestScreen: View {
                 Text(recovery).font(.system(size: 6)).accessibilityIdentifier("xr-recovery")
                 Text("modified:" + modified).font(.system(size: 6)).accessibilityIdentifier("xr-modified")
                 Button("save") { controller.save() }.font(.system(size: 6)).accessibilityIdentifier("xr-save")
+                // touch gate: a native control over the editor (the real editor's sheets open from its bar), tapped
+                // for real so the test sees what a sheet does to the keyboard - no URL hook in between
+                Button("about") { showAbout = true }.font(.system(size: 6)).accessibilityIdentifier("xr-open-about")
+                // one line, never in the way of a tap: the label is read through accessibility, not looked at
+                Text(probe).font(.system(size: 6)).lineLimit(1).frame(maxWidth: 40, alignment: .leading)
+                    .allowsHitTesting(false).accessibilityIdentifier("xr-probe")
             }
             .opacity(0.02)
         }
+        // touch gate (XR_PROBE=1 only): poll the editor every 0.5 s, so the test reads caret / selection / focus from a
+        // label instead of opening a hook URL - a URL could itself change who holds the keyboard
+        .onReceive(Self.tick) { _ in pollProbe() }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in keyboardUp = true }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in keyboardUp = false }
         // the same Save As list as the real editor screen (the UI test taps a format in it)
         .saveAsCopy(formats: $saveAsFormats, lang: ProcessInfo.processInfo.environment["XR_LANG"] ?? AppLanguage.current,
                     controller: controller)
@@ -70,6 +86,14 @@ struct AutotestScreen: View {
                 controller.coordinator?.web?.evaluateJavaScript(js) { r, _ in state = (r as? String) ?? "caret:none" }
             }
             if url.host == "about" { showAbout = true }      // About & Licences over the open editor
+            if url.host == "note",              // touch gate: the test's results into the editor log (check_saved.py)
+               let t = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "t" })?.value {
+                for line in t.split(separator: "\n") { handle("log", String(line)) }
+            }
+            if url.host == "reopen" {           // typing gate: open the document again from what the last save wrote
+                state = "reopening"
+                controller.coordinator?.load()
+            }
             if url.host == "crash" {            // crash recovery test: end the editor's web process the way iOS does
                 guard let web = controller.coordinator?.web else { return }
                 // WebKit's own test hook (WKWebViewPrivate). Only in this CI build configuration, never in the app.
@@ -207,6 +231,59 @@ struct AutotestScreen: View {
             }
         }
         .sheet(isPresented: $showAbout) { AboutSheet() }
+    }
+
+    /// Touch gate probe (Word): the caret's place on screen (web view points), the selected text, the document text,
+    /// bold at the caret, the engine zoom, the visual viewport scale (1 = WebKit is not magnifying a bitmap), who has
+    /// focus in the editor frame, whether the phone ribbon is folded, plus keypress-to-frame latency samples taken by
+    /// listeners on the editor's input field (simulator figures: informational only). Native side: does the web view
+    /// hold first responder (the keyboard), and is a software keyboard shown.
+    /// One timer for the screen (a publisher made inside body would restart on every redraw the probe causes).
+    private static let tick = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
+
+    private static let probeJS = """
+    (function(){var f=document.querySelector('iframe');var w=f&&f.contentWindow;var d=w&&w.document;var a=w&&w.Asc&&w.Asc.editor;
+     if(!a||!d||!a.WordControl)return JSON.stringify({err:'no editor'});
+     var r={},o=f.getBoundingClientRect(),c=d.getElementById('id_target_cursor');
+     if(c){var sd=c.style.display,sv=c.style.visibility;c.style.display='block';c.style.visibility='visible';var b=c.getBoundingClientRect();
+      c.style.display=sd;c.style.visibility=sv;r.caretShown=(sd!=='none'||sv==='visible');
+      if(b.height>=4){r.cx=Math.round(o.left+b.left);r.cy=Math.round(o.top+b.top+b.height/2);r.ch=Math.round(b.height);}}
+     var ld=a.WordControl.m_oLogicDocument;
+     if(ld){try{r.sel=(ld.IsSelectionUse()&&!ld.IsSelectionEmpty())?(ld.GetSelectedText(false)||''):'';}catch(e){r.sel='';r.selErr=String(e);}
+      try{r.text=ld.Content.map(function(p){return p.GetText?p.GetText({ParaSeparator:''}):'';}).join('|');r.paras=ld.Content.length;}catch(e){r.text='';}
+      try{r.bold=!!ld.GetCalculatedTextPr().Bold;}catch(e){}}
+     r.zoom=a.WordControl.m_nZoomValue;
+     r.vv=window.visualViewport?Math.round(window.visualViewport.scale*100)/100:1;r.vvi=w.visualViewport?Math.round(w.visualViewport.scale*100)/100:1;
+     var ic=w.AscCommon&&w.AscCommon.g_inputContext,A=ic&&ic.HtmlArea,ae=d.activeElement;
+     r.focus=ae?(ae.id||ae.tagName):'';r.area=!!(A&&ae===A);r.hasFocus=d.hasFocus();
+     var bar=d.querySelector('.toolbar.folded');r.fold=bar?(bar.classList.contains('expanded')?'open':'closed'):'none';
+     r.menu=[].slice.call(d.querySelectorAll('.btn-group.open > .dropdown-menu, .dropdown-menu.show')).filter(function(m){return m.getBoundingClientRect().height>4;}).length;
+     if(A&&!w.__xrLat){var L=w.__xrLat=[],pend=false;var on=function(){if(pend)return;pend=true;var t0=w.performance.now();
+      w.requestAnimationFrame(function(){w.requestAnimationFrame(function(){L.push(w.performance.now()-t0);pend=false;});});};
+      A.addEventListener('keydown',on,true);A.addEventListener('input',on,true);}
+     if(w.__xrLat&&w.__xrLat.length){var s=w.__xrLat.slice().sort(function(x,y){return x-y;});
+      r.lat={n:s.length,med:Math.round(s[Math.floor(s.length/2)]),p95:Math.round(s[Math.min(s.length-1,Math.floor(s.length*0.95))])};}
+     return JSON.stringify(r);})()
+    """
+
+    private func pollProbe() {
+        guard ProcessInfo.processInfo.environment["XR_PROBE"] == "1", !probing, let web = controller.coordinator?.web else { return }
+        probing = true
+        web.evaluateJavaScript(Self.probeJS) { r, e in
+            probing = false
+            var o = ((r as? String)?.data(using: .utf8)).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+                ?? ["err": e?.localizedDescription ?? "no result"]
+            o["fr"] = Self.holdsFirstResponder(web)
+            o["kb"] = keyboardUp
+            probeSeq += 1
+            let json = (try? JSONSerialization.data(withJSONObject: o)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+            probe = "n=\(probeSeq)|" + json
+        }
+    }
+
+    /// The web view (its private content view, found by walking the public subview tree) is the first responder.
+    private static func holdsFirstResponder(_ v: UIView) -> Bool {
+        v.isFirstResponder || v.subviews.contains { holdsFirstResponder($0) }
     }
 
     private func handle(_ cmd: String, _ param: String) {
