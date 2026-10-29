@@ -193,10 +193,10 @@ struct AutotestScreen: View {
                 var S=w.Common&&w.Common.Utils&&w.Common.Utils.InternalSettings;var ts=S&&S.get('settings-tab-style');if(ts!=='line')bad.push('tab style '+ts);
                 var kind=/spreadsheeteditor/.test(p)?'spreadsheet':/presentationeditor/.test(p)?'presentation':/pdfeditor/.test(p)?'pdf':'document';
                 var acc={light:{document:'#2f6bd8',spreadsheet:'#1e9e5a',presentation:'#e0612f',pdf:'#c62828'},dark:{document:'#7aa7f0',spreadsheet:'#4cc38a',presentation:'#ff8a65',pdf:'#ff6b6b'}}[want][kind];
-                var tok=function(n){var v=cs.getPropertyValue(n).trim().toLowerCase();var m=/^var\(--([\w-]+)\)$/.exec(v);return m?cs.getPropertyValue('--'+m[1]).trim().toLowerCase():v;};
+                var tok=function(n){var v=cs.getPropertyValue(n).trim().toLowerCase();return v.indexOf('var(--')===0?cs.getPropertyValue(v.slice(4,-1)).trim().toLowerCase():v;};
                 var u=tok('--highlight-toolbar-tab-underline-'+kind);if(u!==acc)bad.push('accent '+u+' want '+acc);
                 var cv=tok('--canvas-background');if(cv!==(want==='dark'?'#000':'#f2f2f7'))bad.push('canvas '+cv);
-                var ul=d.querySelector('.toolbar .tabs > ul'),bgOf=function(e){while(e&&e.nodeType===1){var c=w.getComputedStyle(e).backgroundColor;if(c&&c!=='transparent'&&!/, 0\)$/.test(c))return c;e=e.parentNode;}return 'none';};
+                var ul=d.querySelector('.toolbar .tabs > ul'),bgOf=function(e){while(e&&e.nodeType===1){var c=w.getComputedStyle(e).backgroundColor;if(c&&c!=='transparent'&&c.slice(-4)!==', 0)')return c;e=e.parentNode;}return 'none';};
                 var bg=ul?bgOf(ul):'no tabs';if(bg!==(want==='dark'?'rgb(28, 28, 30)':'rgb(249, 249, 249)'))bad.push('tab row '+bg);
                 var a=d.querySelector('.toolbar .tabs .ribtab > a');var ff=a?w.getComputedStyle(a).fontFamily:'';if(!/apple-system|system-ui/.test(ff))bad.push('font '+ff.slice(0,40));
                 var coarse=!w.matchMedia('(any-pointer:fine)').matches;var arrows=[].slice.call(d.querySelectorAll('.toolbar .tabs .scroll')).filter(function(e){return e.offsetParent;}).length;if(coarse&&arrows)bad.push('tab arrows '+arrows);
