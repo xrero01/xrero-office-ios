@@ -200,6 +200,9 @@ struct AutotestScreen: View {
                 var bg=ul?bgOf(ul):'no tabs';if(bg!==(want==='dark'?'rgb(28, 28, 30)':'rgb(249, 249, 249)'))bad.push('tab row '+bg);
                 var a=d.querySelector('.toolbar .tabs .ribtab > a');var ff=a?w.getComputedStyle(a).fontFamily:'';if(!/apple-system|system-ui/.test(ff))bad.push('font '+ff.slice(0,40));
                 var coarse=!w.matchMedia('(any-pointer:fine)').matches;var arrows=[].slice.call(d.querySelectorAll('.toolbar .tabs .scroll')).filter(function(e){return e.offsetParent;}).length;if(coarse&&arrows)bad.push('tab arrows '+arrows);
+                if(kind==='presentation'){var pb=d.querySelector('.xr-present-btn');if(pb&&pb.offsetParent){var pr=pb.getBoundingClientRect(),pc=w.getComputedStyle(pb).backgroundColor;
+                 var hx=function(c){return 'rgb('+parseInt(c.substr(1,2),16)+', '+parseInt(c.substr(3,2),16)+', '+parseInt(c.substr(5,2),16)+')';};
+                 if(pc!==hx(acc))bad.push('present '+pc);if(pr.height<35||pr.height>37)bad.push('present height '+Math.round(pr.height));}}
                 var r=ul&&ul.getBoundingClientRect(),o=f.getBoundingClientRect();
                 var info=want+' '+kind+' tabs='+(r?Math.round(o.left+r.left)+','+Math.round(o.left+r.right)+','+Math.round(o.top+r.top+r.height/2)+','+Math.round(Math.abs(ul.scrollLeft))+','+(ul.scrollWidth-ul.clientWidth):'none');
                 return bad.length?'\(tag)fail '+bad.join('; ')+' ('+info+')':'\(tag)ok ('+info+')';})()
