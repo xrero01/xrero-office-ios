@@ -342,4 +342,3 @@ final class ReviewVideoTests: XCTestCase {
         XCTAssertTrue(row.exists, "the recent file went away while only looking at its actions")
     }
 }
-}
