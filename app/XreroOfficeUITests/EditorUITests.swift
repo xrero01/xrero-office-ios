@@ -543,6 +543,9 @@ final class EditorUITests: XCTestCase {
                 if tab.exists && tab.isHittable { tab.tap() } else { sleep(1) }
                 p = probe(app)
             }
+            // the panel slides down: measure the button again once it has settled (a rect taken mid-slide is off)
+            sleep(1)
+            p = probe(app)
             if str(p, "fold") == "closed" {
                 print("XR touch toolbar button \(key): the Home panel did not open")
                 return false
