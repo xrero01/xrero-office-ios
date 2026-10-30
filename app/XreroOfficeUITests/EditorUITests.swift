@@ -698,7 +698,10 @@ final class EditorUITests: XCTestCase {
         gate("caret-to-line-end", atLineEnd(p6) && str(p6, "sel").isEmpty && focused(p6),
              "caret x=\(num(p6, "cx") ?? -1) line end \(ex) sel='\(str(p6, "sel"))' \(focusInfo(p6))")
         let tapped = tapToolbar(app, "bold", p6, tap: tap)
-        let p7 = probe(app)
+        var p7 = probe(app)
+        // the button state follows the tap a moment later on the phone (one probe right after the tap read bold=false
+        // on 2 of 3 CI runs while the tap had landed): look again for up to ~2 s, never tap a second time (that toggles)
+        for _ in 0..<3 where tapped && !flag(p7, "bold") { usleep(700_000); p7 = probe(app) }
         gate("bold-button-applies", tapped && flag(p7, "bold"), "tapped=\(tapped) bold=\(flag(p7, "bold")) fold=\(str(p7, "fold"))")
         gate("format-tap-keeps-keyboard", tapped && focused(p7), focusInfo(p7))
         shot(app, "54-touch-\(lang)-bold")
