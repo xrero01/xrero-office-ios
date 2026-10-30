@@ -537,7 +537,16 @@ final class EditorUITests: XCTestCase {
         if str(p, "fold") == "closed" {
             let tab = app.webViews.buttons.matching(NSPredicate(format: "label == 'Home' OR label == %@",
                                                                 "\u{0627}\u{0644}\u{0631}\u{0626}\u{064A}\u{0633}\u{064A}\u{0629}")).firstMatch   // الرئيسية
-            if tab.exists && tab.isHittable { tab.tap(); p = probe(app) }
+            // the tab tap can be missed (seen once on the iPhone in Arabic); a closed panel still reports the button's
+            // rect, and a tap there lands in the page and moves the caret - so tap only once the panel is open
+            for _ in 0..<2 where str(p, "fold") == "closed" {
+                if tab.exists && tab.isHittable { tab.tap() } else { sleep(1) }
+                p = probe(app)
+            }
+            if str(p, "fold") == "closed" {
+                print("XR touch toolbar button \(key): the Home panel did not open")
+                return false
+            }
         }
         guard let xy = (p["btn"] as? [String: Any])?[key] as? [NSNumber], xy.count == 2 else {
             print("XR touch toolbar button \(key) not visible: fold=\(str(p, "fold"))")
