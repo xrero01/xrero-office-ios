@@ -33,11 +33,16 @@ final class EditorUITests: XCTestCase {
         let s = waitState(app, prefix: "caret:", timeout: 10)
         let n = s.dropFirst("caret:".count).split(separator: ",").compactMap { Double($0) }
         print("XR first line:", s)
-        if n.count == 2 {
+        let point = n.count == 2
             // the cursor is in web view points; the web view fills the editor area below the system bar
-            web.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: n[0], dy: n[1])).tap()
-        } else {
-            web.coordinate(withNormalizedOffset: fallback).tap()
+            ? web.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: n[0], dy: n[1]))
+            : web.coordinate(withNormalizedOffset: fallback)
+        point.tap()
+        // seen once on iPad (Arabic blank): the first tap gave no keyboard - one more tap, as a person would
+        if !app.keyboards.firstMatch.waitForExistence(timeout: 4) {
+            print("XR first line: no keyboard after the tap - tapping again")
+            point.tap()
+            _ = app.keyboards.firstMatch.waitForExistence(timeout: 4)
         }
     }
 
@@ -93,6 +98,81 @@ final class EditorUITests: XCTestCase {
         XCTAssertTrue(b.hasPrefix("bridge:ok"), "native bridge / state channel: \(b)")
         XCTAssertTrue(probe.exists && probe.label.contains("undo:1"), "EditorState probe: \(probe.exists ? probe.label : "missing")")
         continueAfterFailure = keep
+    }
+
+    /// Neutral editor chrome gate (design item M6), iPhone and iPad: the editor opens in the modern light theme with
+    /// line tabs, the Xrero kind accent on the tab underline, the iOS bar colour on the tab row, the system font and
+    /// no tab arrows on touch; a swipe scrolls the tab row when it overflows (phones); switching the app to dark mode
+    /// swaps the editor to the dark set live (no reload: the same editor instance, undo kept, the typed text still
+    /// there) and back; in both looks a primary dialog button's label reaches 4.5:1 on its fill; Slides must show its
+    /// Present capsule. Recorded, not fatal, so one editor's failure never hides the later results. Runs after the
+    /// typing / save steps of each test. `has`: text typed earlier that must survive the switch (Word only).
+    private var chromeRun = 0
+    /// Runs the Autotest "chrome" probe and waits for THIS run's answer ("chrome<n>:ok ..." / "chrome<n>:fail ...").
+    private func chromeProbe(_ app: XCUIApplication, _ want: String, has: String = "") -> String {
+        chromeRun += 1
+        let h = has.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
+        XCUIDevice.shared.system.open(URL(string: "xrero-autotest://chrome?want=\(want)&n=\(chromeRun)&has=\(h)")!)
+        return waitState(app, prefix: "chrome\(chromeRun):", timeout: 20)
+    }
+    private func checkChrome(_ app: XCUIApplication, _ name: String, has: String = "") {
+        let keep = continueAfterFailure
+        continueAfterFailure = true
+        defer { continueAfterFailure = keep }
+        // "key=value" from a probe answer (inst / undo / text)
+        func field(_ s: String, _ k: String) -> String {
+            guard let m = s.range(of: " " + k + "=") else { return "" }
+            return String(s[m.upperBound...].prefix { $0 != " " && $0 != ")" })
+        }
+        let light = chromeProbe(app, "light", has: has)
+        print("XR chrome \(name) light: \(light)")
+        XCTAssertTrue(light.contains(":ok"), "editor chrome (\(name), light): \(light)")
+        // tabs=<left>,<right>,<centre y>,<scrollLeft>,<overflow> in web view points
+        func tabs(_ s: String) -> [Double] {
+            guard let m = s.range(of: "tabs=") else { return [] }
+            return s[m.upperBound...].prefix { $0 != ")" && $0 != " " }.split(separator: ",").compactMap { Double($0) }
+        }
+        let n = tabs(light)
+        if n.count == 5 && n[4] > 8 {                     // the tab row overflows (phones): it must scroll by finger
+            let o = app.webViews.firstMatch.coordinate(withNormalizedOffset: .zero)
+            let rtl = name.hasSuffix("-ar")                // right-to-left: the hidden tabs are on the left
+            let from = o.withOffset(CGVector(dx: rtl ? n[0] + 40 : n[1] - 40, dy: n[2]))
+            let to = o.withOffset(CGVector(dx: rtl ? n[1] - 40 : n[0] + 40, dy: n[2]))
+            sleep(1)                                       // the probe's test dialog has finished closing
+            from.press(forDuration: 0.1, thenDragTo: to)
+            sleep(1)
+            var after = chromeProbe(app, "light")
+            if tabs(after).count == 5 && tabs(after)[3] == 0 {   // a swipe that did not take: one more, as a person would
+                print("XR chrome \(name) tab swipe did not move the row - swiping again: \(after)")
+                from.press(forDuration: 0.3, thenDragTo: to)
+                sleep(1)
+                after = chromeProbe(app, "light")
+            }
+            print("XR chrome \(name) tab swipe: \(after)")
+            shot(app, "07-\(name)-tabs-swiped")
+            let a = tabs(after)
+            XCTAssertTrue(a.count == 5 && a[3] > 0, "the tab row did not scroll under a swipe (\(name)): \(after)")
+        }
+        shot(app, "06-\(name)-chrome-light")
+        XCUIDevice.shared.system.open(URL(string: "xrero-autotest://appearance?dark=1")!)
+        sleep(3)
+        let dark = chromeProbe(app, "dark", has: has)
+        print("XR chrome \(name) dark: \(dark)")
+        shot(app, "06-\(name)-chrome-dark")
+        XCTAssertTrue(dark.contains(":ok"), "editor chrome (\(name), dark): \(dark)")
+        // the live switch kept the open editor: same instance (no reload), undo state kept, typed text still there
+        XCTAssertTrue(!field(light, "inst").isEmpty && field(dark, "inst") == field(light, "inst"),
+                      "the dark switch reloaded the editor (\(name)): \(light) -> \(dark)")
+        XCTAssertEqual(field(dark, "undo"), field(light, "undo"), "undo lost by the dark switch (\(name)): \(dark)")
+        if !has.isEmpty {
+            XCTAssertEqual(field(light, "text"), "1", "typed text not found before the dark switch (\(name)): \(light)")
+            XCTAssertEqual(field(dark, "text"), "1", "typed text lost by the dark switch (\(name)): \(dark)")
+        }
+        XCUIDevice.shared.system.open(URL(string: "xrero-autotest://appearance?dark=0")!)
+        sleep(3)
+        let back = chromeProbe(app, "light")
+        print("XR chrome \(name) back to light: \(back)")
+        XCTAssertTrue(back.contains(":ok"), "editor chrome (\(name), back to light): \(back)")
     }
 
     /// iPad: the right settings panel, opened in landscape, closes again when the window turns portrait (rotation).
@@ -159,6 +239,7 @@ final class EditorUITests: XCTestCase {
         checkBridge(app)
         checkIPadLayout(app, "word")
         checkIPadRotation(app, "word")
+        checkChrome(app, "word", has: "English")
     }
 
     /// Runs a Home-tab ribbon command by its exact name ("Copy", not "Copy style") and waits until the app reports
@@ -319,7 +400,14 @@ final class EditorUITests: XCTestCase {
             XCTAssertFalse(app.buttons["xr-saveas-" + ext].exists, "\(ext) offered but not supported")
         }
         XCTAssertTrue(app.buttons["xr-saveas-docx"].firstMatch.exists && app.buttons["xr-saveas-odt"].firstMatch.exists)
+        // the list slides up: a tap during the animation lands on the row that is passing under the finger (seen as
+        // the .odt row lighting up and ".odt" exported again) - tap once it is still, again if nothing came of it
+        sleep(1)
         rtf.tap()
+        if !waitState(app, prefix: "exported:" + base + ".rtf", timeout: 20).hasSuffix(".rtf") && rtf.exists && rtf.isHittable {
+            print("XR save-as path: RTF tap did not take - tapping again")
+            rtf.tap()
+        }
         let second = waitState(app, prefix: "exported:" + base + ".rtf", timeout: 60)
         shot(app, "43-saveas-rtf-exported")
         XCTAssertEqual(second, "exported:" + base + ".rtf", "RTF copy not exported from the Save As list")
@@ -359,6 +447,7 @@ final class EditorUITests: XCTestCase {
         XCTAssertTrue(saved.hasPrefix("saved"), "pdf save failed: \(saved)")
         checkContract(app, "pdf")
         checkIPadLayout(app, "pdf")
+        checkChrome(app, "pdf")
     }
 
     /// Swipes until `e` is on screen (lists are lazy: rows below the fold are not in the tree yet).
@@ -507,11 +596,11 @@ final class EditorUITests: XCTestCase {
         return last
     }
 
-    /// New spreadsheet and presentation open in their editors (iPad: also in Arabic, where the spreadsheet's status
-    /// bar mirrors its absolutely placed boxes), and pass the iPad layout gate.
+    /// New spreadsheet and presentation open in their editors (also in Arabic, where the spreadsheet's status bar
+    /// mirrors its absolutely placed boxes and, on phones, the overflowing tab row scrolls right-to-left), and pass
+    /// the iPad layout gate and the chrome gate.
     func testSpreadsheetAndPresentationOpen() {
-        var runs = [("cell", "en"), ("slide", "en")]
-        if UIDevice.current.userInterfaceIdiom == .pad { runs.insert(("cell", "ar"), at: 1) }
+        let runs = [("cell", "en"), ("cell", "ar"), ("slide", "en")]
         for (kind, lang) in runs {
             let app = launch(["XR_KIND": kind, "XR_LANG": lang])
             let ready = waitState(app, prefix: "ready", timeout: 120)
@@ -521,6 +610,7 @@ final class EditorUITests: XCTestCase {
             XCTAssertEqual(ready, "ready", "\(tag) editor did not become ready")
             if lang == "en" { checkContract(app, tag) }
             checkIPadLayout(app, tag)
+            checkChrome(app, tag)
             app.terminate()
         }
     }

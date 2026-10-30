@@ -31,11 +31,22 @@
   var picked = {};                            // "xr-pick:<n>" -> {name, data}
   var pickSeq = 0;
 
-  window.RendererProcessVariable = {          // theme / direction the desktop shell normally passes in
-    theme: { id: H.theme === 'dark' ? 'theme-dark' : 'theme-light', type: H.theme === 'dark' ? 'dark' : 'light', system: H.theme === 'dark' ? 'dark' : 'light' },
+  // Theme / direction the desktop shell normally passes in. 20.3 (M6): "same as system" - the engine resolves it to its
+  // modern light / dark themes (theme-white / theme-night: neutral chrome, line tabs, modern icons) and follows iOS
+  // live: the app sends 'renderervars:changed' when the appearance changes (EditorWebView), no reload. In desktop mode
+  // customization.uiTheme is ignored; desktopinit copies THIS object into window.uitheme. Colours: neutralChrome below.
+  var SYS = H.theme === 'dark' ? 'dark' : 'light';
+  window.RendererProcessVariable = {
+    theme: { id: 'theme-system', type: SYS, system: SYS },
     localthemes: {},
     rtl: H.lang === 'ar'
   };
+  try {
+    // the live switch (Themes.refreshTheme) only acts when a theme id is stored; a theme picked earlier in the
+    // editor's own settings would otherwise win over iOS. The cached colours of the old theme go too.
+    localStorage.setItem('ui-theme-id', 'theme-system');
+    localStorage.removeItem('ui-theme');
+  } catch (e) {}
 
   // Touch defaults, reset once per version (20.3 F0). The editors read some localStorage values BEFORE the ones the
   // app configures: a desktop-sized zoom (de-/pe-/pdfe-/sse-settings-zoom, *-last-zoom), the desktop tab look
@@ -152,7 +163,7 @@
         '#box-document-title .btn .icon{transform:scale(1.3)}' +
         // the file name is already in the app's top bar
         '#box-document-title #id-box-doc-name,#box-document-title #title-doc-name{display:none!important}' +
-        '.toolbar .tabs>ul>li>a,.toolbar .tabs .ribtab>a{font-size:16px!important;line-height:46px!important;height:46px!important;' +
+        '.toolbar .tabs>ul>li>a,.toolbar .tabs .ribtab>a{font-size:15px!important;line-height:46px!important;height:46px!important;' +
           'padding:0 12px!important}' +
         '.toolbar .box-tabs,.toolbar .tabs{height:46px!important}' +
         '.toolbar .tabs a{outline:none!important}' +
@@ -180,7 +191,7 @@
                   'status-btn-select-tool', 'status-btn-hand-tool', 'status-label-action'];
       css += hide.map(function (id) { return '#statusbar #' + id; }).join(',') + '{display:none!important}' +
         'body{--statusbar-height:50px!important}' +
-        '#statusbar{height:50px!important;border-top:.5px solid rgba(0,0,0,.12)!important}' +
+        '#statusbar{height:50px!important;border-top:.5px solid var(--xr-sep,rgba(0,0,0,.12))!important}' +
         '#statusbar>.statusbar{height:50px!important;align-items:center!important;padding:0 10px!important;box-sizing:border-box}' +
         '#statusbar .status-group{display:flex;align-items:center;height:50px!important;gap:6px}' +
         '#statusbar .status-group.cnt-flex-center{justify-content:flex-end;flex:1 1 auto}' +
@@ -194,7 +205,8 @@
         // Slides: the Present button as a proper pill
         '#statusbar #slot-status-btn-preview .btn-toolbar{background:transparent!important;min-width:0!important}' +
         '#statusbar #slot-status-btn-preview .dropdown-toggle{display:none!important}' +
-        '#statusbar #slot-status-btn-preview .btn:not(.dropdown-toggle){height:40px!important;border-radius:20px!important;' +
+        // (a true capsule: 36 pt high, radius 18)
+        '#statusbar #slot-status-btn-preview .btn:not(.dropdown-toggle){height:36px!important;border-radius:18px!important;' +
           'padding:0 16px!important;font-size:15px!important;font-weight:600!important}' +
         // Slides fit the screen by themselves: no zoom buttons next to Present and the slide count
         (/presentationeditor/.test(location.pathname) ? '#statusbar #btn-zoom-down,#statusbar #btn-zoom-up{display:none!important}' : '') +
@@ -213,7 +225,7 @@
       css += '#app-title,#box-document-title{height:40px!important}' +
         '#box-document-title .btn{min-width:42px!important;height:36px!important;margin:2px!important;border-radius:9px!important}' +
         '#box-document-title .btn .icon{transform:scale(1.2)}' +
-        '.toolbar .tabs>ul>li>a,.toolbar .tabs .ribtab>a{font-size:15px!important;line-height:40px!important;height:40px!important;' +
+        '.toolbar .tabs>ul>li>a,.toolbar .tabs .ribtab>a{font-size:14px!important;line-height:40px!important;height:40px!important;' +
           'padding:0 14px!important}' +
         '.toolbar .box-tabs,.toolbar .tabs{height:40px!important}' +
         '.toolbar .tabs a{outline:none!important}' +
@@ -232,7 +244,7 @@
         // (:empty only - the same labels carry real status text, e.g. a save or recalculation message, when set)
         '#statusbar label:empty{display:none!important}' +
         'body{--statusbar-height:50px!important}' +
-        '#statusbar{height:50px!important;border-top:.5px solid rgba(0,0,0,.12)!important}' +
+        '#statusbar{height:50px!important;border-top:.5px solid var(--xr-sep,rgba(0,0,0,.12))!important}' +
         // the iPadOS window-resize corner sits at the bottom RIGHT (in Arabic too): keep 28 pt free there. The bar is
         // made the positioning box so the spreadsheet's absolutely placed zoom / sheet boxes respect that margin.
         '#statusbar>.statusbar{height:50px!important;align-items:center!important;padding:0 12px!important;box-sizing:border-box;' +
@@ -241,7 +253,7 @@
         '#statusbar .btn-toolbar{min-width:44px!important;height:44px!important;border-radius:10px!important;' +
           'align-items:center;justify-content:center}' +
         '#statusbar .btn-toolbar .icon{transform:scale(1.2)}' +
-        '#statusbar #slot-status-btn-preview .btn:not(.dropdown-toggle){height:40px!important;border-radius:20px!important;' +
+        '#statusbar #slot-status-btn-preview .btn:not(.dropdown-toggle){height:36px!important;border-radius:18px!important;' +
           'padding:0 14px!important;font-size:14px!important;font-weight:600!important}' +
         (!SSE ?
           // Word / Slides / PDF: flex groups, the count pill at the start, zoom at the end
@@ -267,11 +279,85 @@
             'margin-top:5px!important;padding-top:0!important;padding-bottom:0!important}' +
           '#statusbar #status-sheets-bar li:not(.icon-visible)>span{padding-left:14px!important;padding-right:14px!important}' +
           '#statusbar #status-sheets-bar li.active>span,#statusbar #status-sheets-bar li.selected>span{' +
-            'box-shadow:inset 0 -2px 0 var(--toolbar-header-spreadsheet,#3A8056)!important}');
+            'box-shadow:inset 0 -2px 0 var(--highlight-toolbar-tab-underline-spreadsheet,#1E9E5A)!important}');
     }
     var add = function () {
       if (document.getElementById('xr-host-css')) return;
       var s = document.createElement('style'); s.id = 'xr-host-css'; s.textContent = css;
+      (document.head || document.documentElement).appendChild(s);
+    };
+    if (document.documentElement) add();
+    document.addEventListener('DOMContentLoaded', add);
+  })();
+
+  // 20.3 (M6): neutral, coherent editor chrome on every device. The engine's own modern themes (theme-white /
+  // theme-night, picked by "same as system" above) do the layout; this only re-points their colour TOKENS, so every
+  // panel, menu and the canvas (asc_setSkin reads the same tokens) stay consistent and a live light/dark switch just
+  // swaps the token set - nothing here fights individual elements. Surfaces are the iOS bar colours, no coloured
+  // header slab; the kind accent (Xrero's own token file, not Office's hex values) appears only as the active tab's
+  // underline; Xrero teal is the primary-button tint; the chrome uses the system font (never the canvas: the page is
+  // drawn by sdkjs with the document's fonts). Selectors carry :root + :is(...) so they outrank the theme blocks
+  // (":root .theme-white"). Static CSS only - nothing runs while typing.
+  (function neutralChrome() {
+    var K = ':root body:is(.theme-white,.theme-night)';
+    var css =
+      // light tokens (labels: iOS label / secondaryLabel; accents >= 3:1 on the bar for the underline; every filled
+      // button's label >= 4.5:1 on its fill: white on the tint 5:1 / 6.7:1 (pressed), white on --xr-present 4.6:1;
+      // dark mode: BLACK labels on the light tints, 9:1 and more - white there was only 2.3:1)
+      ':root body.theme-white{--xr-bar:#F9F9F9;--xr-canvas:#F2F2F7;--xr-label:#000;--xr-label2:rgba(60,60,67,.75);' +
+        '--xr-sep:rgba(60,60,67,.29);--xr-tint:#1F7A8C;--xr-tint-hi:#196575;--xr-on-accent:#fff;' +
+        '--xr-doc:#2F6BD8;--xr-sheet:#1E9E5A;--xr-slide:#E0612F;--xr-present:#C4502A;--xr-pdf:#C62828}' +
+      ':root body.theme-night{--xr-bar:#1C1C1E;--xr-canvas:#000;--xr-label:#fff;--xr-label2:rgba(235,235,245,.7);' +
+        '--xr-sep:rgba(84,84,88,.65);--xr-tint:#5CB8C9;--xr-tint-hi:#7ACBD8;--xr-on-accent:#000;' +
+        '--xr-doc:#7AA7F0;--xr-sheet:#4CC38A;--xr-slide:#FF8A65;--xr-present:#FF8A65;--xr-pdf:#FF6B6B}' +
+      K + '{' +
+        ['document', 'spreadsheet', 'presentation', 'pdf', 'visio'].map(function (k) { return '--toolbar-header-' + k + ':var(--xr-bar)!important'; }).join(';') + ';' +
+        [['document', 'doc'], ['spreadsheet', 'sheet'], ['presentation', 'slide'], ['pdf', 'pdf'], ['visio', 'doc']].map(function (k) {
+          return '--highlight-toolbar-tab-underline-' + k[0] + ':var(--xr-' + k[1] + ')!important;' +
+                 '--highlight-header-tab-underline-' + k[0] + ':var(--xr-' + k[1] + ')!important';
+        }).join(';') + ';' +
+        '--background-toolbar:var(--xr-bar)!important;--background-toolbar-tab:var(--xr-bar)!important;' +
+        '--background-statusbar:var(--xr-bar)!important;--border-toolbar-active-panel-top:var(--xr-bar)!important;' +
+        '--border-toolbar:var(--xr-sep)!important;--border-divider:var(--xr-sep)!important;' +
+        '--text-toolbar-header:var(--xr-label)!important;' +
+        '--toolbar-tab-line-height:2.5px!important;--toolbar-tab-line-radius:1.25px!important;' +
+        '--canvas-background:var(--xr-canvas)!important;--canvas-content-background:#fff!important;' +
+        '--background-primary-dialog-button:var(--xr-tint)!important;--background-accent-button:var(--xr-tint)!important;' +
+        '--highlight-primary-dialog-button-hover:var(--xr-tint-hi)!important;--highlight-primary-dialog-button-pressed:var(--xr-tint-hi)!important;' +
+        '--border-control-focus:var(--xr-tint)!important;--border-preview-select:var(--xr-tint)!important;' +
+        '--font-family-base-custom:-apple-system,system-ui,"SF Arabic","Geeza Pro",sans-serif!important}' +
+      // Arabic: the engine sets its own Arabic UI font on .rtl-font[applang=ar] - the same system font there
+      ':root .rtl-font[applang]{--font-family-base-custom:-apple-system,system-ui,"SF Arabic","Geeza Pro",sans-serif!important}' +
+      // tabs: text labels in the secondary label colour, the active one in the label colour (its underline: the kind
+      // accent through the tokens above)
+      K + ' .toolbar .tabs .ribtab>a{font-weight:500!important;color:var(--xr-label2)!important}' +
+      K + ' .toolbar .tabs .ribtab.active>a{color:var(--xr-label)!important}' +
+      // Slides' Present (the Windows build paints it Office red with a 6 px radius): the editor's single primary
+      // action = the Slides accent as a true capsule (a deeper shade of it in light mode, so the white label reaches
+      // 4.5:1); dark label on the light dark-mode accent (contrast)
+      K + ' .xr-present-btn{background:var(--xr-present)!important;border-radius:18px!important;height:36px!important;' +
+        'display:inline-flex!important;align-items:center}' +
+      K + ' .xr-present-btn:hover{background:var(--xr-present)!important;filter:brightness(.92)}' +
+      K + ' .xr-present-label{color:var(--xr-on-accent)!important;font-family:inherit!important}' +
+      K + ' .xr-present-btn .dropdown-toggle .caret{border-top-color:var(--xr-on-accent)!important}' +
+      // primary dialog buttons (OK / Insert / Replace ...) on the teal tint: the engine's label is --text-inverse
+      // (white in both themes) - the label follows the tint instead (black on the light dark-mode teal)
+      K + ' .btn.primary,' + K + ' .btn.primary:hover,' + K + ' .btn.primary:active,' + K + ' .btn.primary.active{color:var(--xr-on-accent)!important}' +
+      // the editor's own theme picker (Settings > Appearance): the app follows iOS and sets the theme on every open,
+      // so a choice there would not stick - not offered (tab style / background are fixed in xr-editor.html)
+      K + ' #panel-settings :is(tr.appearance,tr.themes,tr.tab-style,tr.tab-background,tr.divider-group:has(+tr.appearance)){display:none!important}' +
+      // touch: no < > scroll arrows on the tab row - it scrolls under the finger, with a soft 24 px fade at both ends.
+      // (a trackpad / mouse keeps the arrows: any-pointer:fine)
+      '@media not all and (any-pointer:fine){' +
+        '.toolbar .tabs .scroll{display:none!important}' +
+        '.toolbar .tabs>ul{overflow-x:auto!important;overflow-y:hidden!important;scrollbar-width:none;' +
+          'padding-left:12px!important;padding-right:12px!important;' +
+          '-webkit-mask-image:linear-gradient(to right,transparent 0,#000 24px,#000 calc(100% - 24px),transparent 100%);' +
+          'mask-image:linear-gradient(to right,transparent 0,#000 24px,#000 calc(100% - 24px),transparent 100%)}' +
+        '.toolbar .tabs>ul::-webkit-scrollbar{display:none}}';
+    var add = function () {
+      if (document.getElementById('xr-chrome-css')) return;
+      var s = document.createElement('style'); s.id = 'xr-chrome-css'; s.textContent = css;
       (document.head || document.documentElement).appendChild(s);
     };
     if (document.documentElement) add();

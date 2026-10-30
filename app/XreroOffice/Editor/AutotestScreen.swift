@@ -169,6 +169,58 @@ struct AutotestScreen: View {
                     }
                 }
             }
+            if url.host == "appearance" {       // M6: switch the editor to dark / back to light the way iOS does (a trait
+                                                // change on the web view -> the live switch, no reload)
+                let dark = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "dark" }?.value == "1"
+                controller.coordinator?.web?.overrideUserInterfaceStyle = dark ? .dark : .light
+                handle("log", "autotest: appearance " + (dark ? "dark" : "light"))
+            }
+            if url.host == "chrome" {           // M6 gate: neutral editor chrome - theme follows the appearance, line
+                                                // tabs, Xrero kind accent on the tab underline, iOS bar colour on the tab
+                                                // row, system font, canvas colour, no tab arrows on touch. Also reports
+                                                // the tab row (web view points) and its scroll position for the swipe test.
+                                                // Also: a primary dialog button's label contrast (>= 4.5:1, opened and
+                                                // closed here), the editor instance (inst=: same id = no reload), undo
+                                                // still available (undo=) and, with has=, the typed text still there.
+                let q = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+                let want = q.first { $0.name == "want" }?.value == "dark" ? "dark" : "light"
+                let tag = "chrome" + (q.first { $0.name == "n" }?.value ?? "").filter(\.isNumber) + ":"    // this run's answer
+                let has = (q.first { $0.name == "has" }?.value ?? "").filter { $0.isLetter || $0.isNumber || $0 == " " }
+                let js = """
+                (function(){var f=document.querySelector('iframe');var w=f&&f.contentWindow;var d=w&&w.document;if(!d||!d.body)return '\(tag)fail no editor';
+                var want='\(want)',bad=[],b=d.body,cs=w.getComputedStyle(b),p=w.location.pathname;
+                var th=b.classList.contains('theme-night')?'dark':b.classList.contains('theme-white')?'light':'other';if(th!==want)bad.push('theme '+th+' ('+b.className.slice(0,80)+')');
+                var S=w.Common&&w.Common.Utils&&w.Common.Utils.InternalSettings;var ts=S&&S.get('settings-tab-style');if(ts!=='line')bad.push('tab style '+ts);
+                var kind=/spreadsheeteditor/.test(p)?'spreadsheet':/presentationeditor/.test(p)?'presentation':/pdfeditor/.test(p)?'pdf':'document';
+                var acc={light:{document:'#2f6bd8',spreadsheet:'#1e9e5a',presentation:'#e0612f',pdf:'#c62828'},dark:{document:'#7aa7f0',spreadsheet:'#4cc38a',presentation:'#ff8a65',pdf:'#ff6b6b'}}[want][kind];
+                var tok=function(n){var v=cs.getPropertyValue(n).trim().toLowerCase();return v.indexOf('var(--')===0?cs.getPropertyValue(v.slice(4,-1)).trim().toLowerCase():v;};
+                var u=tok('--highlight-toolbar-tab-underline-'+kind);if(u!==acc)bad.push('accent '+u+' want '+acc);
+                var cv=tok('--canvas-background');if(cv!==(want==='dark'?'#000':'#f2f2f7'))bad.push('canvas '+cv);
+                var ul=d.querySelector('.toolbar .tabs > ul'),bgOf=function(e){while(e&&e.nodeType===1){var c=w.getComputedStyle(e).backgroundColor;if(c&&c!=='transparent'&&c.slice(-4)!==', 0)')return c;e=e.parentNode;}return 'none';};
+                var bg=ul?bgOf(ul):'no tabs';if(bg!==(want==='dark'?'rgb(28, 28, 30)':'rgb(249, 249, 249)'))bad.push('tab row '+bg);
+                var a=d.querySelector('.toolbar .tabs .ribtab > a');var ff=a?w.getComputedStyle(a).fontFamily:'';if(!/apple-system|system-ui/.test(ff))bad.push('font '+ff.slice(0,40));
+                var coarse=!w.matchMedia('(any-pointer:fine)').matches;var arrows=[].slice.call(d.querySelectorAll('.toolbar .tabs .scroll')).filter(function(e){return e.offsetParent;}).length;if(coarse&&arrows)bad.push('tab arrows '+arrows);
+                if(kind==='presentation'){var pb=d.querySelector('.xr-present-btn');if(pb&&pb.offsetParent){var pr=pb.getBoundingClientRect(),pc=w.getComputedStyle(pb).backgroundColor;
+                 var hx=function(c){return 'rgb('+parseInt(c.substr(1,2),16)+', '+parseInt(c.substr(3,2),16)+', '+parseInt(c.substr(5,2),16)+')';};
+                 if(pc!==hx(want==='dark'?'#ff8a65':'#c4502a'))bad.push('present '+pc);if(pr.height<35||pr.height>37)bad.push('present height '+Math.round(pr.height));}
+                 else bad.push('present button missing');}
+                var lum=function(c){var v=(String(c).match(/[0-9.]+/g)||[]).slice(0,3).map(function(x){x=x/255;return x<=0.03928?x/12.92:Math.pow((x+0.055)/1.055,2.4);});return v.length<3?-1:0.2126*v[0]+0.7152*v[1]+0.0722*v[2];};
+                var U=w.Common&&w.Common.UI,dlg=null,dinfo='none';try{dlg=U&&U.info?U.info({msg:'Xrero',buttons:['ok']}):null;}catch(e){bad.push('dialog '+e);}
+                if(dlg){var db=dlg.$window&&dlg.$window.find('.dlg-btn.primary')[0];if(!db)bad.push('dialog: no primary button');else{var dc=w.getComputedStyle(db),l1=lum(dc.color),l2=lum(dc.backgroundColor),cr=(Math.max(l1,l2)+0.05)/(Math.min(l1,l2)+0.05);
+                 dinfo=cr.toFixed(2);if(l1<0||l2<0||cr<4.5)bad.push('dialog button '+dc.color+' on '+dc.backgroundColor+' = '+dinfo);}try{dlg.close();}catch(e){}}else bad.push('dialog did not open');
+                if(!w.__xrInst)w.__xrInst=Math.random().toString(36).slice(2,8);
+                var api=(w.Asc&&w.Asc.editor)||w.editor,undo='-',txt='-';try{undo=api&&api.asc_getCanUndo&&api.asc_getCanUndo()?'1':'0';}catch(e){}
+                var has='\(has)';if(has){try{var ld=api.WordControl&&api.WordControl.m_oLogicDocument;txt=ld&&ld.GetText&&ld.GetText().indexOf(has)>=0?'1':'0';}catch(e){txt='0';}}
+                var r=ul&&ul.getBoundingClientRect(),o=f.getBoundingClientRect();
+                var info=want+' '+kind+' inst='+w.__xrInst+' undo='+undo+' text='+txt+' dialog='+dinfo+' tabs='+(r?Math.round(o.left+r.left)+','+Math.round(o.left+r.right)+','+Math.round(o.top+r.top+r.height/2)+','+Math.round(Math.abs(ul.scrollLeft))+','+(ul.scrollWidth-ul.clientWidth):'none');
+                return bad.length?'\(tag)fail '+bad.join('; ')+' ('+info+')':'\(tag)ok ('+info+')';})()
+                """
+                controller.coordinator?.web?.evaluateJavaScript(js) { r, e in
+                    let res = (r as? String) ?? tag + "fail " + (e?.localizedDescription ?? "no result")
+                    handle("log", res)
+                    state = res
+                }
+            }
             if url.host == "geom" {             // iPad layout gate (M3): status bar, sheet tabs, ribbon, settings panel
                 // Inside the editor frame: visible status-bar controls must not overlap, no empty label pills, nothing
                 // under the window-resize corner (28 pt), spreadsheets show at least one sheet tab, ribbon buttons and
