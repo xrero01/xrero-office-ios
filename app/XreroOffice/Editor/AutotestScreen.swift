@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 #if XR_AUTOTEST
 /// CI only (build configuration "Autotest"). Opens one document straight in the editor so XCUITest can type into
@@ -50,6 +51,9 @@ struct AutotestScreen: View {
                 Text("modified:" + modified).font(.system(size: 6)).accessibilityIdentifier("xr-modified")
                 EditorStateProbe(state: controller.state)
                 Button("save") { controller.save() }.font(.system(size: 6)).accessibilityIdentifier("xr-save")
+                // touch gate (XR_PROBE=1 only): the editor's caret / selection / zoom / focus, read by the test from a
+                // label instead of a hook URL - a URL could itself change who holds the keyboard
+                if ProcessInfo.processInfo.environment["XR_PROBE"] == "1" { ProbeLabel(controller: controller) }
             }
             .opacity(0.02)
         }
@@ -71,6 +75,15 @@ struct AutotestScreen: View {
                 controller.coordinator?.web?.evaluateJavaScript(js) { r, _ in state = (r as? String) ?? "caret:none" }
             }
             if url.host == "about" { showAbout = true }      // About & Licences over the open editor
+            if url.host == "note",              // touch gate: the test's results into the editor log (check_saved.py)
+               let t = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "t" })?.value {
+                for line in t.split(separator: "\n") { handle("log", String(line)) }
+            }
+            if url.host == "reopen" {           // typing gate: reload the editor from the saved bytes (the document data
+                                                // the save handler updated; the file on disk is checked by check_saved.py)
+                state = "reopening"
+                controller.coordinator?.load()
+            }
             if url.host == "crash" {            // crash recovery test: end the editor's web process the way iOS does
                 guard let web = controller.coordinator?.web else { return }
                 // WebKit's own test hook (WKWebViewPrivate). Only in this CI build configuration, never in the app.
@@ -368,6 +381,89 @@ private struct EditorStateProbe: View {
     @ObservedObject var state: EditorState
     var body: some View {
         Text(state.summary).font(.system(size: 6)).accessibilityIdentifier("xr-editor-state")
+    }
+}
+
+/// Touch gate probe label (XR_PROBE=1). Its own view with its own state, so the 0.5 s updates redraw this one line
+/// and not the editor screen. "t=<ms since 1970>|<json>": the test (same clock on the simulator) waits for a probe
+/// taken after its last action.
+private struct ProbeLabel: View {
+    let controller: EditorController
+    @State private var probe = "t=0|{}"
+    @State private var probing = false
+    @State private var keyboardUp = false
+    private static let tick = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        Text(probe).font(.system(size: 6)).lineLimit(1).frame(maxWidth: 40, alignment: .leading)
+            .allowsHitTesting(false).accessibilityIdentifier("xr-probe")
+            .onReceive(Self.tick) { _ in poll() }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in keyboardUp = true }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in keyboardUp = false }
+    }
+
+    /// Touch gate probe (Word): the caret's place on screen (web view points), the selected text, the document text,
+    /// bold at the caret (Bold or, for Arabic script, BoldCS), the engine zoom, the visual viewport scale (1 = WebKit is not magnifying a bitmap), who has
+    /// focus in the editor frame, whether the phone ribbon is folded, plus keypress-to-frame latency samples taken by
+    /// listeners on the editor's input field (keydown/input -> second requestAnimationFrame, not the canvas paint itself;
+    /// simulator figures: informational only). Native side: does the web view
+    /// hold first responder (the keyboard), and is a software keyboard shown.
+    private static let probeJS = """
+    (function(){var f=document.querySelector('iframe');var w=f&&f.contentWindow;var d=w&&w.document;var a=w&&w.Asc&&w.Asc.editor;
+     if(!a||!d||!a.WordControl)return JSON.stringify({err:'no editor'});
+     var r={},o=f.getBoundingClientRect(),c=d.getElementById('id_target_cursor');
+     if(c){var sd=c.style.display,sv=c.style.visibility;c.style.display='block';c.style.visibility='visible';var b=c.getBoundingClientRect();
+      c.style.display=sd;c.style.visibility=sv;r.caretShown=(sd!=='none'||sv==='visible');
+      if(b.height>=4){r.cx=Math.round(o.left+b.left);r.cy=Math.round(o.top+b.top+b.height/2);r.ch=Math.round(b.height);}}
+     var ld=a.WordControl.m_oLogicDocument;
+     if(ld){try{r.sel=(ld.IsSelectionUse()&&!ld.IsSelectionEmpty())?(ld.GetSelectedText(false)||''):'';}catch(e){r.sel='';r.selErr=String(e);}
+      try{r.text=ld.Content.map(function(p){return p.GetText?p.GetText({ParaSeparator:''}):'';}).join('|');r.paras=ld.Content.length;}catch(e){r.text='';}
+      try{var tp=ld.GetCalculatedTextPr();r.bold=!!(tp.Bold||tp.BoldCS);}catch(e){}}
+     r.zoom=a.WordControl.m_nZoomValue;
+     r.vv=window.visualViewport?Math.round(window.visualViewport.scale*100)/100:1;r.vvi=w.visualViewport?Math.round(w.visualViewport.scale*100)/100:1;
+     var ic=w.AscCommon&&w.AscCommon.g_inputContext,A=ic&&ic.HtmlArea,ae=d.activeElement;
+     r.focus=ae?(ae.id||ae.tagName):'';r.area=!!(A&&ae===A);r.hasFocus=d.hasFocus();
+     var bar=d.querySelector('.toolbar.folded');r.fold=bar?(bar.classList.contains('expanded')?'open':'closed'):'none';
+     r.menu=[].slice.call(d.querySelectorAll('.dropdown-menu')).filter(function(m){return w.getComputedStyle(m).display!=='none'&&m.getBoundingClientRect().height>4;}).length;
+     r.btn={};['bold','select-all'].forEach(function(k){var e=[].slice.call(d.querySelectorAll('[id="id-toolbar-btn-'+k+'"]')).filter(function(x){var q=x.getBoundingClientRect();return x.offsetParent&&q.width>4&&q.height>4;})[0],b=e&&e.getBoundingClientRect();
+      if(!b)return;var z=1;for(var x=e;x&&x!==d.documentElement;x=x.parentElement)z*=parseFloat(w.getComputedStyle(x).zoom)||1;
+      r.btn[k]=[Math.round(o.left+(b.left+b.width/2)*z),Math.round(o.top+(b.top+b.height/2)*z)];});
+     if(A&&!w.__xrLat){var L=w.__xrLat=[],pend=false;var on=function(){if(pend)return;pend=true;var t0=w.performance.now();
+      w.requestAnimationFrame(function(){w.requestAnimationFrame(function(){L.push(w.performance.now()-t0);pend=false;});});};
+      A.addEventListener('keydown',on,true);A.addEventListener('input',on,true);}
+     if(w.__xrLat&&w.__xrLat.length){var s=w.__xrLat.slice().sort(function(x,y){return x-y;});
+      r.lat={n:s.length,med:Math.round(s[Math.floor(s.length/2)]),p95:Math.round(s[Math.min(s.length-1,Math.floor(s.length*0.95))])};}
+     return JSON.stringify(r);})()
+    """
+
+    private func poll() {
+        guard !probing, let web = controller.coordinator?.web else { return }
+        // the test pauses the probe while it types (<probe file>.pause): its full-document read on the main thread
+        // would otherwise sit inside the keypress-latency samples it collects
+        if let f = ProcessInfo.processInfo.environment["XR_PROBE_FILE"], FileManager.default.fileExists(atPath: f + ".pause") { return }
+        probing = true
+        web.evaluateJavaScript(Self.probeJS) { r, e in
+            probing = false
+            var o = ((r as? String)?.data(using: .utf8)).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+                ?? ["err": e?.localizedDescription ?? "no result"]
+            o["fr"] = Self.holdsFirstResponder(web)
+            o["kb"] = keyboardUp
+            let line = "t=\(Int64(Date().timeIntervalSince1970 * 1000))|"
+                + ((try? JSONSerialization.data(withJSONObject: o)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}")
+            // the simulator shares the Mac's file system: a file the test reads costs no accessibility query (each one
+            // walks the whole editor page and times out on the iPad); the label stays as the fallback
+            if let f = ProcessInfo.processInfo.environment["XR_PROBE_FILE"],
+               (try? Data(line.utf8).write(to: URL(fileURLWithPath: f), options: .atomic)) != nil {
+                if probe != "file" { probe = "file" }
+            } else {
+                probe = line
+            }
+        }
+    }
+
+    /// The web view (its private content view, found by walking the public subview tree) is the first responder.
+    private static func holdsFirstResponder(_ v: UIView) -> Bool {
+        v.isFirstResponder || v.subviews.contains { holdsFirstResponder($0) }
     }
 }
 #endif
