@@ -33,7 +33,9 @@ final class OpenDocumentModel: ObservableObject {
     }
 }
 
-/// The editor screen presented over the browser, with a back button to the documents.
+/// The editor screen presented over the browser, with a back button to the documents. It lives in its own
+/// UIHostingController (DocumentOpener), so the language environment is applied here again: the editor's bar, its
+/// menus and alerts mirror with Home.
 struct EditorHost: View {
     @ObservedObject var model: OpenDocumentModel
     var onClose: () -> Void
@@ -42,6 +44,7 @@ struct EditorHost: View {
         NavigationStack {
             EditorScreen(document: $model.document, fileURL: model.file.fileURL, onClose: onClose)
         }
+        .appLanguageEnvironment()
     }
 }
 

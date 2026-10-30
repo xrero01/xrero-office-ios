@@ -3,8 +3,9 @@ import XCTest
 /// App Review screen recording (review-video.yml records the simulator while this runs). Drives the REAL app (Debug/Release
 /// configuration: the system document browser + editor, no test overlay) the way a user does: Home screen -> tap the icon
 /// -> home screen (the optional account card: Sign in opens the account, Not now hides it) > New document -> type English +
-/// Arabic with Bold -> Save -> close -> open a spreadsheet and a presentation from Files -> switch the interface to Arabic ->
-/// Settings > Xrero Office > Licences -> relaunch (no account card). Steps are best-effort (the recording
+/// Arabic with Bold -> Save -> close -> Home's Recent (search, context menu, swipe) -> open a spreadsheet and a presentation
+/// from Files -> switch the interface to Arabic in the editor's globe menu (Home follows) -> Settings > Xrero Office >
+/// Licences -> relaunch (no account card, still Arabic). Steps are best-effort (the recording
 /// matters more than any single step); every step leaves a screenshot and the element tree when something is missing.
 final class ReviewVideoTests: XCTestCase {
 
@@ -146,8 +147,14 @@ final class ReviewVideoTests: XCTestCase {
             XCTAssertFalse(card.exists, "the account card is still shown after Not now")
         } else { XCTFail("no account card on Home at first launch"); dump("account-card") }
 
-        // 2. The home screen: one tile per kind of file; New document
+        // 2. The home screen (plan M8): one row of create tiles, Browse files / Open a PDF, and the empty Recent state
         shot("01b-home")
+        for id in ["xr-home-word", "xr-home-cell", "xr-home-slide", "xr-home-browse", "xr-home-pdf"] {
+            XCTAssertTrue(app.buttons.matching(identifier: id).firstMatch.waitForExistence(timeout: 10), "Home has no \(id)")
+        }
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "xr-home-empty").firstMatch.exists,
+                      "no empty Recent state on a first launch")
+        XCTAssertTrue(app.buttons.matching(identifier: "xr-home-more").firstMatch.exists, "no More menu on Home")
         if let tile = find(app.buttons, "identifier == 'xr-home-word'", timeout: 20) { tile.tap() } else { dump("home") }
         // the editor, or a system alert (e.g. "Unable to Import Document"), whichever comes first
         let saveQ = app.webViews.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] 'Save' OR label BEGINSWITH 'حفظ'")).firstMatch
@@ -192,9 +199,11 @@ final class ReviewVideoTests: XCTestCase {
                 pw.tap(); typeSlowly("not-a-real-password")
                 shot("03b-account")
                 app.buttons.matching(identifier: "xr-acct-submit").firstMatch.tap()
-                let answer = app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] 'Invalid' OR label CONTAINS[c] 'internet' OR label CONTAINS 'HTTP'")).firstMatch
+                // the server's answer, worded for people (no status codes, plan M9b)
+                let answer = app.descendants(matching: .any).matching(identifier: "xr-acct-error").firstMatch
                 XCTAssertTrue(answer.waitForExistence(timeout: 30), "no answer from the account server")
                 print("XR account answer:", answer.label)
+                XCTAssertFalse(answer.label.contains("HTTP"), "a raw status code reached the account sheet: \(answer.label)")
                 shot("03c-account-answer")
                 let done = app.buttons.matching(NSPredicate(format: "label == 'Done' OR label == 'تم'")).firstMatch
                 if done.exists { done.tap() } else { app.swipeDown() }
@@ -204,7 +213,9 @@ final class ReviewVideoTests: XCTestCase {
 
         closeDocument()
         shot("04-home")
+        checkRecent()
 
+        var arabic = false                                          // step 6 switched the interface to Arabic
         // 4. A spreadsheet from Files: edit a cell, save
         if openFromFiles("sales_en.xlsx") && waitEditor("sheet") {
             app.webViews.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.45)).doubleTap()
@@ -226,11 +237,22 @@ final class ReviewVideoTests: XCTestCase {
                 pause(1.5)
             }
             shot("06-deck")
-            // 6. Interface language EN -> AR (the editor reopens in Arabic)
-            if let ar = find(app.webViews.staticTexts, "label == 'AR'", timeout: 3) ?? webButton("label == 'AR'", timeout: 1) {
-                ar.tap(); pause(2); waitEditor("deck-ar")
+            // 6. Interface language EN -> AR in the editor's globe menu: a confirmation (the page reopens), then the
+            // bar is Arabic at once and the page reopens in Arabic; Home follows (one language source, plan M9b)
+            if let globe = find(app.buttons, "identifier == 'xr-nav-lang'", timeout: 5) {
+                globe.tap(); pause(1)
+                if let ar = find(app.buttons, "label == 'العربية'", timeout: 5) { ar.tap(); pause(1) } else { dump("lang-menu") }
+                shot("06a-lang-confirm")
+                if let ok = find(app.buttons, "identifier == 'xr-lang-confirm' OR label == 'حفظ والتبديل'", timeout: 5) {
+                    ok.tap(); pause(2); waitEditor("deck-ar"); arabic = true
+                } else { XCTFail("no confirmation before the editor reopens in Arabic"); dump("lang-confirm") }
+                XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label == 'المستندات'")).firstMatch.waitForExistence(timeout: 10),
+                              "the editor's bar did not switch to Arabic")
             } else { dump("lang") }
             closeDocument()
+            XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label ==[c] 'الأخيرة'")).firstMatch.waitForExistence(timeout: 10),
+                          "Home did not follow the editor into Arabic")
+            shot("06b-home-ar")
         }
 
         // 7. Settings > Apps > Xrero Office > Licences
@@ -271,6 +293,58 @@ final class ReviewVideoTests: XCTestCase {
         XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "xr-home-account-card").firstMatch.exists,
                        "the account card came back after Not now")
         XCTAssertFalse(acctEmail.exists, "an account sheet was presented by itself after relaunch")
+        // the Arabic choice made in the editor persists across a relaunch
+        if arabic { XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label ==[c] 'الأخيرة'")).firstMatch.waitForExistence(timeout: 5),
+                      "the interface language did not persist across a relaunch") }
         shot("08-relaunched-home")
+    }
+
+    /// Home after the first document (plan M8): the file is in Recent; search finds it (and hides the create row);
+    /// its context menu offers Open / Share / Show in Files / Remove; a swipe offers Remove and Share. Nothing is removed.
+    private func checkRecent() {
+        let row = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'xr-recent-Document'")).firstMatch
+        guard row.waitForExistence(timeout: 10) else { XCTFail("the new document is not in Recent"); dump("recent"); return }
+        pause(2)                                                    // the first-page thumbnail
+        shot("04a-recent")
+
+        let search = app.searchFields.firstMatch
+        if search.waitForExistence(timeout: 5) {
+            search.tap(); pause(0.5)
+            typeSlowly("Docu")
+            pause(1)
+            XCTAssertTrue(row.exists, "search did not find the recent document")
+            XCTAssertFalse(app.buttons.matching(identifier: "xr-home-word").firstMatch.exists, "search kept the create row")
+            shot("04b-search")
+            // leave search: "Cancel" (iOS 17/18) or the round close button next to the field (iOS 26)
+            let cancel = app.buttons.matching(NSPredicate(format: "label IN {'Cancel', 'Close'}")).firstMatch
+            if cancel.exists && cancel.isHittable { cancel.tap() } else { search.buttons.firstMatch.tap() }
+            pause(1)
+            XCTAssertTrue(app.buttons.matching(identifier: "xr-home-word").firstMatch.waitForExistence(timeout: 5),
+                          "the create row did not come back after search")
+        } else { XCTFail("no search field over Recent"); dump("search") }
+
+        row.press(forDuration: 1.3)
+        pause(1)
+        let show = app.buttons.matching(NSPredicate(format: "label == 'Show in Files'")).firstMatch
+        XCTAssertTrue(show.waitForExistence(timeout: 5), "no context menu on a recent file")
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label == 'Remove from Recent'")).firstMatch.exists,
+                      "no Remove from Recent in the context menu")
+        shot("04c-context-menu")
+        // a tap on the dimmed background beside the preview closes the menu and reaches nothing under it (the status
+        // bar, tried first, does not close it)
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.45)).tap()
+        pause(1.5)
+        XCTAssertFalse(show.exists, "the context menu did not close")
+
+        if row.waitForExistence(timeout: 5) {
+            row.swipeLeft()
+            pause(1)
+            XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label == 'Remove'")).firstMatch.waitForExistence(timeout: 3),
+                          "no swipe actions on a recent file")
+            shot("04d-swipe")
+            row.swipeRight()
+            pause(1)
+        }
+        XCTAssertTrue(row.exists, "the recent file went away while only looking at its actions")
     }
 }

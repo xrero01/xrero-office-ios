@@ -167,8 +167,11 @@ final class RecentFiles: ObservableObject {
     struct Item: Identifiable, Equatable {
         let id: String          // file path when added: one row per file
         let name: String
-        let date: Date
+        let date: Date          // when it was last opened (the Recent subtitle)
         let bookmark: Data
+        /// Where the file lives, stored as a key and worded at render time so a language switch rewords it:
+        /// "device" (On My iPhone > Xrero Office), "icloud" or "folder:<name>". Empty for 20.2 entries until reopened.
+        var place: String = ""
         var kind: OfficeKind? { OfficeKind(url: URL(fileURLWithPath: name)) }
     }
     @Published private(set) var items: [Item] = []
@@ -180,7 +183,7 @@ final class RecentFiles: ObservableObject {
     func add(_ url: URL) {
         guard let bm = try? url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil) else { return }
         var list = items.filter { $0.id != url.path }
-        list.insert(Item(id: url.path, name: url.lastPathComponent, date: Date(), bookmark: bm), at: 0)
+        list.insert(Item(id: url.path, name: url.lastPathComponent, date: Date(), bookmark: bm, place: Self.place(of: url)), at: 0)
         items = Array(list.prefix(limit))
         save()
     }
@@ -190,12 +193,36 @@ final class RecentFiles: ObservableObject {
         save()
     }
 
-    /// The file's current location (it may have been moved or renamed since), nil when it is gone.
+    /// The file's current location (it may have been moved or renamed since), nil when it is gone. A stale bookmark
+    /// (the file moved) still resolves; it is renewed right after, while the file is reachable, so the next launch
+    /// does not depend on the old one.
     func resolve(_ item: Item) -> URL? {
         var stale = false
         guard let url = try? URL(resolvingBookmarkData: item.bookmark, options: [], relativeTo: nil, bookmarkDataIsStale: &stale)
         else { return nil }
+        if stale {
+            // not during a view update: publishing from inside `body` is not allowed
+            DispatchQueue.main.async { self.renew(item, at: url) }
+        }
         return url
+    }
+
+    private func renew(_ item: Item, at url: URL) {
+        guard let i = items.firstIndex(where: { $0.id == item.id }) else { return }
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        guard let bm = try? url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil) else { return }
+        items[i] = Item(id: item.id, name: url.lastPathComponent, date: item.date, bookmark: bm, place: Self.place(of: url))
+        save()
+    }
+
+    /// "device" for the app's own folder, "icloud" for iCloud Drive, else the containing folder's name.
+    static func place(of url: URL) -> String {
+        let path = url.resolvingSymlinksInPath().path
+        if let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first,
+           path.hasPrefix(docs.resolvingSymlinksInPath().path) { return "device" }
+        if path.contains("/Mobile Documents/") { return "icloud" }
+        return "folder:" + url.deletingLastPathComponent().lastPathComponent
     }
 
     private func load() {
@@ -203,12 +230,13 @@ final class RecentFiles: ObservableObject {
         items = raw.compactMap { d in
             guard let id = d["id"] as? String, let name = d["name"] as? String, let date = d["date"] as? Date,
                   let bm = d["bookmark"] as? Data else { return nil }
-            return Item(id: id, name: name, date: date, bookmark: bm)
+            return Item(id: id, name: name, date: date, bookmark: bm, place: d["place"] as? String ?? "")
         }
     }
 
     private func save() {
-        UserDefaults.standard.set(items.map { ["id": $0.id, "name": $0.name, "date": $0.date, "bookmark": $0.bookmark] },
+        UserDefaults.standard.set(items.map { ["id": $0.id, "name": $0.name, "date": $0.date, "bookmark": $0.bookmark,
+                                               "place": $0.place] },
                                   forKey: key)
     }
 }
