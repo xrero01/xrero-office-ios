@@ -370,7 +370,14 @@ final class EditorUITests: XCTestCase {
             XCTAssertFalse(app.buttons["xr-saveas-" + ext].exists, "\(ext) offered but not supported")
         }
         XCTAssertTrue(app.buttons["xr-saveas-docx"].firstMatch.exists && app.buttons["xr-saveas-odt"].firstMatch.exists)
+        // the list slides up: a tap during the animation lands on the row that is passing under the finger (seen as
+        // the .odt row lighting up and ".odt" exported again) - tap once it is still, again if nothing came of it
+        sleep(1)
         rtf.tap()
+        if !waitState(app, prefix: "exported:" + base + ".rtf", timeout: 20).hasSuffix(".rtf") && rtf.exists && rtf.isHittable {
+            print("XR save-as path: RTF tap did not take - tapping again")
+            rtf.tap()
+        }
         let second = waitState(app, prefix: "exported:" + base + ".rtf", timeout: 60)
         shot(app, "43-saveas-rtf-exported")
         XCTAssertEqual(second, "exported:" + base + ".rtf", "RTF copy not exported from the Save As list")
