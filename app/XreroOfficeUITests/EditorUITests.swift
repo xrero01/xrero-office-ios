@@ -111,9 +111,16 @@ final class EditorUITests: XCTestCase {
             let rtl = name.hasSuffix("-ar")                // right-to-left: the hidden tabs are on the left
             let from = o.withOffset(CGVector(dx: rtl ? n[0] + 40 : n[1] - 40, dy: n[2]))
             let to = o.withOffset(CGVector(dx: rtl ? n[1] - 40 : n[0] + 40, dy: n[2]))
+            sleep(1)                                       // the probe's test dialog has finished closing
             from.press(forDuration: 0.1, thenDragTo: to)
             sleep(1)
-            let after = chromeProbe(app, "light")
+            var after = chromeProbe(app, "light")
+            if tabs(after).count == 5 && tabs(after)[3] == 0 {   // a swipe that did not take: one more, as a person would
+                print("XR chrome \(name) tab swipe did not move the row - swiping again: \(after)")
+                from.press(forDuration: 0.3, thenDragTo: to)
+                sleep(1)
+                after = chromeProbe(app, "light")
+            }
             print("XR chrome \(name) tab swipe: \(after)")
             shot(app, "07-\(name)-tabs-swiped")
             let a = tabs(after)
