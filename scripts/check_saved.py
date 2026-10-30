@@ -5,11 +5,11 @@ xr-clip.docx must hold the ribbon Copy/Paste round trip (own copy twice + outsid
 ar_letter.docx must still hold the original Arabic letter after open + save; File > Save As must export ar_letter.odt
 (a real ODT with the letter) without rewriting the original, and the File menu must show no no-op entry;
 the Arabic blanks (xr-test-ar.*, made with the app in Arabic) must come back from the engine still right-to-left;
-the touch / typing gate (plan M14 + F1, EditorUITests.testTouchGateCaretSelectionPinchFocus) must log every check as
-PASS (or KNOWN: a reported app gap) for EN and AR, and its saved xr-touch-<lang>.docx must hold the sentence with the tapped-in letter inside it,
+the touch / typing gate (plan M14 + F1, EditorUITests.testZZTouchGateCaretSelectionPinchFocus) must log every check as
+PASS (or KNOWN: a reported app gap of the exact shape seen) for EN and AR (results also to out/qa/touch-gate.json), and its saved xr-touch-<lang>.docx must hold the sentence with the tapped-in letter inside it,
 the word typed after the Bold tap in a bold run, and the 5 Enter presses.
 Prints each editor log."""
-import os, re, sys, zipfile
+import json, os, re, sys, zipfile
 import xml.etree.ElementTree as ET
 
 W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
@@ -77,6 +77,9 @@ TOUCH_CHECKS = ("editor-ready", "tap-places-caret-first-line", "typing", "line-d
                 "pinch-zoom-kept", "pinch-out-zooms-back", "save", "reopen-keeps-text")
 
 
+QA = {}   # device -> lang -> {check: [status, detail]} + typing latency: written to out/qa/touch-gate.json (F1 trend)
+
+
 def touch_gate(d, lang):
     """the gate lines the UI test logged + the saved document; returns ok"""
     good = True
@@ -85,6 +88,11 @@ def touch_gate(d, lang):
     res = {}
     for m in re.finditer(r"^touch-gate %s ([\w-]+): (PASS|FAIL|KNOWN|INFO)\s*(.*)$" % lang, log, re.M):
         res[m.group(1)] = (m.group(2), m.group(3))
+    qa = QA.setdefault(os.path.basename(d), {}).setdefault(lang, {"checks": {k: list(v) for k, v in res.items()}})
+    lat = re.search(r"n=([\d.]+) median=(-?[\d.]+) ms p95=(-?[\d.]+) ms", res.get("typing-latency", ("", ""))[1])
+    if lat:   # keydown -> 2nd requestAnimationFrame on the simulator: a trend figure, not the device bar
+        qa["latency_ms"] = {"n": float(lat.group(1)), "median": float(lat.group(2)), "p95": float(lat.group(3)),
+                            "measure": "keydown->2rAF, probe paused, simulator"}
     print("Touch gate (%s):" % lang.upper())
     for name in TOUCH_CHECKS + tuple(k for k in res if k not in TOUCH_CHECKS):
         st, why = res.get(name, ("NOT LOGGED", ""))
@@ -240,5 +248,12 @@ for dev in sorted(os.listdir(root)) if os.path.isdir(root) else []:
         print("ar_letter.pdf: MISSING (PDF edit + save)"); ok = False
 if not (os.path.isdir(root) and os.listdir(root)):
     print("no saved files from any simulator"); ok = False
+try:   # out/qa/touch-gate.json beside out/saved: the gate's results per device + language (published in the evidence)
+    qd = os.path.join(os.path.dirname(os.path.abspath(root)), "qa")
+    os.makedirs(qd, exist_ok=True)
+    with open(os.path.join(qd, "touch-gate.json"), "w", encoding="utf-8") as f:
+        json.dump(QA, f, ensure_ascii=False, indent=1)
+except Exception as e:
+    print("out/qa/touch-gate.json not written:", e)
 print("RESULT", "PASS" if ok else "FAIL")
 sys.exit(0 if ok else 1)

@@ -42,8 +42,18 @@ final class EditorUITests: XCTestCase {
     }
 
     /// Human pace: one character at a time (a burst from XCUITest is far faster than any person types).
+    /// The touch gate's probe (a full-document read on the main thread every 0.5 s) is paused meanwhile, so it does
+    /// not add its own cost to the typing-latency samples; without XR_PROBE nothing reads the pause file.
     private func typeSlowly(_ app: XCUIApplication, _ text: String) {
+        pauseProbe(true)
+        defer { pauseProbe(false) }
         for ch in text { app.typeText(String(ch)); usleep(150_000) }
+    }
+
+    /// AutotestScreen's probe skips its poll while this file exists (the simulator shares the Mac's file system).
+    private func pauseProbe(_ on: Bool) {
+        let f = probeFile + ".pause"
+        if on { FileManager.default.createFile(atPath: f, contents: Data()) } else { try? FileManager.default.removeItem(atPath: f) }
     }
 
     private func shot(_ app: XCUIApplication, _ name: String) {
@@ -562,6 +572,7 @@ final class EditorUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-xr.lang", lang]
         try? FileManager.default.removeItem(atPath: probeFile)
+        pauseProbe(false)
         app.launchEnvironment = ["XR_KIND": "word", "XR_NEW_NAME": "xr-touch-\(lang).docx", "XR_PROBE": "1", "XR_PROBE_FILE": probeFile]
         app.launch()
         let keep = continueAfterFailure
@@ -658,9 +669,12 @@ final class EditorUITests: XCTestCase {
         let p5 = probe(app)
         let sel5 = str(p5, "sel").trimmingCharacters(in: .whitespacesAndNewlines)
         shot(app, "53-touch-\(lang)-long-press")
+        // KNOWN only for the shape seen today (the desktop menu opened, nothing selected): any other failure is a FAIL,
+        // so once long press is fixed a later regression of it is caught
         gate("long-press-selects-word", sel5.count >= 4 && !sel5.contains(" ") && t3.contains(sel5),
              "sel='\(sel5)' web menu=\(num(p5, "menu") ?? 0) native menu=\(app.menuItems.count) \(focusInfo(p5))",
-             known: "a long press opens the editor's desktop right-click menu (Cut/Copy/Paste/Paragraph...) and the keyboard goes down; no word is selected")
+             known: (num(p5, "menu") ?? 0) > 0 && sel5.isEmpty
+                ? "a long press opens the editor's desktop right-click menu (Cut/Copy/Paste/Paragraph...) and the keyboard can go down; no word is selected" : nil)
 
         // 6) a formatting tap keeps the keyboard: caret at the end, Bold, type on
         // close the menu the long press left with a tap in the page margin just above the line (the menu opens below
@@ -682,7 +696,9 @@ final class EditorUITests: XCTestCase {
         gate("type-after-format", plain(p8).contains(sentence.prefix(4)) && (plain(p8).components(separatedBy: "|").first ?? "").hasSuffix(boldWord),
              "bold=\(flag(p8, "bold")) text=\(plain(p8).prefix(80))")
         let paras8 = Int(num(p8, "paras") ?? 0)
+        pauseProbe(true)
         for _ in 0..<5 { app.typeText("\n"); usleep(300_000) }
+        pauseProbe(false)
         typeSlowly(app, endWord)
         let p9 = probe(app)
         let paras9 = Int(num(p9, "paras") ?? 0)
@@ -720,8 +736,8 @@ final class EditorUITests: XCTestCase {
         let p12 = probe(app)
         let caret12 = (num(p12, "cx") ?? -2, num(p12, "cy") ?? -2)
         gate("sheet-opens-and-closes", shown && !version.exists, "shown=\(shown)")
-        gate("sheet-return-keyboard", shown && (!up11 || focused(p12)), "before: \(focusInfo(p11)) after: \(focusInfo(p12))",
-             known: "after a native sheet closes the keyboard does not come back (plan M14: refocus the editor when the keyboard was up before)")
+        // a hard check (no KNOWN): this is the behaviour M14 names, and it passes today on both devices
+        gate("sheet-return-keyboard", shown && (!up11 || focused(p12)), "before: \(focusInfo(p11)) after: \(focusInfo(p12))")
         gate("sheet-return-caret", shown && abs(caret12.0 - caret11.0) <= 2 && abs(caret12.1 - caret11.1) <= 2,
              "caret \(caret11) -> \(caret12)")
         shot(app, "56-touch-\(lang)-sheet-closed")
@@ -755,9 +771,11 @@ final class EditorUITests: XCTestCase {
 
         // keypress-to-frame latency of this run (simulator: recorded for the trend, the real bar needs an iPhone)
         let lat = probe(app)["lat"] as? [String: Any] ?? [:]
-        info("typing-latency", "n=\(num(lat, "n") ?? 0) median=\(num(lat, "med") ?? -1) ms p95=\(num(lat, "p95") ?? -1) ms (simulator)")
+        // keydown/input -> second requestAnimationFrame (not the canvas paint itself), with the probe paused while typing
+        info("typing-latency", "n=\(num(lat, "n") ?? 0) median=\(num(lat, "med") ?? -1) ms p95=\(num(lat, "p95") ?? -1) ms (keydown->2rAF, probe paused, simulator)")
 
-        // 10) Save, open again from the saved file: the text is all there
+        // 10) Save, then reload the editor from the saved bytes (the document data the save wrote; the file on disk is
+        //     checked separately by check_saved.py, which opens xr-touch-<lang>.docx): the text is all there
         let saved = save(app)
         gate("save", saved.hasPrefix("saved"), saved)
         autotest("reopen")

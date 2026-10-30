@@ -78,7 +78,8 @@ struct AutotestScreen: View {
                let t = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "t" })?.value {
                 for line in t.split(separator: "\n") { handle("log", String(line)) }
             }
-            if url.host == "reopen" {           // typing gate: open the document again from what the last save wrote
+            if url.host == "reopen" {           // typing gate: reload the editor from the saved bytes (the document data
+                                                // the save handler updated; the file on disk is checked by check_saved.py)
                 state = "reopening"
                 controller.coordinator?.load()
             }
@@ -275,7 +276,8 @@ private struct ProbeLabel: View {
     /// Touch gate probe (Word): the caret's place on screen (web view points), the selected text, the document text,
     /// bold at the caret, the engine zoom, the visual viewport scale (1 = WebKit is not magnifying a bitmap), who has
     /// focus in the editor frame, whether the phone ribbon is folded, plus keypress-to-frame latency samples taken by
-    /// listeners on the editor's input field (simulator figures: informational only). Native side: does the web view
+    /// listeners on the editor's input field (keydown/input -> second requestAnimationFrame, not the canvas paint itself;
+    /// simulator figures: informational only). Native side: does the web view
     /// hold first responder (the keyboard), and is a software keyboard shown.
     private static let probeJS = """
     (function(){var f=document.querySelector('iframe');var w=f&&f.contentWindow;var d=w&&w.document;var a=w&&w.Asc&&w.Asc.editor;
@@ -307,6 +309,9 @@ private struct ProbeLabel: View {
 
     private func poll() {
         guard !probing, let web = controller.coordinator?.web else { return }
+        // the test pauses the probe while it types (<probe file>.pause): its full-document read on the main thread
+        // would otherwise sit inside the keypress-latency samples it collects
+        if let f = ProcessInfo.processInfo.environment["XR_PROBE_FILE"], FileManager.default.fileExists(atPath: f + ".pause") { return }
         probing = true
         web.evaluateJavaScript(Self.probeJS) { r, e in
             probing = false
