@@ -98,6 +98,9 @@ struct EditorWebView: UIViewRepresentable {
             if !keepReloadCount { reloads = 0 }
             ready = false
             edited = false
+            // a new editor page starts from nothing (after this view update: load() also runs inside one)
+            let state = parent.controller.state
+            DispatchQueue.main.async { state.reset() }
             armWatchdog()
             loadedLang = parent.lang
             resources.media.removeAll()
@@ -191,6 +194,9 @@ struct EditorWebView: UIViewRepresentable {
                 let c = body["c"] as? String ?? ""
                 let p = body["p"] as? String ?? ""
                 if c == "modified" { edited = p == "1" }          // O(1): this can arrive while typing
+                // the state channel (xr-host.js "hub"): at most one diff per animation frame, applied to the
+                // controller's EditorState only - not passed on to the screen, so it never re-renders the editor
+                if c == "state" { parent.controller.state.apply(p); return }
                 if c == "ready" { ready = true; watchdog?.cancel() }
                 if c == "copied" { copied(p); return }
                 if c == "paste" { paste(); return }
@@ -213,15 +219,39 @@ struct EditorWebView: UIViewRepresentable {
             }
         }
 
+        // MARK: calls into the editor
+        /// Runs `body` - the body of a JavaScript function, ending in `return <value>` when a result is wanted - inside
+        /// the editor's IFRAME, where the engine and its API (window.__xrApi, Asc.editor) live; the app's own page
+        /// around it only hosts that frame. The body runs as a function of the frame's own realm (its Function
+        /// constructor), so `window`, `document` and every global in it are the editor's. `done` gets the value (a
+        /// string, number, boolean, or array / object of those; nil for none) or an error text: "no editor frame",
+        /// "error: <JS exception>", "js error: <WebKit>". Native code reaches the editor ONLY through this (also
+        /// EditorController.call). Use it on a tap, never per keystroke.
+        func call(_ body: String, _ done: ((Any?, String?) -> Void)? = nil) {
+            guard let web else { done?(nil, "no editor"); return }
+            // the body as a JS string literal (JSON-escaped inside a one-element array)
+            let src = String(data: (try? JSONSerialization.data(withJSONObject: [body])) ?? Data("[\"\"]".utf8), encoding: .utf8) ?? "[\"\"]"
+            let js = """
+            (function(){var f=document.querySelector('iframe');var w=f&&f.contentWindow;if(!w||!w.Function)return {e:'no editor frame'};
+             try{var v=(new w.Function(\(src)[0])).call(w);return {v:(v===undefined?null:v)};}
+             catch(e){return {e:'error: '+(e&&e.message||e)};}})()
+            """
+            web.evaluateJavaScript(js) { result, error in
+                if let error { done?(nil, "js error: \(error.localizedDescription)"); return }
+                let o = result as? [String: Any]
+                if let e = o?["e"] as? String { done?(nil, e); return }
+                let v = o?["v"]
+                done?(v is NSNull ? nil : v, nil)
+            }
+        }
+
         /// Save As: the format picked in the app's list ('' = cancelled) goes back to xr-host.js, which converts the
         /// copy and sends it as an "export" message.
         func answerSaveAs(_ ext: String) {
             let safe = ext.filter { $0.isLetter || $0.isNumber }
-            let js = "(function(){var f=document.querySelector('iframe');var w=f&&f.contentWindow;" +
-                "return w&&w.__xrSaveAs?w.__xrSaveAs('\(safe)'):'no editor frame';})()"
-            web?.evaluateJavaScript(js) { [weak self] result, error in
+            call("return window.__xrSaveAs ? __xrSaveAs('\(safe)') : 'no save as';") { [weak self] result, error in
                 self?.parent.onCommand("log", "save as answer \(safe.isEmpty ? "(cancel)" : safe): " +
-                    ((result as? String) ?? error?.localizedDescription ?? "?"))
+                    ((result as? String) ?? error ?? "?"))
             }
         }
 
@@ -234,13 +264,12 @@ struct EditorWebView: UIViewRepresentable {
              try{ var a=w.Asc&&w.Asc.editor||w.editor; if(a){ var m=a.isDocumentModified?a.isDocumentModified():(a.asc_isDocumentModified?a.asc_isDocumentModified():true); if(!m)return 'unmodified'; } }catch(e){}
             """ : ""
             let js = """
-            (function(){var f=document.querySelector('iframe');var w=f&&f.contentWindow;if(!w)return 'no editor frame';\(check)
-             try{ if(w.DesktopOfflineAppDocumentStartSave){w.DesktopOfflineAppDocumentStartSave(false);return 'ok';}
-                  if(w.AscDesktopEditor_Save){w.AscDesktopEditor_Save();return 'ok';} return 'no save entry'; }
-             catch(e){ return 'error: '+e; }})()
+            var w=window;\(check)
+            if(w.DesktopOfflineAppDocumentStartSave){w.DesktopOfflineAppDocumentStartSave(false);return 'ok';}
+            if(w.AscDesktopEditor_Save){w.AscDesktopEditor_Save();return 'ok';} return 'no save entry';
             """
-            web?.evaluateJavaScript(js) { [weak self] result, error in
-                let r = (result as? String) ?? (error.map { "js error: \($0.localizedDescription)" } ?? "?")
+            call(js) { [weak self] result, error in
+                let r = (result as? String) ?? error ?? "?"
                 self?.parent.onCommand("log", "native save request: " + r)
                 if r != "ok" { self?.onSaved?(); self?.onSaved = nil }
             }
@@ -297,12 +326,8 @@ struct EditorWebView: UIViewRepresentable {
             guard pb.hasStrings, let text = pb.string, !text.isEmpty else { pasteDone("empty"); return }
             // the text as a JS string literal (JSON-escaped inside a one-element array)
             let arg = String(data: (try? JSONSerialization.data(withJSONObject: [text])) ?? Data("[null]".utf8), encoding: .utf8) ?? "[null]"
-            let js = """
-            (function(){var f=document.querySelector('iframe');var w=f&&f.contentWindow;
-             if(!w||!w.__xrPaste)return 'no editor';return w.__xrPaste(\(arg)[0]);})()
-            """
-            web?.evaluateJavaScript(js) { [weak self] result, error in
-                self?.pasteDone((result as? String) ?? (error.map { "js error: \($0.localizedDescription)" } ?? "?"))
+            call("return window.__xrPaste ? __xrPaste(\(arg)[0]) : 'no editor';") { [weak self] result, error in
+                self?.pasteDone((result as? String) ?? error ?? "?")
             }
         }
 
@@ -355,9 +380,20 @@ extension EditorWebView.Coordinator: WKNavigationDelegate {
     }
 }
 
-/// Lets SwiftUI ask the web editor to save (share, language switch, app going to the background).
+/// Lets SwiftUI talk to the web editor: save (share, language switch, app going to the background), run a command
+/// in it (call) and follow its state (state).
 final class EditorController: ObservableObject {
     weak var coordinator: EditorWebView.Coordinator?
+    /// The editor's live state (undo / redo, modified / saved, selection, text format, title). Views that show it
+    /// observe this object themselves (@ObservedObject var state: EditorState): it is deliberately not republished
+    /// through the controller, so a caret move never re-renders the whole editor screen.
+    let state = EditorState()
+
+    /// Runs a JavaScript function body in the editor frame (see Coordinator.call) - the one way native controls
+    /// reach the engine, e.g. `call("__xrApi.put_TextPrBold(true)")`. On a tap only, never per keystroke.
+    func call(_ body: String, _ done: ((Any?, String?) -> Void)? = nil) {
+        if let c = coordinator { c.call(body, done) } else { done?(nil, "no editor") }
+    }
 
     /// localStorage "xr-acct" = the account the editors' header shows (its chip re-reads it every 0.8 s).
     static func accountScript(_ json: String) -> String {

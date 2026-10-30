@@ -37,6 +37,25 @@
     rtl: H.lang === 'ar'
   };
 
+  // Touch defaults, reset once per version (20.3 F0). The editors read some localStorage values BEFORE the ones the
+  // app configures: a desktop-sized zoom (de-/pe-/pdfe-/sse-settings-zoom, *-last-zoom), the desktop tab look
+  // (settings-tab-style / -background) and a right panel once closed or opened on another window size
+  // (*-hide-right-settings). Values left by earlier builds would hide every corrected touch default, so they are
+  // cleared once when 'xr-touch-defaults' is below TOUCH_DEFAULTS; bump it when a release changes a default these keys
+  // would mask. Runs before the portrait-iPad rule below writes hide-right-settings again. Not limited to touch
+  // screens: this file only runs in the iOS app (iPhone, iPad, Mac "Designed for iPad"), whose defaults are all touch
+  // ones. Replaces the 20.2 one-off 'xr-mig-202-zoom'.
+  var TOUCH_DEFAULTS = 1;
+  try {
+    if ((parseInt(localStorage.getItem('xr-touch-defaults'), 10) || 0) < TOUCH_DEFAULTS) {
+      ['de', 'pe', 'pdfe', 'sse'].forEach(function (p) {
+        ['-settings-zoom', '-last-zoom', '-hide-right-settings'].forEach(function (k) { localStorage.removeItem(p + k); });
+      });
+      ['settings-tab-style', 'settings-tab-background', 'xr-mig-202-zoom'].forEach(function (k) { localStorage.removeItem(k); });
+      localStorage.setItem('xr-touch-defaults', String(TOUCH_DEFAULTS));
+    }
+  } catch (e) {}
+
   // Xrero header controls that need the Windows shell (account, PDF->Word converter, Designs): not on this platform.
   // EN/AR and Share stay: the app handles 'xrero:lang:<code>' and 'xrero:share'.
   // iPad (and Mac "Designed for iPad" with touch): touch-sized rows, the full ribbon
@@ -87,17 +106,6 @@
     }
     try { btn.click(); } catch (e) { log('right panel', e); }
   }
-
-  // 20.2: earlier versions stored a zoom the editors read before the configured one (de-/pe-/pdfe-/sse- settings-zoom
-  // and last-zoom) - clear them once so the corrected default (fit width / fit slide) reaches existing users
-  try {
-    if (!localStorage.getItem('xr-mig-202-zoom')) {
-      ['de', 'pe', 'pdfe', 'sse'].forEach(function (p) {
-        localStorage.removeItem(p + '-settings-zoom'); localStorage.removeItem(p + '-last-zoom');
-      });
-      localStorage.setItem('xr-mig-202-zoom', '1');
-    }
-  } catch (e) {}
 
   // Save As / Download As (File menu format tiles, Ctrl+Shift+S): a COPY in a format the user picks, handed to the
   // share sheet; the original file is never touched. Only formats the on-device converter writes correctly are offered - checked by
@@ -310,6 +318,130 @@
   function editor() { return (window.Asc && window.Asc.editor) || window.editor; }
   function ext(name) { var m = /\.([A-Za-z0-9]+)$/.exec(name || ''); return m ? m[1].toLowerCase() : 'docx'; }
 
+  // ---------------------------------------------------------------- state channel (engine -> native controls)
+  // The app's own controls (top bar, keyboard bar, menus) show the editor's state: undo / redo available, modified /
+  // saved, what is selected, bold / italic / underline, alignment, paragraph direction, list, title. The engine reports
+  // these through callbacks that ALSO fire on caret moves and while typing, so this is built for the keystroke path:
+  //  - every handler is O(1): it reads the callback's value and calls hub.set(key, value), a compare that returns
+  //    at once when nothing changed (typing in one paragraph changes nothing after the first key);
+  //  - a change goes into `pending`, and at most ONE requestAnimationFrame per frame posts the whole diff to the app
+  //    as one 'state' command (JSON object of the changed keys only). Nothing is posted from inside a callback;
+  //  - each callback is timed (hub.on). Budget: under 0.2 ms on average. WebKit's clock is coarse (it may round to
+  //    1 ms), so a single reading means little, but the average over many callbacks is still a fair estimate - the
+  //    CI bridge check reads it through window.__xrState() and fails above the budget.
+  // Keys and values (EditorState.swift mirrors them): canUndo, canRedo, modified, saved (booleans); bold, italic,
+  // underline (booleans); align 'left'|'center'|'right'|'justify'|'distributed'|'none'; direction 'ltr'|'rtl';
+  // list 'none'|'bullet'|'number'; selection 'text'|'table'|'image'|'shape'|'chart'|'equation'|'header'|'slide'|
+  // 'cells'|'none'; title (string). Engine constants are read by name (Asc.* / AscCommon.*, listed in xr-contract.json).
+  var hub = (function () {
+    var state = {}, pending = null, cost = { n: 0, ms: 0, max: 0 }, failed = {};
+    // the next frame; and a 250 ms timer as well, because a page that is not on screen gets no frames (WebKit pauses
+    // requestAnimationFrame) and the app must still learn the state. Whichever comes first posts; the other finds
+    // nothing pending.
+    var frame = function (f) { if (window.requestAnimationFrame) window.requestAnimationFrame(f); setTimeout(f, 250); };
+    var now = (window.performance && performance.now) ? function () { return performance.now(); } : Date.now;
+    function flush() {
+      var d = pending; pending = null;
+      if (d && H.command) H.command('state', JSON.stringify(d));
+    }
+    function set(k, v) {
+      if (state[k] === v) return;
+      state[k] = v;
+      if (!pending) { pending = {}; frame(flush); }
+      pending[k] = v;
+    }
+    // an engine callback with its time measured; its errors are logged once and never reach the engine
+    function on(api, name, fn) {
+      api.asc_registerCallback(name, function () {
+        var t = now();
+        try { fn.apply(null, arguments); } catch (e) { if (!failed[name]) { failed[name] = 1; log('state', name, e && e.message || e); } }
+        var dt = now() - t;
+        cost.n++; cost.ms += dt; if (dt > cost.max) cost.max = dt;
+      });
+    }
+    // CI / debugging: the current state and the measured callback cost (never called by the editor itself)
+    window.__xrState = function () { return JSON.stringify({ state: state, n: cost.n, ms: cost.ms, max: cost.max }); };
+    return { set: set, on: on };
+  })();
+
+  var ALIGN = null, SEL_RANK = { chart: 7, image: 6, shape: 5, table: 4, equation: 3, text: 2, header: 1, slide: 0 };
+  function alignName(v) {
+    if (!ALIGN) {               // built once from the engine's own constants (AscCommon.align_*)
+      var C = window.AscCommon || {};
+      ALIGN = {};
+      ALIGN[C.align_Left] = 'left'; ALIGN[C.align_Center] = 'center'; ALIGN[C.align_Right] = 'right';
+      ALIGN[C.align_Justify] = 'justify'; ALIGN[C.align_Distributed] = 'distributed';
+    }
+    return (v == null ? null : ALIGN[v]) || 'none';
+  }
+  // asc_onFocusObject: the list of what the caret / selection is in (paragraph, table, image ...); the most specific wins
+  function selectionKind(objs) {
+    var E = window.Asc && Asc.c_oAscTypeSelectElement, best = 'none';
+    if (!E || !objs) return best;
+    for (var i = 0; i < objs.length; i++) {
+      var t = objs[i].get_ObjectType(), k = null;
+      if (t === E.Paragraph || t === E.Hyperlink) k = 'text';
+      else if (t === E.Table) k = 'table';
+      else if (t === E.Image) {                 // Word: pictures, shapes and charts all come as Image
+        var v = objs[i].get_ObjectValue();
+        k = v && v.get_ChartProperties && v.get_ChartProperties() ? 'chart' : v && v.get_ShapeProperties && v.get_ShapeProperties() ? 'shape' : 'image';
+      }
+      else if (t === E.Shape) k = 'shape';
+      else if (t === E.Chart) k = 'chart';
+      else if (t === E.Math) k = 'equation';
+      else if (t === E.Header) k = 'header';
+      else if (t === E.Slide) k = 'slide';
+      if (k && (best === 'none' || SEL_RANK[k] > SEL_RANK[best])) best = k;
+    }
+    return best;
+  }
+  // Word's list state (the same reads the editor's own Bullets / Numbering buttons make); the format is looked up
+  // only when the list or its level changes, not on every caret move inside one list
+  var listKey = null, listKind = 'none';
+  function wordList(api) {
+    var id = api.asc_GetCurrentNumberingId();
+    if (id === null || id === undefined) { listKey = null; return 'none'; }
+    var lvl = api.asc_GetCurrentNumberingLvl(), key = id + ':' + lvl;
+    if (key !== listKey) {
+      listKey = key;
+      var F = Asc.c_oAscNumberingFormat, f = api.asc_GetNumberingPr(id).get_Lvl(lvl).get_Format();
+      listKind = (f === F.Bullet || f === F.None) ? 'bullet' : 'number';
+    }
+    return listKind;
+  }
+  function watchState(api) {
+    var cells = /spreadsheeteditor/.test(location.pathname), word = /documenteditor/.test(location.pathname);
+    hub.on(api, cells ? 'asc_onCanUndoChanged' : 'asc_onCanUndo', function (v) { hub.set('canUndo', !!v); });
+    hub.on(api, cells ? 'asc_onCanRedoChanged' : 'asc_onCanRedo', function (v) { hub.set('canRedo', !!v); });
+    if (cells) {
+      hub.on(api, 'asc_onSelectionChanged', function (info) {
+        var S = Asc.c_oAscSelectionType, t = info.asc_getSelectionType();
+        hub.set('selection', t === S.RangeImage ? 'image' : (t === S.RangeChart || t === S.RangeChartText) ? 'chart' :
+          (t === S.RangeShape || t === S.RangeShapeText) ? 'shape' : 'cells');
+        var x = info.asc_getXfs();
+        if (!x) return;
+        hub.set('bold', x.asc_getFontBold() === true);
+        hub.set('italic', x.asc_getFontItalic() === true);
+        hub.set('underline', x.asc_getFontUnderline() === true);
+        hub.set('align', alignName(x.asc_getHorAlign()));
+      });
+      return;
+    }
+    hub.on(api, 'asc_onBold', function (v) { hub.set('bold', !!v); });
+    hub.on(api, 'asc_onItalic', function (v) { hub.set('italic', !!v); });
+    hub.on(api, 'asc_onUnderline', function (v) { hub.set('underline', !!v); });
+    hub.on(api, 'asc_onPrAlign', function (v) { hub.set('align', alignName(v)); });
+    hub.on(api, 'asc_onTextDirection', function (rtl) { hub.set('direction', rtl ? 'rtl' : 'ltr'); });
+    if (!word) hub.on(api, 'asc_onListType', function (v) {
+      var t = v && v.get_ListType ? v.get_ListType() : -1;
+      hub.set('list', t === 0 ? 'bullet' : t === 1 ? 'number' : 'none');
+    });
+    hub.on(api, 'asc_onFocusObject', function (objs) {
+      hub.set('selection', selectionKind(objs));
+      if (word) hub.set('list', wordList(api));
+    });
+  }
+
   // ---------------------------------------------------------------- x2t (WebAssembly) in a worker
   var worker = null, seq = 0, waiting = {};
   function x2t(name, data, to, mediaList, opts) {
@@ -453,6 +585,7 @@
     CheckUserId: function () { return 'xr-ios'; },
     CreateEditorApi: function (api) {
       window.__xrApi = api;
+      try { watchState(api); } catch (e) { log('state channel', e && e.message || e); }
       // phones: show the whole page width instead of 100% zoom running off the screen
       try {
         api.asc_registerCallback('asc_onDocumentContentReady', function () {
@@ -514,10 +647,14 @@
     LocalFileRecovers: function () { return '[]'; },
     LocalFileRecents: function () { return '[]'; },
     IsLocalFileExist: function () { return false; },
-    SetDocumentName: function (n) { H.command && H.command('title', n); },
+    SetDocumentName: function (n) { hub.set('title', String(n || '')); H.command && H.command('title', n); },
     SetLocalRestrictions: noop,
     SetAdvancedOptions: noop,
-    onDocumentModifiedChanged: function (m) { H.command && H.command('modified', m ? '1' : '0'); },
+    onDocumentModifiedChanged: function (m) {
+      if (m) hub.set('saved', false);           // 'saved' = written to the file and unchanged since
+      hub.set('modified', !!m);
+      H.command && H.command('modified', m ? '1' : '0');
+    },
     onDocumentContentReady: function () { H.command && H.command('ready', ''); },
     LocalFileSaveChanges: noop,
     OnSave: noop,                         // 'save round finished' notice for the desktop shell
@@ -526,7 +663,10 @@
     // ---- save: engine -> Editor.bin -> x2t -> original format -> host
     LocalFileSave: function (param, password, docinfo, fileType) {
       var ed = editor();
-      var done = function (err) { try { window.DesktopOfflineAppDocumentEndSave(err, '', ''); } catch (e) { log('endsave', e); } };
+      var done = function (err) {
+        if (err === 0) hub.set('saved', true);  // the file holds the document (a Save As copy ends with 1: not this file)
+        try { window.DesktopOfflineAppDocumentEndSave(err, '', ''); } catch (e) { log('endsave', e); }
+      };
       if (!ed || !opened) { log('save: nothing open'); return done(2); }
       log('save start', opened.name);
       var t0 = Date.now(), bin;
@@ -611,10 +751,18 @@
     buildCryptedStart: noop, buildCryptedEnd: noop,
     convertFile: noop,
     startExternalConvertation: noop,
-    openExternalReference: noop
+    openExternalReference: noop,
+
+    // ---- feature probes answered "not here" on purpose: the editors only test whether these exist, and undefined
+    // keeps their non-desktop path (exactly what the unknown-member Proxy below returned). Listed so that the CI gate
+    // (check_saved.py) can fail on every NEW 'missing AscDesktopEditor.*' line after an editor update.
+    LocalFileOpenRecover: undefined,          // the desktop start page's crash-recovery list
+    isSupportBinaryFontsSprite: undefined,    // font picker keeps the picture sprite the app serves (fontsSprite)
+    onFileLockedClose: undefined              // spreadsheets: tell the desktop window a cell is being edited
   };
 
-  // Unknown members: log once so the harness shows what else the editors ask for.
+  // Unknown members: log once so the harness shows what else the editors ask for. CI fails on any such line
+  // (scripts/check_saved.py): add the member above - implemented, or as a deliberate undefined probe.
   var seen = {};
   window.AscDesktopEditor = (typeof Proxy === 'function') ? new Proxy(A, {
     get: function (t, k) {
