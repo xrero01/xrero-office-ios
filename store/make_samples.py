@@ -17,6 +17,27 @@ OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "samples")
 os.makedirs(OUT, exist_ok=True)
 TEAL, DEEP, GOLD, GREY = (0x1F, 0x7A, 0x8C), (0x15, 0x4F, 0x5E), (0xC8, 0x8A, 0x12), (0x55, 0x5F, 0x66)
 
+# ------------------------------------------------------------------ chart for the report (numbers only)
+def chart_png(lang):
+    import matplotlib; matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    q = [[1.02, 0.81, 0.37], [1.24, 0.98, 0.41]]            # Q2 vs Q3, AED millions per branch
+    fig, ax = plt.subplots(figsize=(8, 3.2), dpi=200)
+    xs = range(3)
+    if lang == "ar":
+        xs = range(2, -1, -1)                              # right-to-left order
+    for i, (vals, col) in enumerate(zip(q, ("#9FCBD3", "#1F7A8C"))):
+        bars = ax.bar([x + (i - 0.5) * 0.36 for x in xs], vals, 0.34, color=col)
+        if i == 1:
+            for b, v in zip(bars, vals):
+                ax.text(b.get_x() + b.get_width() / 2, v + 0.03, "%.2f" % v, ha="center", fontsize=11, color="#154F5E", fontweight="bold")
+    ax.set_xticks([]); ax.set_yticks([]); ax.set_ylim(0, 1.45)
+    for sp in ax.spines.values(): sp.set_visible(False)
+    ax.axhline(0, color="#C9D6DA", lw=1)
+    fig.tight_layout(pad=0.4)
+    f = os.path.join(OUT, "_chart_%s.png" % lang); fig.savefig(f, transparent=True); plt.close(fig)
+    return f
+
 # ------------------------------------------------------------------ Word
 def rtl_paragraph(p):
     pPr = p._p.get_or_add_pPr()
@@ -59,6 +80,11 @@ def report(lang):
         "cols": (["الفرع", "الإيرادات (درهم)", "النمو"], ["Branch", "Revenue (AED)", "Growth"]),
         "rows": ([["دبي", "1,240,000", "+21%"], ["أبوظبي", "980,000", "+17%"], ["الشارقة", "410,000", "+9%"]],
                  [["Dubai", "1,240,000", "+21%"], ["Abu Dhabi", "980,000", "+17%"], ["Sharjah", "410,000", "+9%"]]),
+        "kpi": ([("2.63M", "الإيرادات (درهم)"), ("+18%", "النمو الربعي"), ("3", "فروع")],
+                [("2.63M", "Revenue (AED)"), ("+18%", "Quarterly growth"), ("3", "Branches")]),
+        "h3": ("الخطوات التالية", "Next steps"),
+        "next": (["توسيع الفروع في الإمارات الشمالية", "إطلاق المتجر الإلكتروني في الربع الرابع", "رفع رضا العملاء إلى 95%"],
+                 ["Expand into the Northern Emirates", "Launch the online store in Q4", "Lift customer satisfaction to 95%"]),
         "end": ("نشكر جميع فرق العمل على جهودهم المتميزة، ونتطلع إلى ربع رابع أقوى.",
                 "Thank you to every team for an outstanding quarter - we look forward to an even stronger Q4."),
     }
@@ -72,6 +98,16 @@ def report(lang):
     para(T["title"][k], 24, True, DEEP, 2)
     para(T["sub"][k], 12, False, TEAL, 14)
     para(T["intro"][k], 11.5, False, None, 12)
+    # key numbers: three big figures in tinted cells
+    kp = d.add_table(rows=2, cols=3)
+    if ar:
+        kp._tbl.tblPr.append(OxmlElement("w:bidiVisual"))
+    for c, (num, lab) in enumerate(T["kpi"][k]):
+        for r_, (txt, size, bold, col) in enumerate(((num, 22, True, DEEP), (lab, 10, False, GREY))):
+            cell = kp.rows[r_].cells[c]; cell.text = ""; q = cell.paragraphs[0]; q.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            if ar: rtl_paragraph(q)
+            run(q, txt, size, bold, col, font, ar); shade(cell, "E6F4F6")
+    para("", 6)
     para(T["h1"][k], 15, True, TEAL, 6)
     for b in T["b"][k]:
         p = para("•  " + b, 11.5, False, None, 3)
@@ -91,7 +127,13 @@ def report(lang):
             if ar: rtl_paragraph(p)
             run(p, v, 11, c == 0, (0x1B, 0x8A, 0x4B) if c == 2 else None, font, ar)
             if r_i % 2 == 0: shade(cell, "EEF6F8")
-    para("", 6)
+    para("", 4)
+    d.add_picture(chart_png(lang), width=Cm(16.5))
+    d.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
+    para(T["h3"][k], 15, True, TEAL, 6)
+    for b in T["next"][k]:
+        para("•  " + b, 11.5, False, None, 3)
+    para("", 4)
     para(T["end"][k], 11.5, False, GREY, 6)
     d.save(os.path.join(OUT, "report_%s.docx" % lang))
 
@@ -138,6 +180,14 @@ def sales(lang):
     ws.column_dimensions["I"].width = 10
     note = ws.cell(row=9, column=1, value="أعلى نمو: الشارقة" if ar else "Fastest growth: Sharjah")
     note.font = Font(name=font, size=12, bold=True, color="C88A12")
+    from openpyxl.chart import BarChart, Reference
+    ch = BarChart(); ch.type = "col"; ch.style = 10; ch.height, ch.width = 7.5, 17
+    ch.title = "المبيعات الشهرية" if ar else "Monthly sales"
+    ch.add_data(Reference(ws, min_col=1, max_col=7, min_row=4, max_row=6), from_rows=True, titles_from_data=True)
+    ch.set_categories(Reference(ws, min_col=2, max_col=7, min_row=3))
+    for sr, col in zip(ch.series, ("1F7A8C", "1E9E5A", "C88A12")):
+        sr.graphicalProperties.solidFill = col; sr.graphicalProperties.line.solidFill = col
+    ws.add_chart(ch, "A11")
     wb.save(os.path.join(OUT, "sales_%s.xlsx" % lang))
 
 # ------------------------------------------------------------------ PowerPoint
@@ -168,4 +218,6 @@ def deck(lang):
 
 for lang in ("ar", "en"):
     report(lang); sales(lang); deck(lang)
+for f in os.listdir(OUT):
+    if f.startswith("_chart_"): os.remove(os.path.join(OUT, f))
 print(sorted(os.listdir(OUT)))
