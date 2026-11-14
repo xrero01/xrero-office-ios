@@ -436,8 +436,15 @@ final class EditorUITests: XCTestCase {
             print("XR menu \(name) opened: \(p0)")
             XCTAssertTrue(p0.contains("filetab=0"), "the web File tab is still shown on touch (\(name)): \(p0)")
 
-            // ⋯ as the user sees it: every entry, no PDF / Print
-            openMenu()
+            // ⋯ as the user sees it: every entry, no PDF / Print (a first tap can come while the bar is still settling:
+            // open it again until its first entry is there)
+            for attempt in 0..<3 {
+                if attempt > 0 { app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.01)).tap(); sleep(1) }
+                _ = hittable(more, 5)
+                openMenu()
+                if hittable(app.buttons["xr-menu-find"].firstMatch, 4) { break }
+                print("XR menu \(name): ⋯ did not open - again")
+            }
             var ids = ["xr-menu-find", "xr-bar-save", "xr-nav-share", "xr-menu-export", "xr-menu-info", "xr-nav-lang",
                        "xr-nav-account", "xr-menu-about", "xr-menu-alltools"]
             if !pad { ids.insert("xr-bar-redo", at: 1) }
