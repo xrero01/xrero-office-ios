@@ -33,13 +33,10 @@ struct EditorTopBar<More: View>: ViewModifier {
                 ToolbarItem(placement: .topBarLeading) {
                     Button(action: back) {
                         // iPad: chevron + "Documents"; iPhone: the chevron alone (the room goes to the file name)
-                        // (an HStack, not a Label: bars draw a Label as its icon alone on iOS 26)
-                        if wide {
-                            HStack(spacing: 4) {
-                                Image(systemName: "chevron.backward")
-                                Text(BarText.documents(ar)).lineLimit(1)
-                            }
-                        } else { Image(systemName: "chevron.backward") }
+                        // one Text with the chevron inline: iOS 26 bars draw a Label, or an image beside a text, as the
+                        // icon alone (CI showed a 44 pt icon-only Back on iPad with both)
+                        if wide { Text("\(Image(systemName: "chevron.backward")) \(BarText.documents(ar))").lineLimit(1) }
+                        else { Image(systemName: "chevron.backward") }
                     }
                     .frame(minWidth: 44, minHeight: 44)
                     .contentShape(Rectangle())

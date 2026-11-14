@@ -273,7 +273,7 @@ final class EditorUITests: XCTestCase {
             let status = app.staticTexts["xr-bar-status"]
             let savedWord = ar ? "محفوظ" : "Saved", editedWord = ar ? "معدَّل" : "Edited"
             // one snapshot per read: the line can go away between an `exists` and a `label` (that would fail the test)
-            func statusNow() -> String { (try? status.snapshot())?.label ?? "(none)" }
+            func statusNow() -> String { (try? status.firstMatch.snapshot())?.label ?? "(none)" }
             func waitStatus(_ want: String, _ timeout: TimeInterval) -> String {
                 let end = Date().addingTimeInterval(timeout)
                 while Date() < end {
@@ -285,7 +285,7 @@ final class EditorUITests: XCTestCase {
             func waitProbe(_ part: String, _ timeout: TimeInterval) -> Bool {
                 let end = Date().addingTimeInterval(timeout)
                 while Date() < end {
-                    if ((try? probe.snapshot())?.label ?? "").contains(part) { return true }
+                    if ((try? probe.firstMatch.snapshot())?.label ?? "").contains(part) { return true }
                     Thread.sleep(forTimeInterval: 0.3)
                 }
                 return false
