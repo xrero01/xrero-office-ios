@@ -421,7 +421,7 @@ final class EditorUITests: XCTestCase {
                     if let sub {
                         let s = app.buttons[sub].firstMatch
                         guard hittable(s, 4) else { continue }
-                        s.tap(); usleep(800_000)
+                        s.tap(); sleep(2)             // the submenu redraws its rows while it unfolds: wait it out
                     }
                     let e = app.buttons[id].firstMatch
                     guard hittable(e, 4) else { continue }
@@ -450,7 +450,7 @@ final class EditorUITests: XCTestCase {
                            "PDF / Print offered before the spike passed (\(name))")
             shot(app, "60-menu-\(name)")
             app.buttons["xr-menu-export"].firstMatch.tap()
-            usleep(800_000)
+            sleep(2)
             for ext in ["docx", "odt", "rtf"] {
                 XCTAssertTrue(app.buttons["xr-export-" + ext].firstMatch.waitForExistence(timeout: 3), "Export ▸ has no .\(ext) (\(name))")
             }
