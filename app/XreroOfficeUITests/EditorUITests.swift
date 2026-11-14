@@ -272,11 +272,12 @@ final class EditorUITests: XCTestCase {
             let probe = app.staticTexts["xr-editor-state"]
             let status = app.staticTexts["xr-bar-status"]
             let savedWord = ar ? "محفوظ" : "Saved", editedWord = ar ? "معدَّل" : "Edited"
-            func statusNow() -> String { status.exists ? status.label : "(none)" }
+            // one snapshot per read: the line can go away between an `exists` and a `label` (that would fail the test)
+            func statusNow() -> String { (try? status.snapshot())?.label ?? "(none)" }
             func waitStatus(_ want: String, _ timeout: TimeInterval) -> String {
                 let end = Date().addingTimeInterval(timeout)
                 while Date() < end {
-                    if status.exists && status.label == want { return want }
+                    if statusNow() == want { return want }
                     Thread.sleep(forTimeInterval: 0.3)
                 }
                 return statusNow()
@@ -284,7 +285,7 @@ final class EditorUITests: XCTestCase {
             func waitProbe(_ part: String, _ timeout: TimeInterval) -> Bool {
                 let end = Date().addingTimeInterval(timeout)
                 while Date() < end {
-                    if probe.exists && probe.label.contains(part) { return true }
+                    if ((try? probe.snapshot())?.label ?? "").contains(part) { return true }
                     Thread.sleep(forTimeInterval: 0.3)
                 }
                 return false
@@ -301,9 +302,11 @@ final class EditorUITests: XCTestCase {
             XCTAssertTrue(more.exists, "no ⋯ menu in the top bar (\(name))")
             XCTAssertEqual(app.buttons["xr-bar-redo"].exists, pad, "Redo in the bar: iPad only (\(name))")
             XCTAssertNotEqual(statusNow(), savedWord, "'Saved' before any save (\(name))")
-            // 44 pt targets
+            // 44 pt targets: at least 44 pt wide; on iOS 26 the bar draws its buttons as 36 pt glass capsules and
+            // extends their touch area over the whole bar height itself, so the reported height may be 36
             for (id, e) in [("back", back), ("undo", undo), ("more", more)] {
-                XCTAssertGreaterThanOrEqual(min(e.frame.width, e.frame.height), 43.5, "\(id) is smaller than 44 pt (\(name)): \(e.frame)")
+                XCTAssertGreaterThanOrEqual(e.frame.width, 43.5, "\(id) is narrower than 44 pt (\(name)): \(e.frame)")
+                XCTAssertGreaterThanOrEqual(e.frame.height, 35.5, "\(id) is too short (\(name)): \(e.frame)")
             }
             // the editors' title row is gone: no web Save / Undo buttons (the native bar replaces them)
             let webTitle = app.webViews.buttons.matching(NSPredicate(format:

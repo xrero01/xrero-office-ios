@@ -51,10 +51,10 @@ final class ReviewVideoTests: XCTestCase {
         find(app.webViews.buttons, format, timeout: timeout)
     }
 
-    /// The top bar's second line (nil when it shows none).
+    /// The top bar's second line (nil when it shows none). Read through one snapshot: the line can go away between an
+    /// `exists` and a `label` (Opening... -> nothing), which would fail the whole test.
     private func barStatus() -> String? {
-        let s = app.staticTexts["xr-bar-status"]
-        return s.exists ? s.label : nil
+        (try? app.staticTexts["xr-bar-status"].snapshot())?.label
     }
 
     /// The editor is ready when the native top bar's title is up and its second line no longer says Opening… (plan
