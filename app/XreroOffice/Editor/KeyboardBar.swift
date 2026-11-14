@@ -21,7 +21,11 @@ import WebKit
 struct KeyboardBar: View {
     static let height: CGFloat = 44
     static let flagKey = "xr.keyboardBar"
-    static var enabled: Bool { UserDefaults.standard.object(forKey: flagKey) as? Bool ?? true }
+    /// Unset = on. bool(forKey:) also reads the launch-argument form ("-xr.keyboardBar NO" arrives as the STRING "NO",
+    /// which `as? Bool` does not convert: seen on CI, the bar stayed on in the test that turns it off).
+    static var enabled: Bool {
+        UserDefaults.standard.object(forKey: flagKey) == nil || UserDefaults.standard.bool(forKey: flagKey)
+    }
 
     @ObservedObject var state: EditorState
     let controller: EditorController
