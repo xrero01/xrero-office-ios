@@ -12,7 +12,8 @@ permissions:
 jobs:
   ios:
     runs-on: macos-15
-    timeout-minutes: 90
+    # 120: the document-menu test (M7b) adds ~6 min per device; a slow shared runner cut the iPad half at 90
+    timeout-minutes: 120
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
