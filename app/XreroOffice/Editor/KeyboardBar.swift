@@ -105,14 +105,17 @@ struct KeyboardBar: View {
     }
 
     /// Alignment cycles start -> centre -> end -> start, where start is the paragraph's own reading edge (right in a
-    /// right-to-left paragraph). The engine stores the LOGICAL edge: AscCommon.align_Left (1) is the start and
-    /// align_Right (0) the end, also in a right-to-left paragraph (the editor's own ribbon reads it that way:
-    /// Toolbar.onApiParagraphAlign shows Align Right pressed for 1 when the paragraph is right-to-left). So the cycle
-    /// sends the logical values and the glyph shows the VISUAL edge, unmirrored (seen on CI: a right-aligned Arabic
-    /// paragraph reported "left").
+    /// right-to-left paragraph). The engine is asymmetric here, so both directions are read from its source:
+    ///  - put_PrAlign takes the VISUAL edge: Paragraph.SetParagraphAlign swaps align_Left / align_Right for a
+    ///    right-to-left paragraph before storing it (the ribbon's Align Right always sends align_Right);
+    ///  - asc_onPrAlign (EditorState.alignment) reports the STORED, logical edge: "left" = start, "right" = end, also
+    ///    in a right-to-left paragraph (Toolbar.onApiParagraphAlign presses Align Right for align_Left there).
+    /// So the cycle reads the logical state, sends the visual edge, and the glyph shows the visual edge unmirrored
+    /// (both seen on CI in Arabic: a right-aligned paragraph reported "left"; sending the logical value went back).
     private var alignButton: some View {
         let rtl = state.direction == .rtl
-        let start = 1, center = 2, end = 0                      // AscCommon.align_Left / align_Center / align_Right
+        // AscCommon.align_Left = 1, align_Center = 2, align_Right = 0, as visual edges for put_PrAlign
+        let center = 2, start = rtl ? 0 : 1, end = rtl ? 1 : 0
         let next: Int
         switch state.alignment {
         case .center: next = end
