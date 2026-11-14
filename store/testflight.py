@@ -45,7 +45,9 @@ def main():
 
     # select this build for the version being prepared (still not submitted)
     vers = U.must(*U.api("GET", f"/v1/apps/{app_id}/appStoreVersions?filter[platform]=IOS"), "versions")["data"]
-    ver = next(v for v in vers if v["attributes"]["appStoreState"] in ("PREPARE_FOR_SUBMISSION", "DEVELOPER_REJECTED", "REJECTED", "METADATA_REJECTED"))
+    ver = next((v for v in vers if v["attributes"]["appStoreState"] in ("PREPARE_FOR_SUBMISSION", "DEVELOPER_REJECTED", "REJECTED", "METADATA_REJECTED")), None)
+    if not ver:
+        print("no iOS version in preparation - build is on TestFlight only"); return
     U.must(*U.api("PATCH", f"/v1/appStoreVersions/{ver['id']}/relationships/build", {"data": {"type": "builds", "id": bid}}), "select build")
     print("version", ver["attributes"]["versionString"], "now uses build", b["attributes"]["version"], "- not submitted for review")
 
