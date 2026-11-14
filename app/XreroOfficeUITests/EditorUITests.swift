@@ -822,12 +822,16 @@ final class EditorUITests: XCTestCase {
         // the button state follows the tap a moment later on the phone (one probe right after the tap read bold=false
         // on 2 of 3 CI runs while the tap had landed): look again for up to ~2 s, never tap a second time (that toggles)
         for _ in 0..<3 where tapped && !flag(p7, "bold") { usleep(700_000); p7 = probe(app) }
-        gate("bold-button-applies", tapped && flag(p7, "bold"), "tapped=\(tapped) bold=\(flag(p7, "bold")) fold=\(str(p7, "fold"))")
         gate("format-tap-keeps-keyboard", tapped && focused(p7), focusInfo(p7))
         shot(app, "54-touch-\(lang)-bold")
         if !focused(p7) { tapEnd(); _ = probe(app) }                     // so the later checks still run (logged above)
         typeSlowly(app, " " + boldWord)
         let p8 = probe(app)
+        // Bold with nothing selected is a pending format: the ribbon button lights up at once (seen in the CI shots), but
+        // the caret's text properties can still read not-bold until a letter is typed - so the word typed after the tap
+        // decides (check_saved.py also checks that word is a bold run in the saved file)
+        gate("bold-button-applies", tapped && (flag(p7, "bold") || flag(p8, "bold")),
+             "tapped=\(tapped) bold after tap=\(flag(p7, "bold")) after typing=\(flag(p8, "bold")) fold=\(str(p7, "fold"))")
         gate("type-after-format", plain(p8).contains(sentence.prefix(4)) && (plain(p8).components(separatedBy: "|").first ?? "").hasSuffix(boldWord),
              "bold=\(flag(p8, "bold")) text=\(plain(p8).prefix(80))")
         let paras8 = Int(num(p8, "paras") ?? 0)
