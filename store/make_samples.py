@@ -22,7 +22,7 @@ def chart_png(lang):
     import matplotlib; matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     q = [[1.02, 0.81, 0.37], [1.24, 0.98, 0.41]]            # Q2 vs Q3, AED millions per branch
-    fig, ax = plt.subplots(figsize=(8, 3.2), dpi=200)
+    fig, ax = plt.subplots(figsize=(8, 2.6), dpi=200)
     xs = range(3)
     if lang == "ar":
         xs = range(2, -1, -1)                              # right-to-left order
@@ -128,7 +128,7 @@ def report(lang):
             run(p, v, 11, c == 0, (0x1B, 0x8A, 0x4B) if c == 2 else None, font, ar)
             if r_i % 2 == 0: shade(cell, "EEF6F8")
     para("", 4)
-    d.add_picture(chart_png(lang), width=Cm(16.5))
+    d.add_picture(chart_png(lang), width=Cm(13))
     d.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
     para(T["h3"][k], 15, True, TEAL, 6)
     for b in T["next"][k]:
@@ -180,14 +180,6 @@ def sales(lang):
     ws.column_dimensions["I"].width = 10
     note = ws.cell(row=9, column=1, value="أعلى نمو: الشارقة" if ar else "Fastest growth: Sharjah")
     note.font = Font(name=font, size=12, bold=True, color="C88A12")
-    from openpyxl.chart import BarChart, Reference
-    ch = BarChart(); ch.type = "col"; ch.style = 10; ch.height, ch.width = 7.5, 17
-    ch.title = "المبيعات الشهرية" if ar else "Monthly sales"
-    ch.add_data(Reference(ws, min_col=1, max_col=7, min_row=4, max_row=6), from_rows=True, titles_from_data=True)
-    ch.set_categories(Reference(ws, min_col=2, max_col=7, min_row=3))
-    for sr, col in zip(ch.series, ("1F7A8C", "1E9E5A", "C88A12")):
-        sr.graphicalProperties.solidFill = col; sr.graphicalProperties.line.solidFill = col
-    ws.add_chart(ch, "A11")
     wb.save(os.path.join(OUT, "sales_%s.xlsx" % lang))
 
 # ------------------------------------------------------------------ PowerPoint
