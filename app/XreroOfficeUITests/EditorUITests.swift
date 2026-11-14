@@ -969,9 +969,16 @@ final class EditorUITests: XCTestCase {
         // keydown/input -> second requestAnimationFrame (not the canvas paint itself), with the probe paused while typing
         info("typing-latency", "n=\(num(lat, "n") ?? 0) median=\(num(lat, "med") ?? -1) ms p95=\(num(lat, "p95") ?? -1) ms (keydown->2rAF, probe paused, simulator)")
 
-        // 9b) the keyboard bar's last button puts the keyboard away (plan M5); a tap past the line's end brings it up
-        //     first when the pinches left it down
-        if !focused(probe(app)) { tapEnd(); _ = probe(app) }
+        // 9b) the keyboard bar's last button puts the keyboard away (plan M5); the keyboard is brought up first when the
+        //     pinches left it down. Not with tapEnd(): its point was measured at the old zoom and the pinch-in changed
+        //     the page scale, so it can land in the text and open the desktop menu (CI run 43588342045, iPhone AR).
+        //     The caret's position is measured again at the current zoom and tapped; an open menu is closed with Esc.
+        var q0 = probe(app)
+        for _ in 0..<3 where !focused(q0) {
+            if (num(q0, "menu") ?? 0) > 0 { app.typeKey(XCUIKeyboardKey.escape, modifierFlags: []); q0 = probe(app) }
+            if let x = num(q0, "cx"), let y = num(q0, "cy") { tap(x, y) } else { tapEnd() }
+            usleep(500_000); q0 = probe(app)
+        }
         let kbHide = app.buttons["xr-kb-hide"]
         let hideShown = kbHide.waitForExistence(timeout: 10) && kbHide.isHittable
         if hideShown { kbHide.tap() }
