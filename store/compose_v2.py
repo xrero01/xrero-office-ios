@@ -49,6 +49,27 @@ PRIVATE = {
            ("مجاني ومفتوح المصدر", "كل الميزات دون أي تكلفة")],
 }
 
+_S = 'fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"'
+ICONS = {   # 24-unit line icons, white on the teal tile
+    "device": f'<svg viewBox="0 0 24 24" {_S}><rect x="6" y="2.5" width="12" height="19" rx="2.6"/><path d="M10.5 18.5h3"/><path d="M9.5 9.5l2 2 3.5-4"/></svg>',
+    "offline": f'<svg viewBox="0 0 24 24" {_S}><path d="M6.5 18.5h10a4 4 0 0 0 .6-7.95A6 6 0 0 0 7 9.2 4.7 4.7 0 0 0 6.5 18.5z"/><path d="M3 3l18 18"/></svg>',
+    "account": f'<svg viewBox="0 0 24 24" {_S}><circle cx="12" cy="8" r="3.6"/><path d="M5 20c.8-3.6 3.6-5.5 7-5.5s6.2 1.9 7 5.5"/><path d="M3 3l18 18"/></svg>',
+    "track": f'<svg viewBox="0 0 24 24" {_S}><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/><path d="M3 3l18 18"/></svg>',
+}
+SHIELD = """<svg viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg"><defs>
+<radialGradient id="g" cx="50%" cy="45%" r="50%"><stop offset="0" stop-color="#5FE0CF" stop-opacity=".45"/><stop offset="1" stop-color="#5FE0CF" stop-opacity="0"/></radialGradient>
+<linearGradient id="sf" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff" stop-opacity=".22"/><stop offset="1" stop-color="#ffffff" stop-opacity=".05"/></linearGradient>
+<linearGradient id="se" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#B8FFF5"/><stop offset="1" stop-color="#14A7BF"/></linearGradient></defs>
+<circle cx="200" cy="200" r="200" fill="url(#g)"/>
+<circle cx="200" cy="200" r="168" fill="none" stroke="#5FE0CF" stroke-opacity=".18" stroke-width="2"/>
+<circle cx="200" cy="200" r="132" fill="none" stroke="#5FE0CF" stroke-opacity=".12" stroke-width="2"/>
+<path d="M200 70 L300 108 V196 C300 262 258 310 200 334 C142 310 100 262 100 196 V108 Z" fill="url(#sf)" stroke="url(#se)" stroke-width="7" stroke-linejoin="round"/>
+<path d="M166 150 h50 l22 22 v74 a8 8 0 0 1 -8 8 h-64 a8 8 0 0 1 -8 -8 v-88 a8 8 0 0 1 8 -8 z" fill="#ffffff"/>
+<path d="M216 150 v16 a6 6 0 0 0 6 6 h16 z" fill="#B8E6EC"/>
+<rect x="172" y="180" width="40" height="7" rx="3.5" fill="#9FCBD3"/><rect x="172" y="194" width="52" height="7" rx="3.5" fill="#CFE6EA"/>
+<circle cx="236" cy="248" r="26" fill="#0585A1" stroke="#ffffff" stroke-width="5"/>
+<path d="M224 248 l9 9 l16 -18" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/></svg>"""
+
 def png_size(p):
     return struct.unpack(">II", open(p, "rb").read()[16:24])
 
@@ -100,7 +121,7 @@ def page(device, lang, frame, i):
     kind, doc, eb, h1, sub = frame
     rtl = lang == "ar"
     big = device == "ipad"
-    dark = kind == "dark"
+    dark = kind in ("dark", "private")
     body = ""
     if kind == "hero":
         chips = "".join(f'<span class="chip">{c}</span>' for c in CHIPS[lang])
@@ -115,19 +136,33 @@ def page(device, lang, frame, i):
 <div class="hero"><img src="{ICON}"><div class="name">Xrero Office</div><h1>{h1}</h1><div class="chips">{chips}</div></div>"""
         body += device_html(device, RAW / f"{device}-{doc}.png", 1060 if big else 1280)
     elif kind == "private":
-        rows = "".join(f'<div class="r"><div class="ck">&#10003;</div><div><b>{a}</b><span>{b}</span></div></div>' for a, b in PRIVATE[lang])
+        # dark statement page: a glass shield holding a document, four feature tiles with their own icons, a wide
+        # "free" bar and the app mark - fills the page from top to bottom (no device)
+        items = PRIVATE[lang]
+        tiles = "".join(f'<div class="t"><div class="ic">{ICONS[n]}</div><b>{a}</b><span>{b_}</span></div>'
+                        for n, (a, b_) in zip(("device", "offline", "account", "track"), items[:4]))
+        sw = 640 if big else 620
         body = f"""<style>
-.list{{position:absolute;left:{260 if big else 96}px;right:{260 if big else 96}px;top:{640 if big else 700}px}}
-.r{{display:flex;gap:40px;align-items:center;background:#fff;border-radius:44px;padding:{50 if big else 46}px {56}px;margin-bottom:34px;
-    box-shadow:0 14px 40px rgba(6,60,72,.08)}}
-.ck{{flex:none;width:110px;height:110px;border-radius:32px;background:linear-gradient(135deg,#14A7BF,#035569);color:#fff;
-     font:700 62px/110px sans-serif;text-align:center}}
-.r b{{display:block;font:700 {58 if big else 54}px/1.2 {'Tajawal' if rtl else 'Montserrat'};color:#0B2A33;letter-spacing:{0 if rtl else -.5}px}}
-.r span{{display:block;font-size:{42 if big else 40}px;line-height:1.35;color:#4A6A72;margin-top:10px}}
-.foot{{position:absolute;left:0;right:0;bottom:{150 if big else 170}px;display:flex;gap:28px;justify-content:center;align-items:center;
-      font:700 52px/1 {'Tajawal' if rtl else 'Montserrat'};color:#0585A1}}
-.foot img{{width:110px;height:110px;border-radius:25px}}</style>
-<div class="list">{rows}</div><div class="foot"><img src="{ICON}">Xrero Office</div>"""
+.shield{{position:absolute;left:50%;transform:translateX(-50%);top:{470 if big else 480}px;width:{sw}px;height:{sw}px}}
+.stack{{position:absolute;left:{200 if big else 80}px;right:{200 if big else 80}px;top:{1160 if big else 1170}px}}
+.grid{{display:grid;grid-template-columns:1fr 1fr;gap:{34 if big else 30}px}}
+.t{{background:linear-gradient(180deg,rgba(255,255,255,.09),rgba(255,255,255,.04));border:2px solid rgba(255,255,255,.12);
+    border-radius:48px;padding:{52 if big else 46}px {48 if big else 42}px;min-height:{300 if big else 330}px;box-sizing:border-box}}
+.ic{{width:120px;height:120px;border-radius:36px;background:linear-gradient(135deg,#5FE0CF,#0585A1);display:flex;align-items:center;
+     justify-content:center;box-shadow:0 14px 34px rgba(5,133,161,.45)}}
+.ic svg{{width:66px;height:66px}}
+.t b{{display:block;margin-top:34px;font:700 {54 if big else 50}px/1.2 {'Tajawal' if rtl else 'Montserrat'};color:#F2FAFB;letter-spacing:{0 if rtl else -.5}px}}
+.t span{{display:block;margin-top:14px;font-size:{40 if big else 36}px;line-height:1.35;color:#A9C9D0}}
+.free{{margin-top:{34 if big else 30}px;border-radius:999px;
+      padding:38px 56px;background:linear-gradient(90deg,#5FE0CF,#14A7BF);color:#06222B;display:flex;align-items:center;justify-content:center;gap:24px;
+      font:700 {52 if big else 48}px/1.1 {'Tajawal' if rtl else 'Montserrat'}}}
+.free small{{font:500 {40 if big else 36}px/1.2 {'Tajawal' if rtl else 'Open'};opacity:.8}}
+.foot{{position:absolute;left:0;right:0;bottom:{140 if big else 160}px;display:flex;gap:26px;justify-content:center;align-items:center;
+      font:700 52px/1 {'Tajawal' if rtl else 'Montserrat'};color:#F2FAFB}}
+.foot img{{width:112px;height:112px;border-radius:26px;box-shadow:0 12px 30px rgba(0,0,0,.35)}}</style>
+<div class="shield">{SHIELD}</div><div class="stack"><div class="grid">{tiles}</div>
+<div class="free">{items[4][0]}<small>· {items[4][1]}</small></div></div>
+<div class="foot"><img src="{ICON}">Xrero Office</div>"""
     else:
         body = device_html(device, RAW / f"{device}-{doc}.png", 760 if big else 820)
     dot = ""
