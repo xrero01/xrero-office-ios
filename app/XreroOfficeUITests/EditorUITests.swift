@@ -436,6 +436,12 @@ final class EditorUITests: XCTestCase {
             sleep(5)
             shot(app, "store-\(p[1])-\(p[0])")
             XCTAssertEqual(ready, "ready", "\(p[0]) did not open")
+            // the same document in dark mode (the editor follows iOS live): one dark screen per kind for the listing
+            XCUIDevice.shared.system.open(URL(string: "xrero-autotest://appearance?dark=1")!)
+            sleep(4)
+            shot(app, "store-\(p[1])-dark\(p[0])")
+            XCUIDevice.shared.system.open(URL(string: "xrero-autotest://appearance?dark=0")!)
+            sleep(2)
             app.terminate()
         }
     }
