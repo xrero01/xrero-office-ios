@@ -296,6 +296,8 @@ final class EditorUITests: XCTestCase {
             // the bar as opened: one Back, the name, Undo (nothing to undo yet), ⋯; Redo in the bar on iPad only
             XCTAssertTrue(back.waitForExistence(timeout: 10), "no Back in the top bar (\(name))")
             XCTAssertEqual(back.label, ar ? "المستندات" : "Documents", "Back label (\(name))")
+            // iPad: "Documents" is written next to the chevron (a wider button than the chevron alone)
+            if pad { XCTAssertGreaterThan(back.frame.width, 70, "iPad Back shows no 'Documents' text (\(name)): \(back.frame)") }
             XCTAssertTrue(title.exists && title.label == "xr-bar-\(lang)", "title (\(name)): \(title.exists ? title.label : "missing")")
             XCTAssertTrue(undo.exists, "no Undo in the top bar (\(name))")
             XCTAssertFalse(undo.isEnabled, "Undo enabled with nothing to undo (\(name))")
