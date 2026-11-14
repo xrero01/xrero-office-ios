@@ -16,16 +16,16 @@ import WebKit
 /// the keyboard and the engine keeps its input field focused: the next letter goes where the caret was, with the
 /// new format.
 ///
-/// Flag: UserDefaults "xr.keyboardBar" (default on). Off = WebKit's own bar comes back exactly as before (rollback
-/// without a new build: `defaults write` / launch argument `-xr.keyboardBar NO`).
+/// Flag: UserDefaults "xr.keyboardBar" (default OFF). The plan turns it on by default only after its gate: a green CI
+/// run plus the real-device checks the simulator cannot do (Arabic predictive text, Japanese marked text, latency
+/// with the bar shown). Until then it is switched on per run (`defaults write` / launch argument
+/// `-xr.keyboardBar YES`, as the touch gate does). Off = WebKit's own bar, exactly as before.
 struct KeyboardBar: View {
     static let height: CGFloat = 44
     static let flagKey = "xr.keyboardBar"
-    /// Unset = on. bool(forKey:) also reads the launch-argument form ("-xr.keyboardBar NO" arrives as the STRING "NO",
-    /// which `as? Bool` does not convert: seen on CI, the bar stayed on in the test that turns it off).
-    static var enabled: Bool {
-        UserDefaults.standard.object(forKey: flagKey) == nil || UserDefaults.standard.bool(forKey: flagKey)
-    }
+    /// Unset = off (see "Flag" above). bool(forKey:) also reads the launch-argument form ("-xr.keyboardBar YES"
+    /// arrives as the STRING "YES", which `as? Bool` does not convert: seen on CI with "NO").
+    static var enabled: Bool { UserDefaults.standard.bool(forKey: flagKey) }
 
     @ObservedObject var state: EditorState
     let controller: EditorController
@@ -94,7 +94,7 @@ struct KeyboardBar: View {
         return Button { run("direction", "a.asc_setRtlTextDirection(\(!rtl))") } label: {
             HStack(spacing: 1) {
                 if rtl { Image(systemName: "arrow.left").font(.system(size: 12, weight: .bold)) }
-                Image(systemName: "paragraphsign").font(.system(size: 20, weight: .regular))
+                Image(systemName: "paragraphsign").font(.system(size: 22, weight: .regular))
                 if !rtl { Image(systemName: "arrow.right").font(.system(size: 12, weight: .bold)) }
             }
             .environment(\.layoutDirection, .leftToRight)
@@ -167,7 +167,7 @@ struct KeyboardBar: View {
 
     private func symbol(_ name: String, on: Bool) -> some View {
         Image(systemName: name)
-            .font(.system(size: 20, weight: on ? .semibold : .regular))
+            .font(.system(size: 22, weight: on ? .semibold : .regular))      // plan: 22 pt symbols
             .foregroundStyle(on ? Color.xrDocument : Color.primary)
             .frame(width: 32, height: 32)
             .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -223,7 +223,28 @@ final class XRWebView: WKWebView {
     override var inputAccessoryView: UIView? {
         guard let bar = keyboardBar else { return super.inputAccessoryView }
         // iPhone landscape (under 400 pt tall): the document needs every point; WebKit's slim bar keeps its Done
-        if let h = window?.bounds.height, h < 400 { return super.inputAccessoryView }
+        if isShort { return super.inputAccessoryView }
         return bar
+    }
+
+    private var isShort: Bool { (window?.bounds.height ?? .greatestFiniteMagnitude) < 400 }
+    private var lastShort: Bool?
+
+    /// The accessory is only asked for when the keyboard comes up, so a rotation with the keyboard up would keep the
+    /// wrong bar until the next focus. When the <400 pt answer flips while the editor holds the keyboard, ask the
+    /// current first responder (WebKit's content view, our subview) to reload its input views. Public API only.
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard keyboardBar != nil, window != nil else { return }
+        let short = isShort
+        defer { lastShort = short }
+        guard let was = lastShort, was != short else { return }
+        if let responder = XRWebView.firstResponder(in: self) { responder.reloadInputViews() }
+    }
+
+    private static func firstResponder(in view: UIView) -> UIView? {
+        if view.isFirstResponder { return view }
+        for sub in view.subviews { if let r = firstResponder(in: sub) { return r } }
+        return nil
     }
 }

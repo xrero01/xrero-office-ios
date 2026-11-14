@@ -330,8 +330,8 @@ final class EditorUITests: XCTestCase {
     func testArabicBlanksStartRightToLeft() {
         for kind in ["word", "cell", "slide"] {
             let app = XCUIApplication()
-            // keyboard bar OFF here (its flag, plan M5): the Arabic typing path with WebKit's own bar stays covered
-            // (the rollback path), while the touch gate types Arabic with the bar on
+            // keyboard bar OFF here (its flag's default, plan M5; said explicitly): the Arabic typing path with WebKit's
+            // own bar stays covered, while the touch gate types Arabic with the bar on
             app.launchArguments = ["-xr.lang", "ar", "-xr.keyboardBar", "NO"]
             app.launchEnvironment = ["XR_KIND": kind,
                                      "XR_DOC_NAME": "xr-test-ar." + ["word": "docx", "cell": "xlsx", "slide": "pptx"][kind]!]
@@ -707,7 +707,7 @@ final class EditorUITests: XCTestCase {
         // typed after the keyboard bar's Bold (plan M5)
         let barWord = ar ? "\u{0634}\u{0631}\u{064A}\u{0637}" : "Bar"                              // شريط
         let app = XCUIApplication()
-        app.launchArguments = ["-xr.lang", lang]
+        app.launchArguments = ["-xr.lang", lang, "-xr.keyboardBar", "YES"]   // the bar is off by default until its gate (plan M5)
         try? FileManager.default.removeItem(atPath: probeFile)
         pauseProbe(false)
         app.launchEnvironment = ["XR_KIND": "word", "XR_NEW_NAME": "xr-touch-\(lang).docx", "XR_PROBE": "1", "XR_PROBE_FILE": probeFile]
@@ -836,7 +836,8 @@ final class EditorUITests: XCTestCase {
         // the caret's text properties can still read not-bold until a letter is typed - so the word typed after the tap
         // decides (check_saved.py also checks that word is a bold run in the saved file)
         gate("bold-button-applies", tapped && (flag(p7, "bold") || flag(p8, "bold")),
-             "tapped=\(tapped) bold after tap=\(flag(p7, "bold")) after typing=\(flag(p8, "bold")) fold=\(str(p7, "fold"))")
+             "tapped=\(tapped) bold after tap=\(flag(p7, "bold")) after typing=\(flag(p8, "bold")) fold=\(str(p7, "fold")) " +
+             "button active=\(flag(p7, "bact")) hit=\(str(p7, "bhit")) bold buttons=\(num(p7, "bn") ?? -1) before tap: fold=\(str(p6, "fold")) active=\(flag(p6, "bact"))")
         gate("type-after-format", plain(p8).contains(sentence.prefix(4)) && (plain(p8).components(separatedBy: "|").first ?? "").hasSuffix(boldWord),
              "bold=\(flag(p8, "bold")) text=\(plain(p8).prefix(80))")
 
