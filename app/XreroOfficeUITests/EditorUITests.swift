@@ -862,6 +862,29 @@ final class EditorUITests: XCTestCase {
         gate("kbar-next-word-bold", barShown && flag(q2, "bold") && (plain(q2).components(separatedBy: "|").first ?? "").hasSuffix(barWord),
              "bold=\(flag(q2, "bold")) text=\(plain(q2).prefix(80))")
         shot(app, "54b-touch-\(lang)-keyboard-bar")
+        // the bar's alignment cycles start -> centre -> end -> start (logical values: start = "left" in the engine, also
+        // in a right-to-left paragraph); three taps bring the line back where it was, so the later caret taps still fit
+        let stateLabel = app.staticTexts["xr-editor-state"]
+        func align() -> String {
+            let s = stateLabel.exists ? stateLabel.label : ""
+            return s.components(separatedBy: " ").first { $0.hasPrefix("al:") }.map { String($0.dropFirst(3)) } ?? "?"
+        }
+        let kbAlign = app.buttons["xr-kb-align"]
+        let a0 = align()
+        if barShown && a0 == "left" && kbAlign.exists {
+            var seen: [String] = []
+            for want in ["center", "right", "left"] {
+                kbAlign.tap()
+                var a = align()
+                for _ in 0..<6 where a != want { usleep(500_000); a = align() }
+                seen.append(a)
+            }
+            let q = probe(app)
+            gate("kbar-align-cycles", seen == ["center", "right", "left"] && focused(q),
+                 "start=\(a0) taps -> \(seen.joined(separator: ",")) \(focusInfo(q))")
+        } else {
+            gate("kbar-align-cycles", false, "bar=\(barShown) start alignment=\(a0) button=\(kbAlign.exists)")
+        }
         let paras8 = Int(num(q2, "paras") ?? 0)
         pauseProbe(true)
         for _ in 0..<5 { app.typeText("\n"); usleep(300_000) }

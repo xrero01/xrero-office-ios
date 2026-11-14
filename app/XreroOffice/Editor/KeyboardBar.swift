@@ -105,34 +105,36 @@ struct KeyboardBar: View {
     }
 
     /// Alignment cycles start -> centre -> end -> start, where start is the paragraph's own reading edge (right in a
-    /// right-to-left paragraph). The engine stores the visual edge (AscCommon.align_Left / align_Right, the same
-    /// values the editor's own Align Left / Right buttons send), so the glyph shows that edge unmirrored.
+    /// right-to-left paragraph). The engine stores the LOGICAL edge: AscCommon.align_Left (1) is the start and
+    /// align_Right (0) the end, also in a right-to-left paragraph (the editor's own ribbon reads it that way:
+    /// Toolbar.onApiParagraphAlign shows Align Right pressed for 1 when the paragraph is right-to-left). So the cycle
+    /// sends the logical values and the glyph shows the VISUAL edge, unmirrored (seen on CI: a right-aligned Arabic
+    /// paragraph reported "left").
     private var alignButton: some View {
         let rtl = state.direction == .rtl
-        let C = (left: 1, center: 2, right: 0)                  // AscCommon.align_Left / align_Center / align_Right
-        let start = rtl ? C.right : C.left, end = rtl ? C.left : C.right
+        let start = 1, center = 2, end = 0                      // AscCommon.align_Left / align_Center / align_Right
         let next: Int
         switch state.alignment {
         case .center: next = end
-        case .left: next = rtl ? start : C.center
-        case .right: next = rtl ? C.center : start
-        default: next = C.center                                // justify / none: like start, so centre comes next
+        case .right: next = start                               // at the end: back to the start
+        default: next = center                                  // start / justify / none: centre comes next
+        }
+        // the visual edge: in a right-to-left paragraph the start is on the right
+        enum Edge { case left, right, center, justify }
+        let edge: Edge
+        switch state.alignment {
+        case .center: edge = .center
+        case .justify, .distributed: edge = .justify
+        case .right: edge = rtl ? .left : .right
+        case .left, .none: edge = rtl ? .right : .left
         }
         let glyph: String
-        switch state.alignment {
-        case .center: glyph = "text.aligncenter"
-        case .right: glyph = "text.alignright"
-        case .left: glyph = "text.alignleft"
-        case .justify, .distributed: glyph = "text.justify"
-        case .none: glyph = rtl ? "text.alignright" : "text.alignleft"
-        }
         let value: String
-        switch state.alignment {
-        case .center: value = ar ? "توسيط" : "Centre"
-        case .right: value = ar ? "إلى اليمين" : "Right"
-        case .left: value = ar ? "إلى اليسار" : "Left"
-        case .justify, .distributed: value = ar ? "ضبط" : "Justified"
-        case .none: value = ""
+        switch edge {
+        case .center: glyph = "text.aligncenter"; value = ar ? "توسيط" : "Centre"
+        case .justify: glyph = "text.justify"; value = ar ? "ضبط" : "Justified"
+        case .right: glyph = "text.alignright"; value = ar ? "إلى اليمين" : "Right"
+        case .left: glyph = "text.alignleft"; value = ar ? "إلى اليسار" : "Left"
         }
         return Button { run("align", "a.put_PrAlign(\(next))") } label: {
             symbol(glyph, on: false).environment(\.layoutDirection, .leftToRight)

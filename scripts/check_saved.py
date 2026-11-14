@@ -76,7 +76,8 @@ TOUCH = {   # what EditorUITests.touchGate types per language: sentence, tapped-
 TOUCH_CHECKS = ("editor-ready", "tap-places-caret-first-line", "typing", "line-direction", "tap-moves-caret-into-text",
                 "tap-then-type-inserts-there", "double-tap-selects-word", "long-press-selects-word", "caret-to-line-end",
                 "bold-button-applies", "format-tap-keeps-keyboard", "type-after-format",
-                "kbar-shown", "kbar-bold-on", "kbar-keeps-keyboard", "kbar-next-word-bold", "enter-x5", "select-all",
+                "kbar-shown", "kbar-bold-on", "kbar-keeps-keyboard", "kbar-next-word-bold", "kbar-align-cycles",
+                "enter-x5", "select-all",
                 "sheet-opens-and-closes", "sheet-return-keyboard", "sheet-return-caret", "pinch-in-zooms-page",
                 "pinch-zoom-kept", "pinch-out-zooms-back", "kbar-hide-keyboard", "save", "reopen-keeps-text")
 
