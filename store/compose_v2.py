@@ -1,0 +1,171 @@
+"""compose_v2.py - App Store screenshots, 20.3 look: the real app screenshots (store/raw/<iphone|ipad>-<lang>-<doc>.png
+from the store-shots workflow, incl. the dark-mode ones) set in a light, editorial frame - eyebrow, bold headline with
+one accent phrase, slim device - plus a hero opener and a typographic privacy closer. Rendered by headless Chrome at
+Apple's exact sizes: iPhone 6.9" 1320x2868, iPad 13" 2064x2752. Output: store/final/<lang>/<device>-NN.png.
+Claims are only what the app does today (no other vendor's names, no comparisons)."""
+import json, os, pathlib, struct, subprocess
+
+HERE = pathlib.Path(__file__).resolve().parent
+RAW, OUT, TMP = HERE / "raw", HERE / "final", HERE / "frames-tmp"
+FONTS = (HERE.parent / "fonts-src").as_uri()
+ICON = (HERE / "icon" / "icon-G-files-teal.png").as_uri()
+CHROME = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
+PROFILE = pathlib.Path(os.environ.get("TEMP", ".")) / "xrero-store-chrome"
+SIZES = {"iphone": (1320, 2868), "ipad": (2064, 2752)}
+KIND = {"report": "#2F6BD8", "sales": "#1E9E5A", "deck": "#E0612F"}
+
+# (kind of frame, raw doc, eyebrow, headline with <em>accent</em>, subline)
+SCREENS = {
+    "en": [
+        ("hero", "en-report", "", "The office suite that speaks <em>Arabic</em> and English", ""),
+        ("shot", "en-report", "Documents", "Write <em>beautiful</em> documents", "Open, edit and save .docx - headings, lists, tables and images"),
+        ("shot", "en-sales", "Spreadsheets", "Sheets with <em>real formulas</em>", "Totals, percentages and cell formatting in .xlsx"),
+        ("shot", "en-deck", "Presentations", "Slides that <em>stand out</em>", "Edit .pptx anywhere - layouts, themes and transitions"),
+        ("shot", "ar-report", "Arabic-first", "Right to left, <em>done right</em>", "Cairo, Amiri, Tajawal and Noto Naskh built in"),
+        ("dark", "en-darkreport", "Dark mode", "Easy on the eyes, <em>day or night</em>", "Follows your device - light or dark, live"),
+        ("private", "", "Privacy", "<em>Private</em> by design", ""),
+    ],
+    "ar": [
+        ("hero", "ar-report", "", "حزمة المكتب التي تتحدث <em>العربية</em> والإنجليزية", ""),
+        ("shot", "ar-report", "المستندات", "مستندات <em>بتنسيق احترافي</em>", "افتح ملفات docx وعدّلها واحفظها - عناوين وقوائم وجداول وصور"),
+        ("shot", "ar-sales", "الجداول", "جداول <em>بمعادلات حقيقية</em>", "الإجماليات والنسب وتنسيق الخلايا في ملفات xlsx"),
+        ("shot", "ar-deck", "العروض التقديمية", "عروض <em>تلفت الأنظار</em>", "عدّل شرائح pptx أينما كنت - تخطيطات وسمات وانتقالات"),
+        ("shot", "en-report", "لغتان", "بالعربية <em>والإنجليزية</em>", "بدّل لغة الواجهة بلمسة واحدة"),
+        ("dark", "ar-darkreport", "الوضع الداكن", "مريح للعين <em>ليلًا ونهارًا</em>", "يتبع إعداد جهازك - فاتح أو داكن، فورًا"),
+        ("private", "", "الخصوصية", "<em>خصوصيتك</em> أولًا", ""),
+    ],
+}
+CHIPS = {"en": ["Free", "Works offline", "No account needed"], "ar": ["مجاني", "يعمل دون إنترنت", "بلا حساب"]}
+PRIVATE = {
+    "en": [("Your files stay on your device", "Nothing is uploaded to open, edit or save"),
+           ("Works without internet", "On a plane, on site, anywhere"),
+           ("No account needed", "Open the app and start writing"),
+           ("No tracking", "Data Not Collected - see the privacy label"),
+           ("Free and open source", "Every feature, at no cost")],
+    "ar": [("ملفاتك تبقى على جهازك", "لا يُرفع شيء لفتح الملفات أو تعديلها أو حفظها"),
+           ("يعمل دون إنترنت", "في الطائرة أو في الموقع أو أي مكان"),
+           ("بلا حساب", "افتح التطبيق وابدأ الكتابة"),
+           ("بلا تتبّع", "لا تُجمع أي بيانات - راجع ملصق الخصوصية"),
+           ("مجاني ومفتوح المصدر", "كل الميزات دون أي تكلفة")],
+}
+
+def png_size(p):
+    return struct.unpack(">II", open(p, "rb").read()[16:24])
+
+def css(device, rtl, dark, tint=None):
+    W, H = SIZES[device]
+    big = device == "ipad"
+    ink, sub, accent = ("#F2FAFB", "#A9C9D0", "#5FE0CF") if dark else ("#0B2A33", "#4A6A72", "#0585A1")
+    bg = ("radial-gradient(1200px 900px at 50% 0%,#145a6a 0%,rgba(20,90,106,0) 70%),linear-gradient(180deg,#0B2E38 0%,#06212A 100%)"
+          if dark else
+          f"radial-gradient(1300px 1000px at {'85%' if rtl else '15%'} -10%,{(tint + '2E') if tint else '#C8EEF2'} 0%,rgba(200,238,242,0) 65%),"
+          "radial-gradient(900px 700px at 50% 110%,#D9F3EE 0%,rgba(217,243,238,0) 70%),linear-gradient(180deg,#F7FCFD 0%,#ECF6F8 100%)")
+    head = "Tajawal" if rtl else "Montserrat"
+    return f"""
+@font-face{{font-family:Montserrat;src:url('{FONTS}/Montserrat-Bold.ttf');font-weight:700}}
+@font-face{{font-family:Open;src:url('{FONTS}/OpenSans-Regular.ttf');font-weight:400}}
+@font-face{{font-family:Open;src:url('{FONTS}/OpenSans-Semibold.ttf');font-weight:600}}
+@font-face{{font-family:Tajawal;src:url('{FONTS}/Tajawal-Bold.ttf');font-weight:700}}
+@font-face{{font-family:Tajawal;src:url('{FONTS}/Tajawal-Medium.ttf');font-weight:500}}
+html,body{{margin:0;width:{W}px;height:{H}px;overflow:hidden}}
+body{{background:{bg};color:{ink};font-family:{'Tajawal' if rtl else 'Open'},sans-serif;position:relative}}
+.top{{position:absolute;left:{120 if big else 96}px;right:{120 if big else 96}px;top:{150 if big else 170}px;text-align:center}}
+.eb{{display:inline-flex;align-items:center;gap:16px;font:{'500' if rtl else '600'} {40 if big else 38}px/1 {'Tajawal' if rtl else 'Open'};
+     letter-spacing:{0 if rtl else 3}px;text-transform:uppercase;color:{accent};padding:16px 30px;border-radius:999px;
+     background:{'rgba(95,224,207,.12)' if dark else 'rgba(5,133,161,.09)'}}}
+.eb i{{width:18px;height:18px;border-radius:50%;display:block}}
+h1{{font:700 {118 if big else 104}px/1.08 {head};margin:{34}px 0 0;letter-spacing:{0 if rtl else -2.5}px}}
+h1 em{{font-style:normal;color:{accent}}}
+.sub{{font-size:{50 if big else 46}px;line-height:1.35;color:{sub};margin:28px auto 0;max-width:{1500 if big else 1080}px}}
+.dev{{position:absolute;left:50%;transform:translateX(-50%);background:#0E1A1E;box-shadow:0 60px 140px rgba(6,40,50,{.55 if dark else .28}),
+      0 0 0 2px rgba(255,255,255,{.10 if dark else .6}) inset}}
+.dev img{{display:block}}
+.island{{position:absolute;left:50%;transform:translateX(-50%);background:#000;border-radius:999px}}
+"""
+
+def device_html(device, raw, top):
+    rw, rh = png_size(raw)
+    if device == "iphone":
+        w, bez, rad = 1120, 22, 150
+    else:
+        w, bez, rad = 1740, 26, 70
+    sw = w - 2 * bez
+    sh = round(sw * rh / rw)
+    island = (f'<div class="island" style="top:{bez + round(sw*0.03)}px;width:{round(sw*0.29)}px;height:{round(sw*0.085)}px"></div>'
+              if device == "iphone" else "")
+    return (f'<div class="dev" style="top:{top}px;width:{w}px;padding:{bez}px;box-sizing:border-box;border-radius:{rad}px">'
+            f'<img src="{raw.as_uri()}" style="width:{sw}px;height:{sh}px;border-radius:{rad-bez}px">{island}</div>')
+
+def page(device, lang, frame, i):
+    kind, doc, eb, h1, sub = frame
+    rtl = lang == "ar"
+    big = device == "ipad"
+    dark = kind == "dark"
+    body = ""
+    if kind == "hero":
+        chips = "".join(f'<span class="chip">{c}</span>' for c in CHIPS[lang])
+        body = f"""<style>
+.hero{{position:absolute;left:0;right:0;top:{150 if big else 170}px;text-align:center}}
+.hero img{{width:{230 if big else 250}px;height:{230 if big else 250}px;border-radius:{52 if big else 56}px;box-shadow:0 30px 70px rgba(5,90,110,.35)}}
+.name{{font:700 {54 if big else 52}px/1 {'Tajawal' if rtl else 'Montserrat'};margin-top:30px;color:#0585A1;letter-spacing:{0 if rtl else 1}px}}
+.hero h1{{max-width:{1700 if big else 1150}px;margin:26px auto 0}}
+.chips{{display:flex;gap:18px;justify-content:center;margin-top:40px}}
+.chip{{font:600 {40 if big else 38}px/1 {'Tajawal' if rtl else 'Open'};padding:20px 34px;border-radius:999px;background:#fff;color:#0B2A33;
+      box-shadow:0 8px 24px rgba(6,60,72,.10)}}</style>
+<div class="hero"><img src="{ICON}"><div class="name">Xrero Office</div><h1>{h1}</h1><div class="chips">{chips}</div></div>"""
+        body += device_html(device, RAW / f"{device}-{doc}.png", 1060 if big else 1280)
+    elif kind == "private":
+        rows = "".join(f'<div class="r"><div class="ck">&#10003;</div><div><b>{a}</b><span>{b}</span></div></div>' for a, b in PRIVATE[lang])
+        body = f"""<style>
+.list{{position:absolute;left:{260 if big else 96}px;right:{260 if big else 96}px;top:{640 if big else 700}px}}
+.r{{display:flex;gap:40px;align-items:center;background:#fff;border-radius:44px;padding:{50 if big else 46}px {56}px;margin-bottom:34px;
+    box-shadow:0 14px 40px rgba(6,60,72,.08)}}
+.ck{{flex:none;width:110px;height:110px;border-radius:32px;background:linear-gradient(135deg,#14A7BF,#035569);color:#fff;
+     font:700 62px/110px sans-serif;text-align:center}}
+.r b{{display:block;font:700 {58 if big else 54}px/1.2 {'Tajawal' if rtl else 'Montserrat'};color:#0B2A33;letter-spacing:{0 if rtl else -.5}px}}
+.r span{{display:block;font-size:{42 if big else 40}px;line-height:1.35;color:#4A6A72;margin-top:10px}}
+.foot{{position:absolute;left:0;right:0;bottom:{150 if big else 170}px;display:flex;gap:28px;justify-content:center;align-items:center;
+      font:700 52px/1 {'Tajawal' if rtl else 'Montserrat'};color:#0585A1}}
+.foot img{{width:110px;height:110px;border-radius:25px}}</style>
+<div class="list">{rows}</div><div class="foot"><img src="{ICON}">Xrero Office</div>"""
+    else:
+        body = device_html(device, RAW / f"{device}-{doc}.png", 760 if big else 820)
+    dot = ""
+    k = next((v for key, v in KIND.items() if key in doc), None)
+    if kind == "shot" and k:
+        dot = f'<i style="background:{k}"></i>'
+    top = "" if kind == "hero" else (f'<div class="top">{f"<span class=eb>{dot}{eb}</span>" if eb else ""}<h1>{h1}</h1>'
+                                     + (f'<div class="sub">{sub}</div>' if sub else "") + "</div>")
+    return (f'<!doctype html><html dir="{"rtl" if rtl else "ltr"}" lang="{lang}"><head><meta charset="utf-8">'
+            f'<style>{css(device, rtl, dark, k if kind == "shot" else None)}</style></head><body>{top}{body}</body></html>')
+
+def render(html_path, out_png, W, H):
+    subprocess.run([CHROME, "--headless=new", "--disable-gpu", "--hide-scrollbars", "--force-device-scale-factor=1",
+                    "--allow-file-access-from-files", f"--user-data-dir={PROFILE}", f"--window-size={W},{H}",
+                    f"--screenshot={out_png}", html_path.as_uri()], check=True, capture_output=True, timeout=120)
+    if png_size(out_png) != SIZES["iphone" if W == 1320 else "ipad"]:
+        raise SystemExit(f"{out_png}: wrong size {png_size(out_png)}")
+
+def main():
+    TMP.mkdir(exist_ok=True)
+    made, missing = [], []
+    for lang, frames in SCREENS.items():
+        for device in ("iphone", "ipad"):
+            d = OUT / lang
+            d.mkdir(parents=True, exist_ok=True)
+            for old in d.glob(f"{device}-*.png"):
+                old.unlink()
+            n = 0
+            for frame in frames:
+                if frame[1] and not (RAW / f"{device}-{frame[1]}.png").exists():
+                    missing.append(f"{device}-{frame[1]}"); continue
+                n += 1
+                html = TMP / f"{lang}-{device}-{n}.html"
+                html.write_text(page(device, lang, frame, n), encoding="utf-8")
+                out = d / f"{device}-{n:02d}.png"
+                render(html, out, *SIZES[device])
+                made.append(str(out.relative_to(HERE)))
+    print(json.dumps({"made": made, "missing": missing}, indent=1, ensure_ascii=False))
+
+if __name__ == "__main__":
+    main()
