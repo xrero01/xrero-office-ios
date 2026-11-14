@@ -7,7 +7,8 @@ ar_letter.docx must still hold the original Arabic letter after open + save; Fil
 the Arabic blanks (xr-test-ar.*, made with the app in Arabic) must come back from the engine still right-to-left;
 the touch / typing gate (plan M14 + F1, EditorUITests.testZZTouchGateCaretSelectionPinchFocus) must log every check as
 PASS (or KNOWN: a reported app gap of the exact shape seen) for EN and AR (results also to out/qa/touch-gate.json), and its saved xr-touch-<lang>.docx must hold the sentence with the tapped-in letter inside it,
-the word typed after the Bold tap in a bold run, and the 5 Enter presses.
+the word typed after the Bold tap and the word typed after the keyboard bar's Bold (plan M5) in bold runs, and the
+5 Enter presses.
 Every editor log must be free of 'missing AscDesktopEditor.*' lines (engine contract: a member the editors ask the
 shell for that xr-host.js does not define). Prints each editor log."""
 import json, os, re, sys, zipfile
@@ -66,16 +67,18 @@ def arabic_blank_other(p):
     return rtl, "master title right-aligned rtl=%s" % rtl
 
 
-TOUCH = {   # what EditorUITests.touchGate types per language: sentence, tapped-in letter, word typed after Bold, last word
-    "en": ("Extraordinary Wonderful Typewriter", "Q", "Bold", "End"),
-    "ar": ("المستشفيات والمؤسسات الإماراتية", "ق", "عريض", "نهاية"),
+TOUCH = {   # what EditorUITests.touchGate types per language: sentence, tapped-in letter, word typed after Bold, last word,
+            # word typed after the keyboard bar's Bold (plan M5)
+    "en": ("Extraordinary Wonderful Typewriter", "Q", "Bold", "End", "Bar"),
+    "ar": ("المستشفيات والمؤسسات الإماراتية", "ق", "عريض", "نهاية", "شريط"),
 }
 # the checks every language must log (a missing line means the test stopped early: that is a failure too)
 TOUCH_CHECKS = ("editor-ready", "tap-places-caret-first-line", "typing", "line-direction", "tap-moves-caret-into-text",
                 "tap-then-type-inserts-there", "double-tap-selects-word", "long-press-selects-word", "caret-to-line-end",
-                "bold-button-applies", "format-tap-keeps-keyboard", "type-after-format", "enter-x5", "select-all",
+                "bold-button-applies", "format-tap-keeps-keyboard", "type-after-format",
+                "kbar-shown", "kbar-bold-on", "kbar-keeps-keyboard", "kbar-next-word-bold", "enter-x5", "select-all",
                 "sheet-opens-and-closes", "sheet-return-keyboard", "sheet-return-caret", "pinch-in-zooms-page",
-                "pinch-zoom-kept", "pinch-out-zooms-back", "save", "reopen-keeps-text")
+                "pinch-zoom-kept", "pinch-out-zooms-back", "kbar-hide-keyboard", "save", "reopen-keeps-text")
 
 
 QA = {}   # device -> lang -> {check: [status, detail]} + typing latency: written to out/qa/touch-gate.json (F1 trend)
@@ -101,7 +104,7 @@ def touch_gate(d, lang):
         # KNOWN = a real app gap the gate found and reported (it passes by itself once fixed); FAIL / missing = fail
         if (name in TOUCH_CHECKS and st not in ("PASS", "KNOWN")) or st == "FAIL":
             good = False
-    sentence, marker, bold_word, end_word = TOUCH[lang]
+    sentence, marker, bold_word, end_word, bar_word = TOUCH[lang]
     p = os.path.join(d, "xr-touch-%s.docx" % lang)
     if not os.path.exists(p):
         print("  xr-touch-%s.docx: MISSING" % lang)
@@ -115,17 +118,21 @@ def touch_gate(d, lang):
     first = next((s for s in paras if marker in s or sentence[:6] in s), "")
     inside = first.replace(marker, "").strip().startswith(sentence) and marker in first \
         and not first.startswith(marker) and sentence in first.replace(marker, "")
-    bold = False
-    for r in doc.iter(W + "r"):
-        if bold_word in "".join(t.text or "" for t in r.iter(W + "t")):
-            rpr = r.find(W + "rPr")
-            bold |= rpr is not None and (on(rpr.find(W + "b")) or on(rpr.find(W + "bCs")))
+    def is_bold(word):
+        b = False
+        for r in doc.iter(W + "r"):
+            if word in "".join(t.text or "" for t in r.iter(W + "t")):
+                rpr = r.find(W + "rPr")
+                b |= rpr is not None and (on(rpr.find(W + "b")) or on(rpr.find(W + "bCs")))
+        return b
+    bold = is_bold(bold_word)
+    bar_bold = is_bold(bar_word)          # the keyboard bar's Bold reached the document (plan M5)
     end_at = max((i for i, s in enumerate(paras) if end_word in s), default=-1)
     word_at = max((i for i, s in enumerate(paras) if bold_word in s), default=-1)
     enters = end_at >= 0 and word_at >= 0 and end_at - word_at >= 5
-    saved = inside and bold and enters
-    print("  xr-touch-%s.docx: letter tapped in inside the sentence=%s  word after Bold is bold=%s  5x Enter=%s  first line=%r -> %s"
-          % (lang, inside, bold, enters, first[:80], "OK" if saved else "WRONG"))
+    saved = inside and bold and bar_bold and enters
+    print("  xr-touch-%s.docx: letter tapped in inside the sentence=%s  word after Bold is bold=%s  word after keyboard-bar Bold is bold=%s  5x Enter=%s  first line=%r -> %s"
+          % (lang, inside, bold, bar_bold, enters, first[:80], "OK" if saved else "WRONG"))
     return good and saved
 
 
