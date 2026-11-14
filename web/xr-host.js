@@ -635,7 +635,9 @@
     if (!api) return 'no editor';
     try {
       var c = window.AscCommon && AscCommon.g_inputContext;
-      if (c && c.apiCompositeEnd && (c.IsComposition || c.ApiIsComposition)) c.apiCompositeEnd();
+      // always end it: the engine's own apiCompositeEnd returns at once when no composition is open, so no
+      // instance flag (not in the engine contract, could be renamed) decides whether the half-typed word commits
+      if (c && c.apiCompositeEnd) c.apiCompositeEnd();
     } catch (e) { log('undo: composition', e && e.message || e); }
     var can = redo ? (api.asc_getCanRedo || api.getCanRedo) : (api.asc_getCanUndo || api.getCanUndo);
     try { if (can && !can.call(api)) return redo ? 'nothing to redo' : 'nothing to undo'; } catch (e) {}

@@ -82,6 +82,7 @@ struct AutotestScreen: View {
         .onOpenURL { url in
             guard url.scheme == "xrero-autotest" else { return }
             if url.host == "save" { controller.save() }
+            if url.host == "usersave" { controller.userSave() }   // the user's Save (the bar's ⋯ > Save, asc_Save)
             if url.host == "caret" {            // typing tests: where the new page's first line is (the editor's own text
                                                 // cursor, which sits there after open) - a fixed tap point drifts when
                                                 // the ribbon height changes and then lands in the page margin

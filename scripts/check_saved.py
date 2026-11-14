@@ -150,8 +150,11 @@ for dev in sorted(os.listdir(root)) if os.path.isdir(root) else []:
     t = os.path.join(d, "xr-test.docx")
     if os.path.exists(t):
         s = text(t)
-        en = "Typed on iPhone" in s and "English OK." in s      # iOS Smart Punctuation turns "-" into an en dash
-        ar = "كتابة عربية" in s
+        # the exact text (a stray character, e.g. a Cmd+S typed as "s", fails); iOS Smart Punctuation turns "-" into
+        # an en dash. The Arabic line is there only if the keyboard could type it.
+        n = s.replace("–", "-").strip()
+        en = n in ("Typed on iPhone - English OK.", "Typed on iPhone - English OK.كتابة عربية")
+        ar = n == "Typed on iPhone - English OK.كتابة عربية"
         print("xr-test.docx: English typed=%s  Arabic typed=%s  text=%r" % (en, ar, s[:200]))
         ok &= en
     else:

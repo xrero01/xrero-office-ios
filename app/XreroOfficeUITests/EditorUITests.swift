@@ -204,7 +204,10 @@ final class EditorUITests: XCTestCase {
         checkIPadLayout(app, name + "-rotated")       // asserts the panel is closed (rm<=100) in portrait
     }
 
-    /// Save the way a user does: the editor's own Save button; then Cmd+S; then the test hook.
+    /// Save the way a user does: the editor's own Save button (gone since M4a hid the title row), else the user's Save
+    /// the native bar's ⋯ > Save runs (controller.userSave = asc_Save, through a test URL: these tests keep the bar off
+    /// for their exact layout); the shell's save hook only as the last resort. Never Cmd+S: the simulator has no
+    /// hardware keyboard, so it types a literal "s" into the document.
     private func save(_ app: XCUIApplication) -> String {
         let labels = app.webViews.buttons.allElementsBoundByIndex.prefix(25).map { $0.label }
         print("XR web buttons:", labels)
@@ -214,9 +217,9 @@ final class EditorUITests: XCTestCase {
             let s = waitState(app, prefix: "saved", timeout: 30)
             if s.hasPrefix("saved") { print("XR save path: Save button"); return s }
         }
-        app.typeKey("s", modifierFlags: .command)
-        let s2 = waitState(app, prefix: "saved", timeout: 20)
-        if s2.hasPrefix("saved") { print("XR save path: Cmd+S"); return s2 }
+        XCUIDevice.shared.system.open(URL(string: "xrero-autotest://usersave")!)
+        let s2 = waitState(app, prefix: "saved", timeout: 30)
+        if s2.hasPrefix("saved") { print("XR save path: user save"); return s2 }
         XCUIDevice.shared.system.open(URL(string: "xrero-autotest://save")!)   // routed to the running app, no tapping
         let s3 = waitState(app, prefix: "saved", timeout: 30)
         if s3.hasPrefix("saved") { print("XR save path: test URL") }

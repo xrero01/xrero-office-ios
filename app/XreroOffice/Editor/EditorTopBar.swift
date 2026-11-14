@@ -189,8 +189,7 @@ private struct UndoButton: View {
                 .frame(minWidth: 44, minHeight: 44)
                 .contentShape(Rectangle())
         }
-        .disabled(!can)
-        .opacity(can ? 1 : 0.3)
+        .disabled(!can)     // the bar's own disabled tint: an extra opacity would dim it twice
         .accessibilityLabel(redo ? BarText.redo(ar) : BarText.undo(ar))
         .accessibilityIdentifier(redo ? "xr-bar-redo" : "xr-bar-undo")
     }
