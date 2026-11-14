@@ -518,9 +518,18 @@ final class EditorUITests: XCTestCase {
             XCTAssertEqual(waitState(app, prefix: "lang:", timeout: 5), "lang:" + (ar ? "en" : "ar"), "Language ▸ (\(name))")
 
             // All tools: the editor's File backstage (with its own way back)
+            // (right after Language ▸ the menu can still be closing: a tap then reaches no entry - one more try,
+            // seen once on the iPhone in Arabic; the log line "menu all tools" shows whether the entry ran)
+            sleep(2)
             XCTAssertTrue(pick("xr-menu-alltools"), "no All tools in ⋯ (\(name))")
             sleep(2)
-            let p2 = probe()
+            var p2 = probe()
+            if !p2.contains("file=1") {
+                print("XR menu \(name): All tools tap did not reach the entry (\(p2)) - once more")
+                _ = pick("xr-menu-alltools")
+                sleep(2)
+                p2 = probe()
+            }
             print("XR menu \(name) all tools: \(p2)")
             XCTAssertTrue(p2.contains("file=1"), "⋯ > All tools did not open the File backstage (\(name)): \(p2)")
             shot(app, "65-menu-\(name)-alltools")
