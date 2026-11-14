@@ -185,7 +185,10 @@
         '.toolbar .box-panels .group.field-styles{height:54px!important;position:relative!important;min-width:160px}' +
         '.toolbar .box-panels .group.field-styles>.combo-dataview{position:relative!important;top:0!important;left:0!important}' +
         '.toolbar.folded .box-controls{box-shadow:0 8px 20px rgba(0,0,0,.18)}' +
-        '.toolbar .tabs .scroll{line-height:46px!important;height:46px!important;background:transparent!important}';
+        '.toolbar .tabs .scroll{line-height:46px!important;height:46px!important;background:transparent!important}' +
+        // ⋯ > Find on a phone opens the editor's search bar: its "open the Find panel" buttons lead to the left panel,
+        // which phones do not have (Slides keep it)
+        (/presentationeditor/.test(location.pathname) ? '' : '#search-bar-open-panel,#search-bar-open-panel-redact{display:none!important}');
       // phones: an iOS-style bottom bar - 50 pt tall, 44 pt round buttons, the page / slide count as a pill.
       // It keeps what a finger needs (count, Present, previous / next page, zoom - +, sheet tabs); the text-language
       // picker, spell check, word count, track-changes toggle, select / hand tools and fit icons go (their features
@@ -729,15 +732,24 @@
   // Find: the editor's own Find & Replace panel (phase 1 of the plan; a native find bar can replace it later). The
   // 'replace' shortcut opens the panel itself in every editor - 'search' would open the small search bar, which is
   // anchored to the title row the app hides. The File backstage is closed first (Find does nothing over it).
+  // Phones have no left panel (xr-editor.html: layout.leftMenu off, except Slides): there the 'search' shortcut opens
+  // the editor's search bar, a small window placed under the ribbon at the window's edge (no title-row anchor needed).
+  function searchShown(lm) {
+    var app = window.DE || window.PE || window.SSE || window.PDFE, vp = null;
+    try { vp = app.getController('Viewport'); } catch (e) {}
+    return !!((lm.isSearchPanelVisible && lm.isSearchPanelVisible()) || (vp && vp.isSearchBarVisible && vp.isSearchBarVisible()));
+  }
   window.__xrFind = function () {
     var lm = leftMenu();
     if (!lm || !lm.onShortcut) return 'no left menu';
     try {
       if (lm.leftMenu.menuFile && lm.leftMenu.menuFile.isVisible()) lm.leftMenu.menuFile.hide();
-      lm.onShortcut('replace');
-      return lm.isSearchPanelVisible && lm.isSearchPanelVisible() ? 'ok' : 'not shown';
+      var panel = document.getElementById('left-menu');
+      lm.onShortcut(panel && panel.offsetWidth > 0 ? 'replace' : 'search');
+      return searchShown(lm) ? 'ok' : 'not shown';
     } catch (e) { return 'error: ' + (e && e.message || e); }
   };
+  window.__xrSearchShown = function () { var lm = leftMenu(); return !!lm && searchShown(lm); };
 
   // All tools: the editor's File backstage (protection, properties, page setup, templates ...), which the hidden File
   // tab no longer opens on touch. The backstage's own "Close Menu" entry leads back to the document.

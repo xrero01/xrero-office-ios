@@ -189,9 +189,9 @@ struct AutotestScreen: View {
                 state = "probing"                   // the test waits for a fresh "menu:" answer
                 controller.call("""
                 var app=window.DE||window.PE||window.SSE||window.PDFE,lm=app&&app.getController('LeftMenu');if(!lm)return 'menu:fail no left menu';
-                var fm=lm.leftMenu.menuFile,f=fm&&fm.isVisible()?1:0,s=lm.isSearchPanelVisible&&lm.isSearchPanelVisible()?1:0;
+                var fm=lm.leftMenu.menuFile,f=fm&&fm.isVisible()?1:0,s=window.__xrSearchShown&&__xrSearchShown()?1:0,vp=app.getController('Viewport');
                 var t=document.querySelector('a[data-tab="file"]'),tab=t&&t.offsetParent?1:0;
-                if(\(close)){try{if(f)fm.hide();if(s)lm.onShowHideSearch(false);}catch(e){}}
+                if(\(close)){try{if(f)fm.hide();if(s&&lm.isSearchPanelVisible())lm.onShowHideSearch(false);if(s&&vp.isSearchBarVisible())vp.searchBar.hide();}catch(e){}}
                 return 'menu:search='+s+' file='+f+' filetab='+tab;
                 """) { r, e in
                     let res = (r as? String) ?? "menu:fail " + (e ?? "?")

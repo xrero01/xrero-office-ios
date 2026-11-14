@@ -149,7 +149,10 @@ def doc_menu(d):
                 g = z.read("mimetype") == b"application/vnd.oasis.opendocument.text" and "Menu check" in body and want_ar in body
             else:
                 raw = open(p, "rb").read()
-                g = raw.startswith(rb"{\rtf") and b"Menu check" in raw and rb"\u1605" in raw     # meem = U+0645 as \u1605
+                # x2t writes every character as an RTF escape (\uN* with N the signed 16-bit code): decode them
+                esc = re.compile(re.escape(bytes([92])) + rb"u(-?[0-9]+)[*]?")      # a backslash, u, the number
+                txt = esc.sub(lambda m: chr(int(m.group(1)) % 65536).encode("utf-8"), raw).decode("utf-8", "replace")
+                g = raw.startswith(rb"{\rtf") and "Menu check" in txt and want_ar in txt
         except Exception as e:
             g = False; print("%s: cannot read: %s" % (f, e))
         print("%s (⋯ > Export ▸ .%s): text on screen kept -> %s" % (f, kind, "OK" if g else "WRONG"))

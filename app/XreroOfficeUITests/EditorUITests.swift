@@ -397,18 +397,38 @@ final class EditorUITests: XCTestCase {
                 return waitState(app, prefix: "menu:", timeout: 10)
             }
             func openMenu() { more.tap(); usleep(800_000) }
-            /// ⋯, then the entry (inside a submenu when `sub` is given); false when it is not there
-            func pick(_ id: String, sub: String? = nil) -> Bool {
-                openMenu()
-                if let sub {
-                    let s = app.buttons[sub].firstMatch
-                    guard s.waitForExistence(timeout: 5) else { return false }
-                    s.tap(); usleep(800_000)
+            /// waits until `e` can take a tap (a menu still sliding in, a sheet still sliding out)
+            func hittable(_ e: XCUIElement, _ timeout: TimeInterval) -> Bool {
+                let end = Date().addingTimeInterval(timeout)
+                while Date() < end {
+                    if e.exists && e.isHittable { return true }
+                    usleep(300_000)
                 }
-                let e = app.buttons[id].firstMatch
-                guard e.waitForExistence(timeout: 5) else { return false }
-                e.tap()
-                return true
+                return false
+            }
+            /// ⋯, then the entry (inside a submenu when `sub` is given); false when it is not there. A tap on ⋯ can
+            /// land while a sheet is still closing: then the menu is not open - close whatever is open (a tap on the
+            /// status bar touches nothing in the editor) and try again.
+            func pick(_ id: String, sub: String? = nil) -> Bool {
+                for attempt in 0..<3 {
+                    if attempt > 0 {
+                        print("XR menu \(name): \(id) not reachable - opening ⋯ again")
+                        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.01)).tap()
+                        sleep(1)
+                    }
+                    guard hittable(more, 5) else { continue }
+                    openMenu()
+                    if let sub {
+                        let s = app.buttons[sub].firstMatch
+                        guard hittable(s, 4) else { continue }
+                        s.tap(); usleep(800_000)
+                    }
+                    let e = app.buttons[id].firstMatch
+                    guard hittable(e, 4) else { continue }
+                    e.tap()
+                    return true
+                }
+                return false
             }
 
             // the web File tab is gone on touch (its entries are in ⋯)
@@ -461,7 +481,7 @@ final class EditorUITests: XCTestCase {
             sleep(1)
             shot(app, "63-menu-\(name)-info")
             app.buttons["xr-docinfo-done"].firstMatch.tap()
-            sleep(1)
+            sleep(2)
 
             if !ar {
                 // Export ▸ .odt and .rtf: copies as on screen (check_saved.py reads them)
@@ -474,7 +494,7 @@ final class EditorUITests: XCTestCase {
                 XCTAssertTrue(pick("xr-menu-about"), "no About in ⋯")
                 XCTAssertTrue(app.staticTexts["xr-about-version"].waitForExistence(timeout: 10), "⋯ > About did not open")
                 app.buttons["xr-about-done"].firstMatch.tap()
-                sleep(1)
+                sleep(2)
                 // Account (signed out here: the sign-in sheet; nothing is typed or sent)
                 XCTAssertTrue(pick("xr-nav-account"), "no Account in ⋯")
                 XCTAssertTrue(app.textFields["xr-acct-email"].firstMatch.waitForExistence(timeout: 10), "⋯ > Account did not open")
