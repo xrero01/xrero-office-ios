@@ -189,7 +189,8 @@ struct AutotestScreen: View {
             if url.host == "uikitdir" {         // ⋯ menu test (M7b review): UIKit's own direction, which the menus it
                                                 // draws for SwiftUI follow (UIKitLayoutDirection)
                 let d = controller.coordinator?.web?.effectiveUserInterfaceLayoutDirection
-                state = d == nil ? "dir:none" : (d == .rightToLeft ? "dir:rtl" : "dir:ltr")
+                state = (d == nil ? "dir:none" : (d == .rightToLeft ? "dir:rtl" : "dir:ltr")) +
+                        (UIKitLayoutDirection.forced ? "+force" : "")
             }
             if url.host == "menuprobe" {        // ⋯ menu test (M7b): is the editor's Find panel / File backstage open,
                                                 // is the File tab hidden; "close" also shuts both again

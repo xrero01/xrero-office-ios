@@ -467,7 +467,7 @@ final class EditorUITests: XCTestCase {
             XCTAssertTrue(p0.contains("filetab=0"), "the web File tab is still shown on touch (\(name)): \(p0)")
             // UIKit itself is mirrored in Arabic: the menus it draws for the ⋯ Menu follow its trait, not SwiftUI's
             autotest("uikitdir")
-            XCTAssertEqual(waitState(app, prefix: "dir:", timeout: 5), ar ? "dir:rtl" : "dir:ltr", "UIKit layout direction (\(name))")
+            XCTAssertEqual(waitState(app, prefix: "dir:", timeout: 5), ar ? "dir:rtl+force" : "dir:ltr", "UIKit layout direction (\(name))")
 
             // ⋯ as the user sees it: every entry, no PDF / Print (a first tap can come while the bar is still settling:
             // open it again until its first entry is there)
