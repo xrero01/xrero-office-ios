@@ -55,7 +55,7 @@ struct AutotestScreen: View {
                 screen.editorTopBar(title: (name as NSString).deletingPathExtension, state: controller.state,
                                     status: barStatus, controller: controller, ar: lang == "ar",
                                     back: { state = "back" }, save: { controller.userSave() },
-                                    find: { controller.find() }) {
+                                    find: { controller.find() }, menuKey: "\(lang)|\(document.kind.rawValue)") {
                     DocumentMenuItems(kind: document.kind, lang: lang, signedIn: false, model: menu, controller: controller,
                                       language: { state = "lang:" + $0 }, share: { state = "share" },
                                       account: { showAccount = true }, about: { showAbout = true })

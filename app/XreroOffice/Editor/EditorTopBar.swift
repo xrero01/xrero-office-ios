@@ -21,6 +21,9 @@ struct EditorTopBar<More: View>: ViewModifier {
     var save: () -> Void
     /// ⋯ > Find (the editor's Find & Replace panel); nil leaves the entry out.
     var find: (() -> Void)?
+    /// Everything the ⋯ menu's entries depend on besides `ar` and the width (language, account, file kind): the menu
+    /// is rebuilt only when this changes (MoreMenu).
+    var menuKey: String
     @ViewBuilder var more: () -> More
     @Environment(\.horizontalSizeClass) var sizeClass      // not private: that would hide the memberwise init
 
@@ -59,27 +62,12 @@ struct EditorTopBar<More: View>: ViewModifier {
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     UndoButton(state: state, redo: false, ar: ar) { undo(false) }
                     if wide { UndoButton(state: state, redo: true, ar: ar) { undo(true) } }
-                    Menu {
-                        // section 1 of the document menu (plan M7b): Find, Redo on iPhone, Save; `more` adds the rest
-                        Section {
-                            if let find {
-                                Button(action: find) { Label(BarText.find(ar), systemImage: "magnifyingglass") }
-                                    .accessibilityIdentifier("xr-menu-find")
-                            }
-                            if !wide {
-                                RedoMenuItem(state: state, ar: ar) { undo(true) }
-                            }
-                            Button(action: save) { Label(BarText.save(ar), systemImage: "square.and.arrow.down") }
-                                .accessibilityIdentifier("xr-bar-save")
-                        }
-                        more()
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                            .frame(minWidth: 44, minHeight: 44)
-                            .contentShape(Rectangle())
-                    }
-                    .accessibilityLabel(BarText.more(ar))
-                    .accessibilityIdentifier("xr-bar-more")
+                    // equatable: the menu is rebuilt only when what it shows changes (language, width, account...),
+                    // never because the screen redrew - a menu rebuilt while it is open stays on screen with every tap
+                    // ignored (CI: the dead ⋯ menu after Document info / Language)
+                    MoreMenu(key: menuKey, wide: wide, ar: ar, state: state, find: find, save: save,
+                             redo: { undo(true) }, more: more)
+                        .equatable()
                 }
             }
     }
@@ -92,10 +80,10 @@ struct EditorTopBar<More: View>: ViewModifier {
 extension View {
     func editorTopBar<More: View>(title: String, state: EditorState, status: EditorBarStatus, controller: EditorController,
                                   ar: Bool, back: @escaping () -> Void, save: @escaping () -> Void,
-                                  find: (() -> Void)? = nil,
+                                  find: (() -> Void)? = nil, menuKey: String = "",
                                   @ViewBuilder more: @escaping () -> More) -> some View {
         modifier(EditorTopBar(title: title, state: state, status: status, controller: controller, ar: ar,
-                              back: back, save: save, find: find, more: more))
+                              back: back, save: save, find: find, menuKey: menuKey, more: more))
     }
 }
 
@@ -203,6 +191,47 @@ private struct UndoButton: View {
         .disabled(!can)     // the bar's own disabled tint: an extra opacity would dim it twice
         .accessibilityLabel(redo ? BarText.redo(ar) : BarText.undo(ar))
         .accessibilityIdentifier(redo ? "xr-bar-redo" : "xr-bar-undo")
+    }
+}
+
+/// The ⋯ menu: section 1 (Find, Redo on iPhone, Save) and the screen's document menu (`more`). Equatable on what it
+/// shows, so a redraw of the screen around it does not rebuild an open menu (the closures are the screen's own and
+/// keep working: they reach its state through its storage).
+private struct MoreMenu<More: View>: View, Equatable {
+    var key: String
+    var wide: Bool
+    var ar: Bool
+    var state: EditorState
+    var find: (() -> Void)?
+    var save: () -> Void
+    var redo: () -> Void
+    var more: () -> More
+
+    static func == (a: Self, b: Self) -> Bool {
+        a.key == b.key && a.wide == b.wide && a.ar == b.ar && (a.find == nil) == (b.find == nil) && a.state === b.state
+    }
+
+    var body: some View {
+        Menu {
+            Section {
+                if let find {
+                    Button(action: find) { Label(BarText.find(ar), systemImage: "magnifyingglass") }
+                        .accessibilityIdentifier("xr-menu-find")
+                }
+                if !wide {
+                    RedoMenuItem(state: state, ar: ar, action: redo)
+                }
+                Button(action: save) { Label(BarText.save(ar), systemImage: "square.and.arrow.down") }
+                    .accessibilityIdentifier("xr-bar-save")
+            }
+            more()
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .accessibilityLabel(BarText.more(ar))
+        .accessibilityIdentifier("xr-bar-more")
     }
 }
 

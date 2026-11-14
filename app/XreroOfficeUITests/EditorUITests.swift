@@ -504,7 +504,9 @@ final class EditorUITests: XCTestCase {
                 print("XR menu \(name) row: no text / symbol exposed (frame \(infoRow.frame)) - the dir check stands")
             }
             shot(app, "60-menu-\(name)")
-            app.buttons["xr-menu-export"].firstMatch.tap()
+            let exportRow = app.buttons["xr-menu-export"].firstMatch
+            _ = settled(exportRow)                       // the menu has finished unfolding
+            exportRow.tap()
             sleep(2)
             for ext in ["docx", "odt", "rtf"] {
                 XCTAssertTrue(app.buttons["xr-export-" + ext].firstMatch.waitForExistence(timeout: 3), "Export ▸ has no .\(ext) (\(name))")

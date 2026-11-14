@@ -37,7 +37,8 @@ struct EditorScreen: View {
             // (plan M7b: Find, Redo, Save | Share, Export, Document info | Language, Account, About, All tools)
             .editorTopBar(title: (title as NSString).deletingPathExtension, state: controller.state, status: barStatus,
                           controller: controller, ar: lang == "ar", back: close, save: { controller.userSave() },
-                          find: { controller.find() }) {
+                          find: { controller.find() },
+                          menuKey: "\(lang)|\(account.isSignedIn)|\(document.kind.rawValue)") {
                 DocumentMenuItems(kind: document.kind, lang: lang, signedIn: account.isSignedIn, model: menu,
                                   controller: controller,
                                   language: { if $0 != lang { pendingLang = $0 } },
