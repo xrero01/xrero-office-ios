@@ -143,6 +143,11 @@
   (function hideDesktopOnly() {
     // language / share / account are in the app's own top bar on iOS: the editors' header cluster is not needed
     var css = '#xr-b-ctx,#xr-designs-launch,#xr-design-ov,#xr-hdr-btns,#xr-acct-menu{display:none!important}' +
+              // the editors' title row (Save / Undo / Redo / quick-access "..." and the file name): the app's native top
+              // bar holds Back, the name with its Edited / Saved line, Undo / Redo and Save (plan M4a), so the row goes
+              // on every device - about 44 pt more page. A hidden layout item takes no height (VBoxLayout skips it) and
+              // phoneHeights sets its stored height to 0 for the File menu's offset.
+              '#app-title{display:none!important}' +
               // File menu: recent files live on the app's home screen; "Suggest a Feature" opens a desktop form
               '#fm-btn-recent,#fm-btn-suggest{display:none!important}' +
               // File menu entries that would do nothing here (each checked in web-apps FileMenu + Desktop.js):
@@ -157,13 +162,8 @@
     // phones: the status bar keeps what a finger needs (page/slide count, Present, zoom); the text-language picker,
     // spell-check toggle and fit-to-page/width icons go (pinch and the zoom buttons cover fitting)
     if (Math.min(screen.width, screen.height) < 600) {
-      // header: 44 pt title row (save / undo / redo / more), 46 pt tabs with 16 pt labels
-      css += '#app-title,#box-document-title{height:44px!important}' +
-        '#box-document-title .btn{min-width:46px!important;height:40px!important;margin:2px 2px!important;border-radius:10px!important}' +
-        '#box-document-title .btn .icon{transform:scale(1.3)}' +
-        // the file name is already in the app's top bar
-        '#box-document-title #id-box-doc-name,#box-document-title #title-doc-name{display:none!important}' +
-        '.toolbar .tabs>ul>li>a,.toolbar .tabs .ribtab>a{font-size:15px!important;line-height:46px!important;height:46px!important;' +
+      // header: 46 pt tabs with 16 pt labels (the title row is hidden above: the app's top bar replaces it)
+      css += '.toolbar .tabs>ul>li>a,.toolbar .tabs .ribtab>a{font-size:15px!important;line-height:46px!important;height:46px!important;' +
           'padding:0 12px!important}' +
         '.toolbar .box-tabs,.toolbar .tabs{height:46px!important}' +
         '.toolbar .tabs a{outline:none!important}' +
@@ -222,10 +222,7 @@
       // iPad: the full ribbon fits; rows and the status bar get touch-sized (40 pt rows, 50 pt status bar, 44 pt
       // buttons) in the same iOS style
       var SSE = /spreadsheeteditor/.test(location.pathname);
-      css += '#app-title,#box-document-title{height:40px!important}' +
-        '#box-document-title .btn{min-width:42px!important;height:36px!important;margin:2px!important;border-radius:9px!important}' +
-        '#box-document-title .btn .icon{transform:scale(1.2)}' +
-        '.toolbar .tabs>ul>li>a,.toolbar .tabs .ribtab>a{font-size:14px!important;line-height:40px!important;height:40px!important;' +
+      css += '.toolbar .tabs>ul>li>a,.toolbar .tabs .ribtab>a{font-size:14px!important;line-height:40px!important;height:40px!important;' +
           'padding:0 14px!important}' +
         '.toolbar .box-tabs,.toolbar .tabs{height:40px!important}' +
         '.toolbar .tabs a{outline:none!important}' +
@@ -628,6 +625,25 @@
     } catch (e) { return 'error: ' + (e && e.message || e); }
   };
 
+  // ---- Undo / Redo from the app's top bar (plan M4a; EditorController.call on a tap, never per keystroke).
+  // A word still being composed (QuickType or a marked-text keyboard: the engine holds it as a "composite input") is
+  // committed first, the way the engine's own touch manager does before it acts (apiCompositeEnd) - an undo in the
+  // middle of a composition would leave the composite input pointing at text the undo just removed. Spreadsheets
+  // name the call asc_Undo / asc_Redo. Returns 'ok', 'nothing to undo' / 'nothing to redo' or the reason it could not.
+  window.__xrUndo = function (redo) {
+    var api = window.__xrApi;
+    if (!api) return 'no editor';
+    try {
+      var c = window.AscCommon && AscCommon.g_inputContext;
+      if (c && c.apiCompositeEnd && (c.IsComposition || c.ApiIsComposition)) c.apiCompositeEnd();
+    } catch (e) { log('undo: composition', e && e.message || e); }
+    var can = redo ? (api.asc_getCanRedo || api.getCanRedo) : (api.asc_getCanUndo || api.getCanUndo);
+    try { if (can && !can.call(api)) return redo ? 'nothing to redo' : 'nothing to undo'; } catch (e) {}
+    var fn = redo ? (api.Redo || api.asc_Redo) : (api.Undo || api.asc_Undo);
+    if (!fn) return 'no undo';
+    try { fn.call(api); return 'ok'; } catch (e) { return 'error: ' + (e && e.message || e); }
+  };
+
   // ---- Save As / Download As: the copy itself (formats: SAVE_AS at the top)
   var pendingCopy = null;                     // {bin, done} while the app asks which format
   // The app answers 'saveas' with the chosen extension ('' = cancelled). The engine waits (its save action is open)
@@ -866,12 +882,15 @@
   var PHONE = Math.min(screen.width, screen.height) < 600;
   function phoneHeights() {
     var S = window.Common && Common.Utils && Common.Utils.InternalSettings;
-    if (!(PHONE || TABLET) || !S || S.get('xr-phone')) return;
+    if (!S || S.get('xr-phone')) return;
     S.set('xr-phone', true);
-    var tabs = PHONE ? 46 : 40, title = PHONE ? 44 : 40;
+    // every device: no title row (hidden in hideDesktopOnly - the app's top bar replaces it), so the File menu panel,
+    // placed at "tabs + title height", starts right under the tabs
+    S.set('document-title-height', 0);
+    if (!(PHONE || TABLET)) return;
+    var tabs = PHONE ? 46 : 40;
     S.set('toolbar-height-tabs', tabs);
     S.set('toolbar-height-tabs-top-title', tabs);
-    S.set('document-title-height', title);
     S.set('toolbar-height-compact', tabs);
     S.set('toolbar-height-normal', tabs + (S.get('toolbar-height-controls') || 84));
   }

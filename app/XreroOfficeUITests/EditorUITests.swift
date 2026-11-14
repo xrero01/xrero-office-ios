@@ -252,6 +252,116 @@ final class EditorUITests: XCTestCase {
         checkChrome(app, "word", has: "English")
     }
 
+    /// The native top bar (plan M4a), iPhone and iPad, English in light then Arabic in dark: Back ("Documents"), the
+    /// file name, Undo, ⋯ (and Redo in the bar on iPad, in ⋯ on iPhone); the editors' own title row is gone (no web
+    /// Save / Undo buttons); the second line says nothing for an unchanged document, "Edited" after typing, and
+    /// "Saved" only once a save really completed; Undo / Redo reach the engine through the bridge (the state
+    /// channel's canRedo follows); Arabic mirrors the bar (Back on the right). Runs the editor under the bar
+    /// (XR_BAR=1) in its own document, so the typing tests keep their exact layout.
+    func testTopBar() {
+        continueAfterFailure = true                        // the Arabic / dark half still reports when English fails
+        let pad = UIDevice.current.userInterfaceIdiom == .pad
+        for (lang, dark) in [("en", false), ("ar", true)] {
+            let ar = lang == "ar"
+            let doc = "xr-bar-\(lang).docx"
+            let app = launch(["XR_KIND": "word", "XR_BAR": "1", "XR_LANG": lang, "XR_NEW_NAME": doc])
+            let ready = waitState(app, prefix: "ready", timeout: 120)
+            XCTAssertEqual(ready, "ready", "editor did not become ready (\(lang))")
+            if dark { XCUIDevice.shared.system.open(URL(string: "xrero-autotest://appearance?dark=1")!); sleep(3) }
+            let name = lang + (dark ? "-dark" : "-light")
+            let probe = app.staticTexts["xr-editor-state"]
+            let status = app.staticTexts["xr-bar-status"]
+            let savedWord = ar ? "محفوظ" : "Saved", editedWord = ar ? "معدَّل" : "Edited"
+            func statusNow() -> String { status.exists ? status.label : "(none)" }
+            func waitStatus(_ want: String, _ timeout: TimeInterval) -> String {
+                let end = Date().addingTimeInterval(timeout)
+                while Date() < end {
+                    if status.exists && status.label == want { return want }
+                    Thread.sleep(forTimeInterval: 0.3)
+                }
+                return statusNow()
+            }
+            func waitProbe(_ part: String, _ timeout: TimeInterval) -> Bool {
+                let end = Date().addingTimeInterval(timeout)
+                while Date() < end {
+                    if probe.exists && probe.label.contains(part) { return true }
+                    Thread.sleep(forTimeInterval: 0.3)
+                }
+                return false
+            }
+            let back = app.buttons["xr-bar-back"], undo = app.buttons["xr-bar-undo"], more = app.buttons["xr-bar-more"]
+            let title = app.staticTexts["xr-bar-title"]
+
+            // the bar as opened: one Back, the name, Undo (nothing to undo yet), ⋯; Redo in the bar on iPad only
+            XCTAssertTrue(back.waitForExistence(timeout: 10), "no Back in the top bar (\(name))")
+            XCTAssertEqual(back.label, ar ? "المستندات" : "Documents", "Back label (\(name))")
+            XCTAssertTrue(title.exists && title.label == "xr-bar-\(lang)", "title (\(name)): \(title.exists ? title.label : "missing")")
+            XCTAssertTrue(undo.exists, "no Undo in the top bar (\(name))")
+            XCTAssertFalse(undo.isEnabled, "Undo enabled with nothing to undo (\(name))")
+            XCTAssertTrue(more.exists, "no ⋯ menu in the top bar (\(name))")
+            XCTAssertEqual(app.buttons["xr-bar-redo"].exists, pad, "Redo in the bar: iPad only (\(name))")
+            XCTAssertNotEqual(statusNow(), savedWord, "'Saved' before any save (\(name))")
+            // 44 pt targets
+            for (id, e) in [("back", back), ("undo", undo), ("more", more)] {
+                XCTAssertGreaterThanOrEqual(min(e.frame.width, e.frame.height), 43.5, "\(id) is smaller than 44 pt (\(name)): \(e.frame)")
+            }
+            // the editors' title row is gone: no web Save / Undo buttons (the native bar replaces them)
+            let webTitle = app.webViews.buttons.matching(NSPredicate(format:
+                "label BEGINSWITH[c] 'Save' OR label BEGINSWITH 'حفظ' OR label BEGINSWITH[c] 'Undo' OR label BEGINSWITH 'تراجع'"))
+            XCTAssertEqual(webTitle.count, 0, "the editor's own title row is still shown (\(name)): \(webTitle.allElementsBoundByIndex.map { $0.label })")
+            // mirrored as one piece: Back leads (left in English, right in Arabic), Undo / ⋯ trail
+            if ar { XCTAssertGreaterThan(back.frame.midX, undo.frame.midX, "Arabic bar not mirrored: Back \(back.frame) Undo \(undo.frame)") }
+            else { XCTAssertLessThan(back.frame.midX, undo.frame.midX, "English bar order: Back \(back.frame) Undo \(undo.frame)") }
+            print("XR bar \(name): back=\(back.frame) undo=\(undo.frame) more=\(more.frame) title=\(title.frame) status=\(statusNow())")
+            shot(app, "50-bar-\(name)-opened")
+
+            // typing -> "Edited", Undo enabled
+            tapFirstLine(app, fallback: CGVector(dx: 0.35, dy: pad ? 0.19 : 0.3))
+            sleep(2)
+            typeSlowly(app, ar ? "\u{0634}\u{0631}\u{064A}\u{0637} \u{0623}\u{0639}\u{0644}\u{0649}" : "Top bar test")   // شريط أعلى
+            XCTAssertEqual(waitStatus(editedWord, 10), editedWord, "no 'Edited' after typing (\(name))")
+            XCTAssertTrue(waitProbe("undo:1", 10), "no undo after typing (\(name)): \(probe.label)")
+            XCTAssertTrue(undo.isEnabled, "Undo still disabled after typing (\(name))")
+            shot(app, "51-bar-\(name)-edited")
+
+            // Undo through the bridge: something to redo now; Redo (bar on iPad, ⋯ on iPhone) takes it back
+            undo.tap()
+            XCTAssertTrue(waitProbe("redo:1", 10), "Undo did not reach the engine (\(name)): \(probe.label)")
+            print("XR bar \(name) after undo: \(probe.label)")
+            if pad {
+                app.buttons["xr-bar-redo"].tap()
+            } else {
+                more.tap()
+                let redo = app.buttons["xr-bar-redo"]
+                XCTAssertTrue(redo.waitForExistence(timeout: 5), "no Redo in ⋯ (\(name))")
+                shot(app, "52-bar-\(name)-menu")
+                redo.tap()
+            }
+            XCTAssertTrue(waitProbe("redo:0", 10), "Redo did not reach the engine (\(name)): \(probe.label)")
+            print("XR bar \(name) after redo: \(probe.label)")
+            XCTAssertNotEqual(statusNow(), savedWord, "'Saved' without a save (\(name))")
+
+            // Save from ⋯ -> the file is written -> "Saved"
+            more.tap()
+            let save = app.buttons["xr-bar-save"]
+            XCTAssertTrue(save.waitForExistence(timeout: 5), "no Save in ⋯ (\(name))")
+            if pad { shot(app, "52-bar-\(name)-menu") }
+            save.tap()
+            let saved = waitState(app, prefix: "saved", timeout: 40)
+            XCTAssertTrue(saved.hasPrefix("saved"), "Save in ⋯ did not save (\(name)): \(saved)")
+            let line = waitStatus(savedWord, 10)
+            print("XR bar \(name) saved: \(saved) status=\(line)")
+            XCTAssertEqual(line, savedWord, "no 'Saved' after the save (\(name))")
+            shot(app, "53-bar-\(name)-saved")
+            if !dark {                                     // the same bar in dark (Arabic runs in dark throughout)
+                XCUIDevice.shared.system.open(URL(string: "xrero-autotest://appearance?dark=1")!)
+                sleep(3)
+                shot(app, "54-bar-\(lang)-dark")
+            }
+            app.terminate()
+        }
+    }
+
     /// Runs a Home-tab ribbon command by its exact name ("Copy", not "Copy style") and waits until the app reports
     /// it done (the Autotest state turns "clip<n> ..."). Phones fold the ribbon, and a tap on a button of a folded
     /// panel lands on the page (it moves the caret and drops the selection) - so the Home panel is opened through

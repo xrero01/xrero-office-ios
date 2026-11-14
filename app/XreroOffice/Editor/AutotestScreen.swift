@@ -18,6 +18,11 @@ struct AutotestScreen: View {
     @State private var clipCount = 0
     @State private var saveAsFormats: [String] = []
     @StateObject private var controller = EditorController()
+    @StateObject private var barStatus = EditorBarStatus()
+    /// XR_BAR=1: the editor under the app's native top bar (plan M4a), the way EditorScreen shows it - for the bar's
+    /// own test. Without it the editor fills the screen as before, so the typing tests keep their exact geometry.
+    private let bar = ProcessInfo.processInfo.environment["XR_BAR"] == "1"
+    private let lang = ProcessInfo.processInfo.environment["XR_LANG"] ?? AppLanguage.current
     private let name: String
     private let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
 
@@ -38,6 +43,19 @@ struct AutotestScreen: View {
     }
 
     var body: some View {
+        if bar {
+            NavigationStack {
+                screen.editorTopBar(title: (name as NSString).deletingPathExtension, state: controller.state,
+                                    status: barStatus, controller: controller, ar: lang == "ar",
+                                    back: { state = "back" }, save: { controller.save() }) { EmptyView() }
+            }
+            .environment(\.layoutDirection, lang == "ar" ? .rightToLeft : .leftToRight)
+        } else {
+            screen
+        }
+    }
+
+    private var screen: some View {
         ZStack(alignment: .topLeading) {
             EditorWebView(document: $document, title: name, lang: ProcessInfo.processInfo.environment["XR_LANG"] ?? AppLanguage.current,
                           onCommand: handle, controller: controller)
@@ -186,6 +204,8 @@ struct AutotestScreen: View {
                                                 // change on the web view -> the live switch, no reload)
                 let dark = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "dark" }?.value == "1"
                 controller.coordinator?.web?.overrideUserInterfaceStyle = dark ? .dark : .light
+                // the top bar's test: the whole window (the native bar too), as when iOS itself switches
+                if bar { controller.coordinator?.web?.window?.overrideUserInterfaceStyle = dark ? .dark : .light }
                 handle("log", "autotest: appearance " + (dark ? "dark" : "light"))
             }
             if url.host == "chrome" {           // M6 gate: neutral editor chrome - theme follows the appearance, line
@@ -342,6 +362,7 @@ struct AutotestScreen: View {
     }
 
     private func handle(_ cmd: String, _ param: String) {
+        barStatus.note(cmd, param)
         switch cmd {
         case "ready": state = "ready"; tooLarge = false
         case "modified": modified = param

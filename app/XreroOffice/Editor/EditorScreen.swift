@@ -7,6 +7,7 @@ struct EditorScreen: View {
     /// Back to the documents (after the editor has saved). Without it the screen dismisses itself.
     var onClose: (() -> Void)? = nil
     @StateObject private var controller = EditorController()
+    @StateObject private var barStatus = EditorBarStatus()      // the top bar's Opening / Saving / Edited / Saved line
     @State private var lang = AppLanguage.current
     @State private var share: ShareFile?
     @State private var saveAsFormats: [String] = []
@@ -27,38 +28,30 @@ struct EditorScreen: View {
         EditorWebView(document: $document, title: title, lang: lang, onCommand: handle, controller: controller)
             .ignoresSafeArea(.container, edges: [.bottom])
             .editorRecovery(notice: $recovered, tooLarge: tooLarge, ar: lang == "ar", share: shareDocument, back: leave)
-            .navigationTitle((title as NSString).deletingPathExtension)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button(action: close) { Image(systemName: "chevron.backward") }
-                        .accessibilityLabel(L.documents)
-                }
-                // language, share and account live in the system bar (full-size touch targets); the editors' own
-                // header buttons for them are hidden on iOS so the ribbon tabs get the whole width
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    Menu {
-                        Button { if lang != "en" { pendingLang = "en" } } label: {
-                            Label("English", systemImage: lang == "en" ? "checkmark" : "")
-                        }
-                        .accessibilityIdentifier("xr-nav-lang-en")
-                        Button { if lang != "ar" { pendingLang = "ar" } } label: {
-                            Label("العربية", systemImage: lang == "ar" ? "checkmark" : "")
-                        }
-                        .accessibilityIdentifier("xr-nav-lang-ar")
-                    } label: { Image(systemName: "globe") }
-                        .accessibilityLabel(lang == "ar" ? "اللغة" : "Language")
-                        .accessibilityIdentifier("xr-nav-lang")
-                    Button { handle("xrero:share", "") } label: { Image(systemName: "square.and.arrow.up") }
-                        .accessibilityLabel(lang == "ar" ? "مشاركة" : "Share")
-                        .accessibilityIdentifier("xr-nav-share")
-                    Button { showAccount = true } label: {
-                        Image(systemName: account.isSignedIn ? "person.crop.circle.fill" : "person.crop.circle")
+            // one native bar (plan M4a): Back, name + Edited / Saved, Undo (+ Redo when wide), the ⋯ menu. Language,
+            // Share and Account wait in ⋯ until M7b arranges it (same ids as before, so nothing is lost on the way)
+            .editorTopBar(title: (title as NSString).deletingPathExtension, state: controller.state, status: barStatus,
+                          controller: controller, ar: lang == "ar", back: close, save: { controller.save() }) {
+                Menu {
+                    Button { if lang != "en" { pendingLang = "en" } } label: {
+                        Label("English", systemImage: lang == "en" ? "checkmark" : "")
                     }
-                        .accessibilityLabel(account.isSignedIn ? (lang == "ar" ? "الحساب" : "Account")
-                                                               : (lang == "ar" ? "تسجيل الدخول" : "Sign in"))
-                        .accessibilityIdentifier("xr-nav-account")
+                    .accessibilityIdentifier("xr-nav-lang-en")
+                    Button { if lang != "ar" { pendingLang = "ar" } } label: {
+                        Label("العربية", systemImage: lang == "ar" ? "checkmark" : "")
+                    }
+                    .accessibilityIdentifier("xr-nav-lang-ar")
+                } label: { Label(lang == "ar" ? "اللغة" : "Language", systemImage: "globe") }
+                    .accessibilityIdentifier("xr-nav-lang")
+                Button { handle("xrero:share", "") } label: {
+                    Label(lang == "ar" ? "مشاركة" : "Share", systemImage: "square.and.arrow.up")
                 }
+                    .accessibilityIdentifier("xr-nav-share")
+                Button { showAccount = true } label: {
+                    Label(account.isSignedIn ? (lang == "ar" ? "الحساب" : "Account") : (lang == "ar" ? "تسجيل الدخول" : "Sign in"),
+                          systemImage: account.isSignedIn ? "person.crop.circle.fill" : "person.crop.circle")
+                }
+                    .accessibilityIdentifier("xr-nav-account")
             }
             .overlay(alignment: .bottom) {
                 // short failure notice (paste): a capsule above the editor's bottom bar, gone after 2 s
@@ -126,6 +119,7 @@ struct EditorScreen: View {
     }
 
     private func handle(_ cmd: String, _ param: String) {
+        barStatus.note(cmd, param)
         if cmd == "close" {
             close()
         } else if cmd == "recovered" {          // the last saved version is back on screen after the web process ended
@@ -157,7 +151,7 @@ struct EditorScreen: View {
             let new = String(cmd.dropFirst("xrero:lang:".count)) == "ar" ? "ar" : "en"
             guard new != lang else { return }
             AppLanguage.set(new)
-            controller.save { lang = new }                       // reopen the editor in the other language
+            controller.save { barStatus.reopening(); lang = new }  // reopen the editor in the other language
         }
     }
 }
