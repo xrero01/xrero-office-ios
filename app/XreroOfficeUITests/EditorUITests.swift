@@ -448,13 +448,19 @@ final class EditorUITests: XCTestCase {
                     guard hittable(e, 4), settled(e) else { continue }
                     e.tap()
                     // a menu ignores a tap while it is still unfolding (seen on the iPhone in Arabic right after
-                    // Language ▸: the menu stayed open and the entry did not run); a tap that ran closes the menu, so
-                    // the entry still being there means it was ignored - tap it once more (a user would do the same)
-                    if !gone(e, 2) {
+                    // Language ▸: the menu stayed open and the entry did not run); a tap that ran closes the menu.
+                    // Tap once more only when the menu is plainly still open after 4 s - the entry AND the menu's Save
+                    // still there - never while a sheet is coming up (a blind second tap there can land inside the
+                    // sheet: the likely cause of a lost About Done button in CI round 8)
+                    if !gone(e, 4) {
+                        let save = app.buttons["xr-bar-save"].firstMatch
+                        if id != "xr-bar-save" && !(save.exists && save.isHittable) { return true }
                         print("XR menu \(name): \(id) ignored the tap (menu still open) - tapping again")
                         guard settled(e) else { continue }
                         e.tap()
-                        if !gone(e, 2) { continue }
+                        let ran = gone(e, 4)
+                        autotest("note", "test: menu \(id) ignored the first tap, second tap \(ran ? "ran" : "ignored too")")
+                        if !ran { continue }
                     }
                     return true
                 }
