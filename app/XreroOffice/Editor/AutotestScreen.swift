@@ -61,8 +61,11 @@ struct AutotestScreen: View {
                                     fileURL: docs.appendingPathComponent(name), ar: lang == "ar")
             }
             .environment(\.layoutDirection, lang == "ar" ? .rightToLeft : .leftToRight)
+            .background(UIKitLayoutDirection(rtl: lang == "ar"))
         } else {
-            screen
+            // UIKit mirrored as in the real app (EditorHost's appLanguageEnvironment): the typing tests type under
+            // the same trait a user in Arabic gets
+            screen.background(UIKitLayoutDirection(rtl: lang == "ar"))
         }
     }
 
@@ -182,6 +185,11 @@ struct AutotestScreen: View {
                 controller.call("var ed=window.Asc&&Asc.editor;if(!ed)return 'no editor';ed.asc_AddText(\(arg)[0]);return 'ok';") { r, e in
                     handle("log", "addtext: \((r as? String) ?? e ?? "?")")
                 }
+            }
+            if url.host == "uikitdir" {         // ⋯ menu test (M7b review): UIKit's own direction, which the menus it
+                                                // draws for SwiftUI follow (UIKitLayoutDirection)
+                let d = controller.coordinator?.web?.effectiveUserInterfaceLayoutDirection
+                state = d == nil ? "dir:none" : (d == .rightToLeft ? "dir:rtl" : "dir:ltr")
             }
             if url.host == "menuprobe" {        // ⋯ menu test (M7b): is the editor's Find panel / File backstage open,
                                                 // is the File tab hidden; "close" also shuts both again

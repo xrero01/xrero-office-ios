@@ -406,6 +406,27 @@ final class EditorUITests: XCTestCase {
                 }
                 return false
             }
+            /// `e` stays at the same place for 0.4 s (the menu has finished unfolding)
+            func settled(_ e: XCUIElement) -> Bool {
+                var last = CGRect.null
+                for _ in 0..<12 {
+                    guard e.exists else { return false }
+                    let f = e.frame
+                    if f == last { return true }
+                    last = f
+                    usleep(400_000)
+                }
+                return e.exists
+            }
+            /// `e` is no longer on screen within `timeout` (the menu closed)
+            func gone(_ e: XCUIElement, _ timeout: TimeInterval) -> Bool {
+                let end = Date().addingTimeInterval(timeout)
+                while Date() < end {
+                    if !(e.exists && e.isHittable) { return true }
+                    usleep(250_000)
+                }
+                return false
+            }
             /// ⋯, then the entry (inside a submenu when `sub` is given); false when it is not there. A tap on ⋯ can
             /// land while a sheet is still closing: then the menu is not open - close whatever is open (a tap on the
             /// status bar touches nothing in the editor) and try again.
@@ -424,8 +445,17 @@ final class EditorUITests: XCTestCase {
                         s.tap(); sleep(2)             // the submenu redraws its rows while it unfolds: wait it out
                     }
                     let e = app.buttons[id].firstMatch
-                    guard hittable(e, 4) else { continue }
+                    guard hittable(e, 4), settled(e) else { continue }
                     e.tap()
+                    // a menu ignores a tap while it is still unfolding (seen on the iPhone in Arabic right after
+                    // Language ▸: the menu stayed open and the entry did not run); a tap that ran closes the menu, so
+                    // the entry still being there means it was ignored - tap it once more (a user would do the same)
+                    if !gone(e, 2) {
+                        print("XR menu \(name): \(id) ignored the tap (menu still open) - tapping again")
+                        guard settled(e) else { continue }
+                        e.tap()
+                        if !gone(e, 2) { continue }
+                    }
                     return true
                 }
                 return false
@@ -435,6 +465,9 @@ final class EditorUITests: XCTestCase {
             let p0 = probe()
             print("XR menu \(name) opened: \(p0)")
             XCTAssertTrue(p0.contains("filetab=0"), "the web File tab is still shown on touch (\(name)): \(p0)")
+            // UIKit itself is mirrored in Arabic: the menus it draws for the ⋯ Menu follow its trait, not SwiftUI's
+            autotest("uikitdir")
+            XCTAssertEqual(waitState(app, prefix: "dir:", timeout: 5), ar ? "dir:rtl" : "dir:ltr", "UIKit layout direction (\(name))")
 
             // ⋯ as the user sees it: every entry, no PDF / Print (a first tap can come while the bar is still settling:
             // open it again until its first entry is there)
@@ -455,6 +488,15 @@ final class EditorUITests: XCTestCase {
             let pdfOrPrint = NSPredicate(format: "label CONTAINS[c] 'Print' OR label CONTAINS 'طباعة' OR label CONTAINS 'PDF'")
             XCTAssertEqual(app.buttons.matching(pdfOrPrint).count - app.webViews.buttons.matching(pdfOrPrint).count, 0,
                            "PDF / Print offered before the spike passed (\(name))")
+            // the rows read from the right in Arabic: a row's text sits right of its symbol (when the menu exposes them)
+            let infoRow = app.buttons["xr-menu-info"].firstMatch
+            let rowText = infoRow.staticTexts.firstMatch, rowIcon = infoRow.images.firstMatch
+            if rowText.exists && rowIcon.exists {
+                print("XR menu \(name) row: text \(rowText.frame) icon \(rowIcon.frame)")
+                XCTAssertEqual(rowText.frame.midX > rowIcon.frame.midX, !ar, "⋯ rows are not mirrored (\(name)): text \(rowText.frame) icon \(rowIcon.frame)")
+            } else {
+                print("XR menu \(name) row: no text / symbol exposed (frame \(infoRow.frame)) - the dir check stands")
+            }
             shot(app, "60-menu-\(name)")
             app.buttons["xr-menu-export"].firstMatch.tap()
             sleep(2)
@@ -517,19 +559,12 @@ final class EditorUITests: XCTestCase {
             XCTAssertTrue(pick(ar ? "xr-nav-lang-en" : "xr-nav-lang-ar", sub: "xr-nav-lang"), "no Language ▸ entries (\(name))")
             XCTAssertEqual(waitState(app, prefix: "lang:", timeout: 5), "lang:" + (ar ? "en" : "ar"), "Language ▸ (\(name))")
 
-            // All tools: the editor's File backstage (with its own way back)
-            // (right after Language ▸ the menu can still be closing: a tap then reaches no entry - one more try,
-            // seen once on the iPhone in Arabic; the log line "menu all tools" shows whether the entry ran)
+            // All tools: the editor's File backstage (with its own way back). pick() makes sure the tap ran (the
+            // menu closed); the log line "menu all tools" in the editor log shows the entry itself ran.
             sleep(2)
             XCTAssertTrue(pick("xr-menu-alltools"), "no All tools in ⋯ (\(name))")
             sleep(2)
-            var p2 = probe()
-            if !p2.contains("file=1") {
-                print("XR menu \(name): All tools tap did not reach the entry (\(p2)) - once more")
-                _ = pick("xr-menu-alltools")
-                sleep(2)
-                p2 = probe()
-            }
+            let p2 = probe()
             print("XR menu \(name) all tools: \(p2)")
             XCTAssertTrue(p2.contains("file=1"), "⋯ > All tools did not open the File backstage (\(name)): \(p2)")
             shot(app, "65-menu-\(name)-alltools")

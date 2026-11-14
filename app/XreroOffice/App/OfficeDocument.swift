@@ -139,6 +139,46 @@ struct AppLanguageEnvironment: ViewModifier {
         content
             .environment(\.layoutDirection, language.layoutDirection)
             .environment(\.locale, language.locale)
+            .background(UIKitLayoutDirection(rtl: language.isArabic))
+    }
+}
+
+/// UIKit's own layout direction for the window scene, from the app language. SwiftUI's \.layoutDirection mirrors only
+/// SwiftUI views: the menus UIKit draws for a SwiftUI Menu (the editor's ⋯ menu, its Export ▸ / Language ▸ submenus),
+/// alerts and system controls follow UIKit's trait instead, so without this an Arabic menu showed its rows
+/// left-to-right with right-pointing chevrons (plan M7b review). A scene-wide trait override is what an iPhone set to
+/// Arabic gives the app anyway; the in-app language is the source of truth (plan M9b), so English is set explicitly
+/// too. Views that pin .leftToRight (digits, glyph pictures) keep it: their SwiftUI environment wins.
+struct UIKitLayoutDirection: UIViewRepresentable {
+    var rtl: Bool
+
+    func makeUIView(context: Context) -> Probe {
+        let v = Probe()
+        v.isUserInteractionEnabled = false
+        v.isAccessibilityElement = false
+        return v
+    }
+
+    func updateUIView(_ v: Probe, context: Context) {
+        v.rtl = rtl
+        v.apply()
+    }
+
+    final class Probe: UIView {
+        var rtl = false
+        private var applied: Bool?
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            applied = nil              // a new window / scene: set it there too
+            apply()
+        }
+
+        func apply() {
+            guard let scene = window?.windowScene, applied != rtl else { return }
+            applied = rtl
+            scene.traitOverrides.layoutDirection = rtl ? .rightToLeft : .leftToRight
+        }
     }
 }
 

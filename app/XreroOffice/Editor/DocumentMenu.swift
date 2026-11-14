@@ -7,8 +7,9 @@ import SwiftUI
 ///      equivalent yet: protection, properties, page setup...).
 /// Mirrored with the screen it sits in. Every entry reaches the editor through EditorController (the F0 bridge).
 ///
-/// PDF and Print are left out on purpose: the PDF spike (CI, `xrero-autotest://pdfspike`) showed whether this
-/// WebAssembly converter can write a PDF at all, and they are offered only once an exported Arabic PDF passes a
+/// PDF and Print are left out on purpose: in the PDF spike (CI, `xrero-autotest://pdfspike`) route (a), this
+/// WebAssembly converter writing the PDF, fails (x2t exit code 80); route (b), the editor's print-renderer output turned
+/// into a PDF, is a follow-up (plan.json M7b "deferred"). They are offered only once an exported Arabic PDF passes a
 /// copy-text check there.
 struct DocumentMenuItems: View {
     var kind: OfficeKind
@@ -33,6 +34,7 @@ struct DocumentMenuItems: View {
                 Menu {
                     ForEach(formats, id: \.self) { ext in
                         Button(SaveAsCopy.label(ext, lang)) { model.export(ext, controller) }
+                            .disabled(model.exporting != nil)     // one export at a time: the capsule is for that one
                             .accessibilityIdentifier("xr-export-" + ext)
                     }
                 } label: { Label(ar ? "تصدير" : "Export", systemImage: "square.and.arrow.up.on.square") }
@@ -93,6 +95,7 @@ final class DocumentMenuModel: ObservableObject {
         case "exporting": if exporting != param { exporting = param }
         case "export", "export-failed": if exporting != nil { exporting = nil }
         case "docinfo":
+            guard counting else { break }          // only the answer to an opening still counting
             var c: [String: Int] = [:]
             if let d = param.data(using: .utf8), let o = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] {
                 for (k, v) in o { if let n = (v as? NSNumber)?.intValue, n >= 0 { c[k] = n } }
@@ -104,19 +107,27 @@ final class DocumentMenuModel: ObservableObject {
     }
 
     /// Export ▸ <format>: the copy is converted in the editor and comes back as an 'export' message (share sheet).
+    /// The entries are disabled while one runs (the capsule and its end message belong to that one).
     func export(_ ext: String, _ controller: EditorController) {
+        guard exporting == nil else { return }
         exporting = ext
         controller.export(ext) { [weak self] r in if r != "ok" { self?.exporting = nil } }
     }
 
-    /// Document info: the sheet opens at once with what the app knows; the editor's counts follow.
+    /// Document info: the sheet opens at once with what the app knows; the editor's counts follow. Each opening has
+    /// its own number, so a late answer or the 15 s stop of an earlier opening never ends this one's count.
+    private var infoRequest = 0
     func showInfo(_ controller: EditorController) {
+        infoRequest += 1
+        let mine = infoRequest
         counts = [:]
         counting = true
         infoShown = true
-        controller.docInfo { [weak self] r in if r != "ok" { self?.counting = false } }
+        controller.docInfo { [weak self] r in if r != "ok", self?.infoRequest == mine { self?.counting = false } }
         // a count that never ends (a very large document) must not spin for ever
-        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in self?.counting = false }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
+            if self?.infoRequest == mine { self?.counting = false }
+        }
     }
 }
 

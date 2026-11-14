@@ -765,8 +765,9 @@
 
   // Document info: the counts for the app's native sheet, posted as one 'docinfo' message (JSON). Word counts in the
   // background (startGetDocInfo -> asc_onDocInfo ... asc_onGetDocInfoEnd, the same run the File > Info panel uses);
-  // slides and sheets are counted at once. The callbacks are registered once and fire only during such a run.
-  var docInfoHooked = false, docInfoLast = null;
+  // slides and sheets are counted at once. The callbacks are registered once and fire during every such run, also
+  // the web backstage's own Info panel: only a run the app asked for (docInfoPending) is posted.
+  var docInfoHooked = false, docInfoLast = null, docInfoPending = false;
   window.__xrDocInfo = function () {
     var api = window.__xrApi, post = function (o) { H.command && H.command('docinfo', JSON.stringify(o)); };
     if (!api) return 'no editor';
@@ -782,12 +783,17 @@
           docInfoLast = { pages: o.get_PageCount(), words: o.get_WordsCount(), paragraphs: o.get_ParagraphCount(),
                           chars: o.get_SymbolsCount(), charsSpaces: o.get_SymbolsWSCount() };
         });
-        api.asc_registerCallback('asc_onGetDocInfoEnd', function () { post(docInfoLast || {}); });
+        api.asc_registerCallback('asc_onGetDocInfoEnd', function () {
+          if (!docInfoPending) return;
+          docInfoPending = false;
+          post(docInfoLast || {});
+        });
       }
       docInfoLast = null;
+      docInfoPending = true;
       api.startGetDocInfo();
       return 'ok';
-    } catch (e) { post({}); return 'error: ' + (e && e.message || e); }
+    } catch (e) { docInfoPending = false; post({}); return 'error: ' + (e && e.message || e); }
   };
 
   var A = {
