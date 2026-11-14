@@ -13,7 +13,10 @@ struct EditorScreen: View {
     @State private var saveAsFormats: [String] = []
     @State private var showAccount = false
     @State private var showAbout = false
-    @StateObject private var menu = DocumentMenuModel()     // the ⋯ menu's Exporting capsule + Document info sheet
+    // @State, not @StateObject: the screen must NOT redraw when the model changes. A redraw rebuilds the top bar's
+    // toolbar, and a ⋯ menu open at that moment stays on screen but dead - every tap ignored (CI: the Document info
+    // sheet's 15 s count stop fired while the menu was open). Only the capsule and the sheet observe the model.
+    @State private var menu = DocumentMenuModel()           // the ⋯ menu's Exporting capsule + Document info sheet
     @State private var recovered: RecoveryNotice?           // the editor was reopened after its web process ended
     @State private var tooLarge = false                     // ... twice within a minute: Share / Back instead
     @State private var toast: String?

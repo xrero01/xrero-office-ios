@@ -447,11 +447,11 @@ final class EditorUITests: XCTestCase {
                     let e = app.buttons[id].firstMatch
                     guard hittable(e, 4), settled(e) else { continue }
                     e.tap()
-                    // a menu ignores a tap while it is still unfolding (seen on the iPhone in Arabic right after
-                    // Language ▸: the menu stayed open and the entry did not run); a tap that ran closes the menu.
-                    // Tap once more only when the menu is plainly still open after 4 s - the entry AND the menu's Save
-                    // still there - never while a sheet is coming up (a blind second tap there can land inside the
-                    // sheet: the likely cause of a lost About Done button in CI round 8)
+                    // a tap that ran closes the menu. If the menu is plainly still open after 4 s (the entry AND the
+                    // menu's Save still there - never while a sheet is coming up) tap once more and note it in the
+                    // editor log. (The menu that stayed open with every tap ignored in CI was an app bug - the screen
+                    // redrew its toolbar while the menu was open - fixed in EditorScreen / DocumentMenuModel; a menu
+                    // that is dead again fails here, a second tap does not revive it.)
                     if !gone(e, 4) {
                         let save = app.buttons["xr-bar-save"].firstMatch
                         if id != "xr-bar-save" && !(save.exists && save.isHittable) { return true }

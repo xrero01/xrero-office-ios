@@ -11,7 +11,10 @@ struct AutotestScreen: View {
     @State private var state = "loading"
     @State private var showAbout = false
     @State private var showAccount = false
-    @StateObject private var menu = DocumentMenuModel()
+    // @State, not @StateObject: the screen must NOT redraw when the model changes. A redraw rebuilds the top bar's
+    // toolbar, and a ⋯ menu open at that moment stays on screen but dead - every tap ignored (CI: the Document info
+    // sheet's 15 s count stop fired while the menu was open). Only the capsule and the sheet observe the model.
+    @State private var menu = DocumentMenuModel()
     @State private var recovery = "none"                    // sticky: "recovered:edited" / "recovered:" / "too-large"
     @State private var recovered: RecoveryNotice?
     @State private var tooLarge = false

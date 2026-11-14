@@ -33,8 +33,9 @@ struct DocumentMenuItems: View {
             if !formats.isEmpty {
                 Menu {
                     ForEach(formats, id: \.self) { ext in
+                        // (one export at a time: a second tap while one runs is ignored in export(); the entries
+                        // do not observe the model - a menu redrawn while open stops taking taps)
                         Button(SaveAsCopy.label(ext, lang)) { model.export(ext, controller) }
-                            .disabled(model.exporting != nil)     // one export at a time: the capsule is for that one
                             .accessibilityIdentifier("xr-export-" + ext)
                     }
                 } label: { Label(ar ? "تصدير" : "Export", systemImage: "square.and.arrow.up.on.square") }
@@ -101,13 +102,13 @@ final class DocumentMenuModel: ObservableObject {
                 for (k, v) in o { if let n = (v as? NSNumber)?.intValue, n >= 0 { c[k] = n } }
             }
             counts = c
-            counting = false
+            stopCounting()
         default: break
         }
     }
 
     /// Export ▸ <format>: the copy is converted in the editor and comes back as an 'export' message (share sheet).
-    /// The entries are disabled while one runs (the capsule and its end message belong to that one).
+    /// One at a time: a tap while one runs is ignored (the capsule and its end message belong to that one).
     func export(_ ext: String, _ controller: EditorController) {
         guard exporting == nil else { return }
         exporting = ext
@@ -123,12 +124,15 @@ final class DocumentMenuModel: ObservableObject {
         counts = [:]
         counting = true
         infoShown = true
-        controller.docInfo { [weak self] r in if r != "ok", self?.infoRequest == mine { self?.counting = false } }
+        controller.docInfo { [weak self] r in if r != "ok", self?.infoRequest == mine { self?.stopCounting() } }
         // a count that never ends (a very large document) must not spin for ever
         DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
-            if self?.infoRequest == mine { self?.counting = false }
+            if self?.infoRequest == mine { self?.stopCounting() }
         }
     }
+
+    /// Publishes only a real change: every publish redraws what observes the model.
+    private func stopCounting() { if counting { counting = false } }
 }
 
 extension View {
