@@ -55,7 +55,8 @@ struct AutotestScreen: View {
                 // label instead of a hook URL - a URL could itself change who holds the keyboard
                 if ProcessInfo.processInfo.environment["XR_PROBE"] == "1" { ProbeLabel(controller: controller) }
             }
-            .opacity(0.02)
+            // store screenshots (XR_CLEAN=1): the labels stay readable by the test but leave no trace in the picture
+            .opacity(ProcessInfo.processInfo.environment["XR_CLEAN"] == "1" ? 0.001 : 0.02)
         }
         // the same Save As list as the real editor screen (the UI test taps a format in it)
         .saveAsCopy(formats: $saveAsFormats, lang: ProcessInfo.processInfo.environment["XR_LANG"] ?? AppLanguage.current,
