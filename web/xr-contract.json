@@ -51,6 +51,7 @@
     { "kind": "api", "name": "Redo", "editors": ["word", "slide", "pdf"], "why": "top bar Redo (__xrUndo)" },
     { "kind": "api", "name": "asc_Undo", "editors": ["cell"], "why": "top bar Undo in spreadsheets (__xrUndo)" },
     { "kind": "api", "name": "asc_Redo", "editors": ["cell"], "why": "top bar Redo in spreadsheets (__xrUndo)" },
+    { "kind": "api", "name": "asc_Save", "why": "top bar Save: the engine's own user save (EditorController.userSave)" },
     { "kind": "api", "name": "asc_getCanUndo", "why": "top bar Undo does nothing when there is nothing to undo" },
     { "kind": "api", "name": "asc_getCanRedo", "why": "top bar Redo does nothing when there is nothing to redo" },
     { "kind": "api", "name": "asc_GetCurrentNumberingId", "editors": ["word"], "why": "state channel: Word list kind" },

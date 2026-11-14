@@ -31,7 +31,7 @@ struct EditorScreen: View {
             // one native bar (plan M4a): Back, name + Edited / Saved, Undo (+ Redo when wide), the ⋯ menu. Language,
             // Share and Account wait in ⋯ until M7b arranges it (same ids as before, so nothing is lost on the way)
             .editorTopBar(title: (title as NSString).deletingPathExtension, state: controller.state, status: barStatus,
-                          controller: controller, ar: lang == "ar", back: close, save: { controller.save() }) {
+                          controller: controller, ar: lang == "ar", back: close, save: { controller.userSave() }) {
                 Menu {
                     Button { if lang != "en" { pendingLang = "en" } } label: {
                         Label("English", systemImage: lang == "en" ? "checkmark" : "")

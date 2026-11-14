@@ -47,7 +47,7 @@ struct AutotestScreen: View {
             NavigationStack {
                 screen.editorTopBar(title: (name as NSString).deletingPathExtension, state: controller.state,
                                     status: barStatus, controller: controller, ar: lang == "ar",
-                                    back: { state = "back" }, save: { controller.save() }) { EmptyView() }
+                                    back: { state = "back" }, save: { controller.userSave() }) { EmptyView() }
             }
             .environment(\.layoutDirection, lang == "ar" ? .rightToLeft : .leftToRight)
         } else {
