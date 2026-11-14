@@ -12,6 +12,8 @@ struct EditorScreen: View {
     @State private var share: ShareFile?
     @State private var saveAsFormats: [String] = []
     @State private var showAccount = false
+    @State private var showAbout = false
+    @StateObject private var menu = DocumentMenuModel()     // the ⋯ menu's Exporting capsule + Document info sheet
     @State private var recovered: RecoveryNotice?           // the editor was reopened after its web process ended
     @State private var tooLarge = false                     // ... twice within a minute: Share / Back instead
     @State private var toast: String?
@@ -28,31 +30,20 @@ struct EditorScreen: View {
         EditorWebView(document: $document, title: title, lang: lang, onCommand: handle, controller: controller)
             .ignoresSafeArea(.container, edges: [.bottom])
             .editorRecovery(notice: $recovered, tooLarge: tooLarge, ar: lang == "ar", share: shareDocument, back: leave)
-            // one native bar (plan M4a): Back, name + Edited / Saved, Undo (+ Redo when wide), the ⋯ menu. Language,
-            // Share and Account wait in ⋯ until M7b arranges it (same ids as before, so nothing is lost on the way)
+            // one native bar (plan M4a): Back, name + Edited / Saved, Undo (+ Redo when wide), the ⋯ document menu
+            // (plan M7b: Find, Redo, Save | Share, Export, Document info | Language, Account, About, All tools)
             .editorTopBar(title: (title as NSString).deletingPathExtension, state: controller.state, status: barStatus,
-                          controller: controller, ar: lang == "ar", back: close, save: { controller.userSave() }) {
-                Menu {
-                    Button { if lang != "en" { pendingLang = "en" } } label: {
-                        Label("English", systemImage: lang == "en" ? "checkmark" : "")
-                    }
-                    .accessibilityIdentifier("xr-nav-lang-en")
-                    Button { if lang != "ar" { pendingLang = "ar" } } label: {
-                        Label("العربية", systemImage: lang == "ar" ? "checkmark" : "")
-                    }
-                    .accessibilityIdentifier("xr-nav-lang-ar")
-                } label: { Label(lang == "ar" ? "اللغة" : "Language", systemImage: "globe") }
-                    .accessibilityIdentifier("xr-nav-lang")
-                Button { handle("xrero:share", "") } label: {
-                    Label(lang == "ar" ? "مشاركة" : "Share", systemImage: "square.and.arrow.up")
-                }
-                    .accessibilityIdentifier("xr-nav-share")
-                Button { showAccount = true } label: {
-                    Label(account.isSignedIn ? (lang == "ar" ? "الحساب" : "Account") : (lang == "ar" ? "تسجيل الدخول" : "Sign in"),
-                          systemImage: account.isSignedIn ? "person.crop.circle.fill" : "person.crop.circle")
-                }
-                    .accessibilityIdentifier("xr-nav-account")
+                          controller: controller, ar: lang == "ar", back: close, save: { controller.userSave() },
+                          find: { controller.find() }) {
+                DocumentMenuItems(kind: document.kind, lang: lang, signedIn: account.isSignedIn, model: menu,
+                                  controller: controller,
+                                  language: { if $0 != lang { pendingLang = $0 } },
+                                  share: { handle("xrero:share", "") },
+                                  account: { showAccount = true },
+                                  about: { showAbout = true })
             }
+            .documentMenuChrome(model: menu, kind: document.kind, name: title, size: document.data.count,
+                                fileURL: fileURL, ar: lang == "ar")
             .overlay(alignment: .bottom) {
                 // short failure notice (paste): a capsule above the editor's bottom bar, gone after 2 s
                 if let toast {
@@ -87,6 +78,7 @@ struct EditorScreen: View {
             }
             .sheet(item: $share) { ShareSheet(items: [$0.url]) }
             .sheet(isPresented: $showAccount) { AccountView() }
+            .sheet(isPresented: $showAbout) { AboutSheet() }
             .onChange(of: account.info) { _, _ in controller.syncAccount(account.webValue) }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .background { controller.save() }     // never lose typing when the app is left
@@ -120,6 +112,7 @@ struct EditorScreen: View {
 
     private func handle(_ cmd: String, _ param: String) {
         barStatus.note(cmd, param)
+        menu.note(cmd, param)
         if cmd == "close" {
             close()
         } else if cmd == "recovered" {          // the last saved version is back on screen after the web process ended
@@ -133,6 +126,8 @@ struct EditorScreen: View {
             showAccount = true
         } else if cmd == "paste-failed" {
             showToast(L.cannotPaste)
+        } else if cmd == "export-failed" {
+            showToast(lang == "ar" ? "تعذّر التصدير" : "Couldn't export")
         } else if cmd == "xrero:signout" {
             account.signOut()
         } else if cmd == "saveas" {

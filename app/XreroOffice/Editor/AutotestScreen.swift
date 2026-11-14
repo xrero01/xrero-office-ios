@@ -10,6 +10,8 @@ struct AutotestScreen: View {
     @State private var document: OfficeDocument
     @State private var state = "loading"
     @State private var showAbout = false
+    @State private var showAccount = false
+    @StateObject private var menu = DocumentMenuModel()
     @State private var recovery = "none"                    // sticky: "recovered:edited" / "recovered:" / "too-large"
     @State private var recovered: RecoveryNotice?
     @State private var tooLarge = false
@@ -45,9 +47,18 @@ struct AutotestScreen: View {
     var body: some View {
         if bar {
             NavigationStack {
+                // the real ⋯ document menu (plan M7b); the actions that would leave the test's editor (language
+                // switch, share sheet) report in the state label instead
                 screen.editorTopBar(title: (name as NSString).deletingPathExtension, state: controller.state,
                                     status: barStatus, controller: controller, ar: lang == "ar",
-                                    back: { state = "back" }, save: { controller.userSave() }) { EmptyView() }
+                                    back: { state = "back" }, save: { controller.userSave() },
+                                    find: { controller.find() }) {
+                    DocumentMenuItems(kind: document.kind, lang: lang, signedIn: false, model: menu, controller: controller,
+                                      language: { state = "lang:" + $0 }, share: { state = "share" },
+                                      account: { showAccount = true }, about: { showAbout = true })
+                }
+                .documentMenuChrome(model: menu, kind: document.kind, name: name, size: document.data.count,
+                                    fileURL: docs.appendingPathComponent(name), ar: lang == "ar")
             }
             .environment(\.layoutDirection, lang == "ar" ? .rightToLeft : .leftToRight)
         } else {
@@ -126,7 +137,8 @@ struct AutotestScreen: View {
                 let js = """
                 (function(){var f=document.querySelector('iframe');var w=f&&f.contentWindow;if(!w)return 'no frame';
                  var d=w.document,p=d.getElementById('file-menu-panel'),t=d.querySelector('a[data-tab="file"]');
-                 if(t&&(!p||p.style.display==='none'))t.click();
+                 var tab=!!(t&&t.offsetParent);w.XreroHost.log('file tab shown: '+(tab?1:0));
+                 if(!p||p.style.display==='none'){if(tab)t.click();else w.XreroHost.log('all tools: '+(w.__xrAllTools?w.__xrAllTools():'missing'));}
                  setTimeout(function(){var ids=[].slice.call(d.querySelectorAll('#file-menu-panel .panel-menu > li.fm-btn'))
                    .filter(function(li){return w.getComputedStyle(li).display!=='none';}).map(function(li){return li.id;});
                    var tiles=[].slice.call(d.querySelectorAll('#panel-saveas .format-item'))
@@ -169,6 +181,35 @@ struct AutotestScreen: View {
                 let arg = String(data: (try? JSONSerialization.data(withJSONObject: [t])) ?? Data("[\"\"]".utf8), encoding: .utf8) ?? "[\"\"]"
                 controller.call("var ed=window.Asc&&Asc.editor;if(!ed)return 'no editor';ed.asc_AddText(\(arg)[0]);return 'ok';") { r, e in
                     handle("log", "addtext: \((r as? String) ?? e ?? "?")")
+                }
+            }
+            if url.host == "menuprobe" {        // ⋯ menu test (M7b): is the editor's Find panel / File backstage open,
+                                                // is the File tab hidden; "close" also shuts both again
+                let close = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "close" }?.value == "1"
+                state = "probing"                   // the test waits for a fresh "menu:" answer
+                controller.call("""
+                var app=window.DE||window.PE||window.SSE||window.PDFE,lm=app&&app.getController('LeftMenu');if(!lm)return 'menu:fail no left menu';
+                var fm=lm.leftMenu.menuFile,f=fm&&fm.isVisible()?1:0,s=lm.isSearchPanelVisible&&lm.isSearchPanelVisible()?1:0;
+                var t=document.querySelector('a[data-tab="file"]'),tab=t&&t.offsetParent?1:0;
+                if(\(close)){try{if(f)fm.hide();if(s)lm.onShowHideSearch(false);}catch(e){}}
+                return 'menu:search='+s+' file='+f+' filetab='+tab;
+                """) { r, e in
+                    let res = (r as? String) ?? "menu:fail " + (e ?? "?")
+                    handle("log", res)
+                    state = res
+                }
+            }
+            if url.host == "export" {           // Export ▸ without the menu (spreadsheet / presentation formats)
+                let ext = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "f" }?.value ?? ""
+                menu.export(ext, controller)
+            }
+            if url.host == "docinfo" {          // Document info counts without the sheet (spreadsheet / presentation)
+                state = "counting"
+                controller.docInfo()
+            }
+            if url.host == "pdfspike" {         // the PDF spike (M7b): can this x2t build write a PDF? (log only)
+                controller.call("return window.__xrExport ? __xrExport('pdf', true) : 'no export';") { r, e in
+                    handle("log", "pdf spike request: \((r as? String) ?? e ?? "?")")
                 }
             }
             if url.host == "bridge" { checkBridge() }
@@ -289,6 +330,7 @@ struct AutotestScreen: View {
             }
         }
         .sheet(isPresented: $showAbout) { AboutSheet() }
+        .sheet(isPresented: $showAccount) { AccountView() }
     }
 
     /// Bridge check (20.3 F0): a native call reaches the engine and the engine's answer comes back through the state
@@ -364,6 +406,7 @@ struct AutotestScreen: View {
 
     private func handle(_ cmd: String, _ param: String) {
         barStatus.note(cmd, param)
+        menu.note(cmd, param)
         switch cmd {
         case "ready": state = "ready"; tooLarge = false
         case "modified": modified = param
@@ -377,12 +420,16 @@ struct AutotestScreen: View {
         case "saved":
             try? document.data.write(to: docs.appendingPathComponent(name), options: .atomic)
             state = "saved:" + param
+        case "export-failed": state = "export-failed:" + param
+        case "docinfo": state = "docinfo:" + param
         case "saveas": saveAsFormats = param.split(separator: ",").map(String.init)
         case "export":                       // Save As copy -> Documents/<name> for the workflow to check
-            let src = URL(fileURLWithPath: param), dst = docs.appendingPathComponent(src.lastPathComponent)
+            // (an export in the document's own format gets an "exp-" name: the test document's file is not replaced)
+            let src = URL(fileURLWithPath: param)
+            let dst = docs.appendingPathComponent((src.lastPathComponent == name ? "exp-" : "") + src.lastPathComponent)
             try? FileManager.default.removeItem(at: dst)
             try? FileManager.default.copyItem(at: src, to: dst)
-            state = "exported:" + src.lastPathComponent
+            state = "exported:" + dst.lastPathComponent
         case "log":
             let line = (param + "\n").data(using: .utf8)!
             let url = docs.appendingPathComponent("xr-log-" + name + ".txt")      // one log per test document

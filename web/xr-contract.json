@@ -54,6 +54,9 @@
     { "kind": "api", "name": "asc_Save", "why": "top bar Save: the engine's own user save (EditorController.userSave)" },
     { "kind": "api", "name": "asc_getCanUndo", "why": "top bar Undo does nothing when there is nothing to undo" },
     { "kind": "api", "name": "asc_getCanRedo", "why": "top bar Redo does nothing when there is nothing to redo" },
+    { "kind": "api", "name": "startGetDocInfo", "editors": ["word"], "why": "⋯ > Document info counts (__xrDocInfo)" },
+    { "kind": "api", "name": "getCountPages", "editors": ["slide"], "why": "⋯ > Document info slide count (__xrDocInfo)" },
+    { "kind": "api", "name": "asc_getWorksheetsCount", "editors": ["cell"], "why": "⋯ > Document info sheet count (__xrDocInfo)" },
     { "kind": "api", "name": "asc_GetCurrentNumberingId", "editors": ["word"], "why": "state channel: Word list kind" },
     { "kind": "api", "name": "asc_GetCurrentNumberingLvl", "editors": ["word"], "why": "state channel: Word list kind" },
     { "kind": "api", "name": "asc_GetNumberingPr", "editors": ["word"], "why": "state channel: Word list kind" },
@@ -68,6 +71,10 @@
 
     { "kind": "controller", "name": "Viewport", "path": "viewport.vlayout.getItem", "why": "fitRibbon reserves the ribbon's height" },
     { "kind": "controller", "name": "RightMenu", "path": "rightmenu.clearSelection", "editors": ["word", "cell", "slide"], "devices": ["tablet"], "why": "closeRightPanel" },
+    { "kind": "controller", "name": "LeftMenu", "path": "onShortcut", "why": "⋯ > Find opens the editor's Find & Replace panel (__xrFind)" },
+    { "kind": "controller", "name": "LeftMenu", "path": "isSearchPanelVisible", "why": "⋯ > Find checks the panel opened (__xrFind)" },
+    { "kind": "controller", "name": "LeftMenu", "path": "leftMenu.showMenu", "why": "⋯ > All tools opens the File backstage (__xrAllTools)" },
+    { "kind": "controller", "name": "LeftMenu", "path": "leftMenu.menuFile.isVisible", "why": "⋯ > All tools / Find: is the File backstage open" },
     { "kind": "controller", "name": "LeftMenu", "path": "leftMenu.btnThumbs.toggle", "editors": ["slide"], "why": "phones start with the slide strip closed" },
 
     { "kind": "callback", "name": "asc_onDocumentContentReady", "why": "'ready' to the app" },
@@ -83,6 +90,8 @@
     { "kind": "callback", "name": "asc_onTextDirection", "why": "state channel" },
     { "kind": "callback", "name": "asc_onListType", "why": "state channel (slides)" },
     { "kind": "callback", "name": "asc_onFocusObject", "why": "state channel" },
+    { "kind": "callback", "name": "asc_onDocInfo", "why": "⋯ > Document info (Word counts)" },
+    { "kind": "callback", "name": "asc_onGetDocInfoEnd", "why": "⋯ > Document info (Word counting finished)" },
     { "kind": "callback", "name": "asc_onSelectionChanged", "why": "state channel (spreadsheets)" },
 
     { "kind": "setting", "name": "toolbar-height-tabs", "why": "touch tab row height" },
@@ -106,6 +115,7 @@
     { "kind": "id", "name": "fm-btn-local-open", "why": "hidden no-op File entry" },
     { "kind": "id", "name": "fm-btn-print", "why": "hidden no-op File entry" },
     { "kind": "id", "name": "fm-btn-export-pdf", "why": "hidden no-op File entry" },
+    { "kind": "id", "name": "fm-btn-return", "why": "File backstage 'Close Menu': the way back once the File tab is hidden on touch" },
     { "kind": "id", "name": "fm-btn-recent", "why": "hidden File entry" },
     { "kind": "id", "name": "slot-status-btn-preview", "why": "Slides Present pill" },
     { "kind": "id", "name": "status-tabs-scroll", "why": "touch sheet tabs" },

@@ -9,8 +9,8 @@ import SwiftUI
 /// still being composed). No keyboard shortcut is attached on purpose: the engine handles a hardware ⌘Z / ⇧⌘Z itself,
 /// and a second binding here would undo twice.
 ///
-/// The ⋯ menu holds Redo (compact width), Save and whatever the screen adds (`more`); the next design item (M7b)
-/// gives it its final contents.
+/// The ⋯ menu (plan M7b) starts with Find, Redo (compact width) and Save; the screen adds the rest of the document
+/// menu (`more` = DocumentMenuItems: Share, Export, Document info, Language, Account, About, All tools).
 struct EditorTopBar<More: View>: ViewModifier {
     var title: String
     var state: EditorState
@@ -19,6 +19,8 @@ struct EditorTopBar<More: View>: ViewModifier {
     var ar: Bool
     var back: () -> Void
     var save: () -> Void
+    /// ⋯ > Find (the editor's Find & Replace panel); nil leaves the entry out.
+    var find: (() -> Void)?
     @ViewBuilder var more: () -> More
     @Environment(\.horizontalSizeClass) var sizeClass      // not private: that would hide the memberwise init
 
@@ -58,11 +60,18 @@ struct EditorTopBar<More: View>: ViewModifier {
                     UndoButton(state: state, redo: false, ar: ar) { undo(false) }
                     if wide { UndoButton(state: state, redo: true, ar: ar) { undo(true) } }
                     Menu {
-                        if !wide {
-                            RedoMenuItem(state: state, ar: ar) { undo(true) }
+                        // section 1 of the document menu (plan M7b): Find, Redo on iPhone, Save; `more` adds the rest
+                        Section {
+                            if let find {
+                                Button(action: find) { Label(BarText.find(ar), systemImage: "magnifyingglass") }
+                                    .accessibilityIdentifier("xr-menu-find")
+                            }
+                            if !wide {
+                                RedoMenuItem(state: state, ar: ar) { undo(true) }
+                            }
+                            Button(action: save) { Label(BarText.save(ar), systemImage: "square.and.arrow.down") }
+                                .accessibilityIdentifier("xr-bar-save")
                         }
-                        Button(action: save) { Label(BarText.save(ar), systemImage: "square.and.arrow.down") }
-                            .accessibilityIdentifier("xr-bar-save")
                         more()
                     } label: {
                         Image(systemName: "ellipsis.circle")
@@ -83,9 +92,10 @@ struct EditorTopBar<More: View>: ViewModifier {
 extension View {
     func editorTopBar<More: View>(title: String, state: EditorState, status: EditorBarStatus, controller: EditorController,
                                   ar: Bool, back: @escaping () -> Void, save: @escaping () -> Void,
+                                  find: (() -> Void)? = nil,
                                   @ViewBuilder more: @escaping () -> More) -> some View {
         modifier(EditorTopBar(title: title, state: state, status: status, controller: controller, ar: ar,
-                              back: back, save: save, more: more))
+                              back: back, save: save, find: find, more: more))
     }
 }
 
@@ -129,6 +139,7 @@ enum BarText {
     static func undo(_ ar: Bool) -> String { ar ? "تراجع" : "Undo" }
     static func redo(_ ar: Bool) -> String { ar ? "إعادة" : "Redo" }
     static func save(_ ar: Bool) -> String { ar ? "حفظ" : "Save" }
+    static func find(_ ar: Bool) -> String { ar ? "بحث" : "Find" }
     static func more(_ ar: Bool) -> String { ar ? "المزيد" : "More" }
     static func opening(_ ar: Bool) -> String { ar ? "جارٍ الفتح…" : "Opening…" }
     static func saving(_ ar: Bool) -> String { ar ? "جارٍ الحفظ…" : "Saving…" }

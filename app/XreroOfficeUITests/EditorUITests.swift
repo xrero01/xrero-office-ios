@@ -370,6 +370,145 @@ final class EditorUITests: XCTestCase {
         }
     }
 
+    /// The ⋯ document menu (plan M7b), one check per entry, under the native bar (XR_BAR=1), English in light then
+    /// Arabic in dark: the web File tab is hidden on touch; ⋯ lists Find, Save (+ Redo on iPhone), Share, Export,
+    /// Document info, Language, Account, About, All tools - and no PDF / Print. Find opens the editor's Find panel;
+    /// Document info opens a native sheet with the editor's counts; Export ▸ .docx / .odt / .rtf each write a copy
+    /// (check_saved.py opens them: the text inserted here must be inside); About and Account open their sheets;
+    /// Language ▸ offers both languages; All tools opens the File backstage. Last, the PDF spike (log only, see
+    /// check_saved.py): can this converter write a PDF at all?
+    func testDocumentMenu() {
+        continueAfterFailure = true                        // the Arabic half still reports when English fails
+        let pad = UIDevice.current.userInterfaceIdiom == .pad
+        for (lang, dark) in [("en", false), ("ar", true)] {
+            let ar = lang == "ar"
+            let base = "xr-menu-\(lang)"
+            let app = launch(["XR_KIND": "word", "XR_BAR": "1", "XR_LANG": lang, "XR_NEW_NAME": base + ".docx"])
+            XCTAssertEqual(waitState(app, prefix: "ready", timeout: 120), "ready", "editor did not become ready (\(lang))")
+            if dark { XCUIDevice.shared.system.open(URL(string: "xrero-autotest://appearance?dark=1")!); sleep(3) }
+            let name = lang + (dark ? "-dark" : "-light")
+            sleep(2)
+            // three words to count and to find in the exported copies (inserted without the keyboard)
+            autotest("addtext", "Menu check \u{0645}\u{0631}\u{062D}\u{0628}\u{0627}")      // Menu check مرحبا
+            let more = app.buttons["xr-bar-more"]
+            XCTAssertTrue(more.waitForExistence(timeout: 10), "no ⋯ in the top bar (\(name))")
+            func probe(close: Bool = false) -> String {
+                autotest(close ? "menuprobe?close=1" : "menuprobe")
+                return waitState(app, prefix: "menu:", timeout: 10)
+            }
+            func openMenu() { more.tap(); usleep(800_000) }
+            /// ⋯, then the entry (inside a submenu when `sub` is given); false when it is not there
+            func pick(_ id: String, sub: String? = nil) -> Bool {
+                openMenu()
+                if let sub {
+                    let s = app.buttons[sub].firstMatch
+                    guard s.waitForExistence(timeout: 5) else { return false }
+                    s.tap(); usleep(800_000)
+                }
+                let e = app.buttons[id].firstMatch
+                guard e.waitForExistence(timeout: 5) else { return false }
+                e.tap()
+                return true
+            }
+
+            // the web File tab is gone on touch (its entries are in ⋯)
+            let p0 = probe()
+            print("XR menu \(name) opened: \(p0)")
+            XCTAssertTrue(p0.contains("filetab=0"), "the web File tab is still shown on touch (\(name)): \(p0)")
+
+            // ⋯ as the user sees it: every entry, no PDF / Print
+            openMenu()
+            var ids = ["xr-menu-find", "xr-bar-save", "xr-nav-share", "xr-menu-export", "xr-menu-info", "xr-nav-lang",
+                       "xr-nav-account", "xr-menu-about", "xr-menu-alltools"]
+            if !pad { ids.insert("xr-bar-redo", at: 1) }
+            for id in ids {
+                XCTAssertTrue(app.buttons[id].firstMatch.waitForExistence(timeout: 3), "⋯ has no \(id) (\(name))")
+            }
+            // (the menu's own entries: the editor page's buttons are not counted)
+            let pdfOrPrint = NSPredicate(format: "label CONTAINS[c] 'Print' OR label CONTAINS 'طباعة' OR label CONTAINS 'PDF'")
+            XCTAssertEqual(app.buttons.matching(pdfOrPrint).count - app.webViews.buttons.matching(pdfOrPrint).count, 0,
+                           "PDF / Print offered before the spike passed (\(name))")
+            shot(app, "60-menu-\(name)")
+            app.buttons["xr-menu-export"].firstMatch.tap()
+            usleep(800_000)
+            for ext in ["docx", "odt", "rtf"] {
+                XCTAssertTrue(app.buttons["xr-export-" + ext].firstMatch.waitForExistence(timeout: 3), "Export ▸ has no .\(ext) (\(name))")
+            }
+            XCTAssertFalse(app.buttons["xr-export-pdf"].exists, "Export ▸ offers PDF (\(name))")
+            shot(app, "61-menu-\(name)-export")
+            app.buttons["xr-export-docx"].firstMatch.tap()
+            let firstExport = waitState(app, prefix: "exported:", timeout: 60)
+            XCTAssertEqual(firstExport, "exported:exp-\(base).docx", "Export ▸ .docx (\(name))")
+
+            // Find: the editor's own Find & Replace panel
+            XCTAssertTrue(pick("xr-menu-find"), "no Find in ⋯ (\(name))")
+            sleep(2)
+            let p1 = probe()
+            print("XR menu \(name) find: \(p1)")
+            XCTAssertTrue(p1.contains("search=1"), "⋯ > Find did not open the Find panel (\(name)): \(p1)")
+            shot(app, "62-menu-\(name)-find")
+            _ = probe(close: true)
+
+            // Document info: a native sheet, the editor's counts (3 words, 1 page)
+            XCTAssertTrue(pick("xr-menu-info"), "no Document info in ⋯ (\(name))")
+            let info = waitState(app, prefix: "docinfo:", timeout: 20)
+            print("XR menu \(name) docinfo: \(info)")
+            XCTAssertTrue(info.contains("\"words\":3") && info.contains("\"pages\":1"), "Document info counts (\(name)): \(info)")
+            let words = app.descendants(matching: .any)["xr-docinfo-words"].firstMatch
+            XCTAssertTrue(words.waitForExistence(timeout: 10), "the Document info sheet shows no word count (\(name))")
+            XCTAssertTrue(app.descendants(matching: .any)["xr-docinfo-size"].firstMatch.exists, "no size in Document info (\(name))")
+            XCTAssertTrue(app.staticTexts[ar ? "معلومات المستند" : "Document Info"].firstMatch.exists, "Document info title (\(name))")
+            sleep(1)
+            shot(app, "63-menu-\(name)-info")
+            app.buttons["xr-docinfo-done"].firstMatch.tap()
+            sleep(1)
+
+            if !ar {
+                // Export ▸ .odt and .rtf: copies as on screen (check_saved.py reads them)
+                for ext in ["odt", "rtf"] {
+                    XCTAssertTrue(pick("xr-export-" + ext, sub: "xr-menu-export"), "no Export ▸ .\(ext) (\(name))")
+                    let s = waitState(app, prefix: "exported:\(base).\(ext)", timeout: 60)
+                    XCTAssertEqual(s, "exported:\(base).\(ext)", "Export ▸ .\(ext) (\(name))")
+                }
+                // About & Licences
+                XCTAssertTrue(pick("xr-menu-about"), "no About in ⋯")
+                XCTAssertTrue(app.staticTexts["xr-about-version"].waitForExistence(timeout: 10), "⋯ > About did not open")
+                app.buttons["xr-about-done"].firstMatch.tap()
+                sleep(1)
+                // Account (signed out here: the sign-in sheet; nothing is typed or sent)
+                XCTAssertTrue(pick("xr-nav-account"), "no Account in ⋯")
+                XCTAssertTrue(app.textFields["xr-acct-email"].firstMatch.waitForExistence(timeout: 10), "⋯ > Account did not open")
+                shot(app, "64-menu-account")
+                let done = app.buttons.matching(NSPredicate(format: "label == 'Done' OR label == 'تم'")).firstMatch
+                if done.exists { done.tap() } else { app.swipeDown(velocity: .fast) }
+                sleep(2)
+                // Share
+                XCTAssertTrue(pick("xr-nav-share"), "no Share in ⋯")
+                XCTAssertEqual(waitState(app, prefix: "share", timeout: 5), "share", "⋯ > Share did not reach the screen")
+            }
+            // Language ▸ English / العربية (the switch itself reopens the page: ReviewVideoTests covers it)
+            XCTAssertTrue(pick(ar ? "xr-nav-lang-en" : "xr-nav-lang-ar", sub: "xr-nav-lang"), "no Language ▸ entries (\(name))")
+            XCTAssertEqual(waitState(app, prefix: "lang:", timeout: 5), "lang:" + (ar ? "en" : "ar"), "Language ▸ (\(name))")
+
+            // All tools: the editor's File backstage (with its own way back)
+            XCTAssertTrue(pick("xr-menu-alltools"), "no All tools in ⋯ (\(name))")
+            sleep(2)
+            let p2 = probe()
+            print("XR menu \(name) all tools: \(p2)")
+            XCTAssertTrue(p2.contains("file=1"), "⋯ > All tools did not open the File backstage (\(name)): \(p2)")
+            shot(app, "65-menu-\(name)-alltools")
+            _ = probe(close: true)
+
+            if !ar {
+                // the PDF spike: logged, never offered (check_saved.py reports what the converter did)
+                autotest("pdfspike")
+                let spike = waitState(app, prefix: "export", timeout: 90)
+                print("XR menu pdf spike: \(spike)")
+            }
+            app.terminate()
+        }
+    }
+
     /// Runs a Home-tab ribbon command by its exact name ("Copy", not "Copy style") and waits until the app reports
     /// it done (the Autotest state turns "clip<n> ..."). Phones fold the ribbon, and a tap on a button of a folded
     /// panel lands on the page (it moves the caret and drops the selection) - so the Home panel is opened through
@@ -396,7 +535,10 @@ final class EditorUITests: XCTestCase {
     }
 
     private func autotest(_ host: String, _ text: String? = nil) {
-        var c = URLComponents(); c.scheme = "xrero-autotest"; c.host = host
+        // "host?k=v": a hook with its own parameters
+        let parts = host.split(separator: "?", maxSplits: 1).map(String.init)
+        var c = URLComponents(); c.scheme = "xrero-autotest"; c.host = parts[0]
+        if parts.count == 2 { c.query = parts[1] }
         if let text { c.queryItems = [URLQueryItem(name: "t", value: text)] }
         XCUIDevice.shared.system.open(c.url!)                 // routed to the running app, no tapping
         sleep(2)
@@ -1052,7 +1194,19 @@ final class EditorUITests: XCTestCase {
             let tag = kind + (lang == "en" ? "" : "-" + lang)
             shot(app, "20-" + tag + "-ready")
             XCTAssertEqual(ready, "ready", "\(tag) editor did not become ready")
-            if lang == "en" { checkContract(app, tag) }
+            if lang == "en" {
+                checkContract(app, tag)
+                // ⋯ > Export ▸ formats of this kind (M7b; the same call as the menu entry) and the Document info counts
+                for ext in kind == "cell" ? ["xlsx"] : ["pptx", "odp"] {
+                    autotest("export?f=" + ext)
+                    let want = "exported:" + (ext == (kind == "cell" ? "xlsx" : "pptx") ? "exp-" : "") + "xr-test." + ext
+                    XCTAssertEqual(waitState(app, prefix: want, timeout: 60), want, "Export ▸ .\(ext) (\(tag))")
+                }
+                autotest("docinfo")
+                let info = waitState(app, prefix: "docinfo:", timeout: 20)
+                print("XR menu \(tag) docinfo: \(info)")
+                XCTAssertTrue(info.contains(kind == "cell" ? "\"sheets\":1" : "\"slides\":1"), "Document info counts (\(tag)): \(info)")
+            }
             checkIPadLayout(app, tag)
             checkChrome(app, tag)
             app.terminate()
