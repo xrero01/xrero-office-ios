@@ -431,17 +431,11 @@ final class EditorUITests: XCTestCase {
         for item in set.split(separator: ";") {
             let p = item.split(separator: "|", maxSplits: 2).map(String.init)
             guard p.count == 3 else { continue }
-            let app = launch(["XR_DOC_NAME": p[0], "XR_LANG": p[1], "XR_DOC_B64": p[2]])
+            let app = launch(["XR_DOC_NAME": p[0], "XR_LANG": p[1], "XR_DOC_B64": p[2], "XR_CLEAN": "1"])
             let ready = waitState(app, prefix: "ready", timeout: 120)
             sleep(5)
-            shot(app, "store-\(p[1])-\(p[0])")
+            shot(app, "store-\(p[1])-\(ProcessInfo.processInfo.environment["XR_STORE_DARK"] == "1" ? "dark" : "")\(p[0])")
             XCTAssertEqual(ready, "ready", "\(p[0]) did not open")
-            // the same document in dark mode (the editor follows iOS live): one dark screen per kind for the listing
-            XCUIDevice.shared.system.open(URL(string: "xrero-autotest://appearance?dark=1")!)
-            sleep(4)
-            shot(app, "store-\(p[1])-dark\(p[0])")
-            XCUIDevice.shared.system.open(URL(string: "xrero-autotest://appearance?dark=0")!)
-            sleep(2)
             app.terminate()
         }
     }

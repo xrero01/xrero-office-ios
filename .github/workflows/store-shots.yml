@@ -63,10 +63,16 @@ jobs:
             xcrun simctl boot $DEV 2>/dev/null; xcrun simctl bootstatus $DEV -b >/dev/null
             xcrun simctl status_bar $DEV override --time "9:41" --dataNetwork wifi --wifiMode active --wifiBars 3 \
               --cellularMode active --cellularBars 4 --batteryState charged --batteryLevel 100
-            xcodebuild test-without-building -project app/XreroOffice.xcodeproj -scheme XreroOffice -configuration Autotest \
-              -destination "id=$DEV" -derivedDataPath dd -resultBundlePath "out/store-$DEV.xcresult" \
-              -only-testing:XreroOfficeUITests/EditorUITests/testStoreScreenshots 2>&1 | grep -E "Test Case|error" | tail -10
-            xcrun xcresulttool export attachments --path "out/store-$DEV.xcresult" --output-path "out/raw-$DEV" >/dev/null 2>&1
+            # two passes: the system in light mode, then in dark mode (the whole app follows, status bar included)
+            for MODE in light dark; do
+              xcrun simctl ui $DEV appearance $MODE
+              export TEST_RUNNER_XR_STORE_DARK=$([ $MODE = dark ] && echo 1 || echo 0)
+              xcodebuild test-without-building -project app/XreroOffice.xcodeproj -scheme XreroOffice -configuration Autotest \
+                -destination "id=$DEV" -derivedDataPath dd -resultBundlePath "out/store-$DEV-$MODE.xcresult" \
+                -only-testing:XreroOfficeUITests/EditorUITests/testStoreScreenshots 2>&1 | grep -E "Test Case|error" | tail -10
+              xcrun xcresulttool export attachments --path "out/store-$DEV-$MODE.xcresult" --output-path "out/raw-$DEV-$MODE" >/dev/null 2>&1
+            done
+            xcrun simctl ui $DEV appearance light
             xcrun simctl shutdown $DEV
           done
           python3 - <<'EOF'
