@@ -220,6 +220,18 @@ final class KeyboardBarHost: UIView {
 final class XRWebView: WKWebView {
     var keyboardBar: KeyboardBarHost?
 
+    /// The native edit menu's anchor (plan S5, EditMenu.swift): a transparent, touch-transparent view over the whole
+    /// web view, added on first use so a document that never shows the menu has no extra view.
+    var editMenuAnchor: EditMenuAnchor {
+        if let a = anchor { return a }
+        let a = EditMenuAnchor(frame: bounds)
+        a.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        addSubview(a)
+        anchor = a
+        return a
+    }
+    private var anchor: EditMenuAnchor?
+
     override var inputAccessoryView: UIView? {
         guard let bar = keyboardBar else { return super.inputAccessoryView }
         // iPhone landscape (under 400 pt tall): the document needs every point; WebKit's slim bar keeps its Done

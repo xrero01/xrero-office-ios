@@ -451,7 +451,9 @@
     }
     // CI / debugging: the current state and the measured callback cost (never called by the editor itself)
     window.__xrState = function () { return JSON.stringify({ state: state, n: cost.n, ms: cost.ms, max: cost.max }); };
-    return { set: set, on: on };
+    // the last value of a key (read on a tap only, e.g. the edit menu's Bold / Italic toggles)
+    function get(k) { return state[k]; }
+    return { set: set, on: on, get: get };
   })();
 
   var ALIGN = null, SEL_RANK = { chart: 7, image: 6, shape: 5, table: 4, equation: 3, text: 2, header: 1, slide: 0 };
@@ -630,6 +632,81 @@
       api.asc_PasteData(F.Text, String(text));
       return 'text';
     } catch (e) { return 'error: ' + (e && e.message || e); }
+  };
+
+  // ---- native edit menu on touch (plan S5, phase 1: text selection in Word)
+  // A long press on the page (the engine's desktop touch manager turns a press of over 750 ms without movement into a
+  // right click: checkDesktopModeContextMenuEnd) opened the desktop right-click menu - a mouse menu with small rows
+  // that took the focus, so the keyboard could go down, and nothing was selected. On touch, iOS selects the word and
+  // shows its edit menu instead. So: when asc_onContextMenu comes from that emulated right click, it is swallowed here
+  // (the web menu never opens), the word under the finger is selected when nothing is (the engine's right click has
+  // just put the caret there), and the app is told where to show its UIEditMenu ('editmenu' command; the app's
+  // actions come back through __xrEditMenu below, one EditorController.call each).
+  // Touch vs pointer: the touch manager marks ITS emulated right click with global_mouseEvent.ButtonOverride = right
+  // for the length of the synchronous mouse down / up that raises the menu; a real right click (trackpad or mouse on
+  // iPad / Mac, Shift+F10) leaves it at -1, so pointer input keeps the desktop menu, as the plan asks.
+  // Never on the keystroke path: the only per-key cost is the `open` check in the keydown listener (O(1)).
+  // Off with the app setting xr.editMenu = NO (XreroHost.editMenu '0'): the desktop menu on touch, as before.
+  var editMenu = (function () {
+    var open = false, word = /documenteditor/.test(location.pathname);
+    function fromTouch() {
+      var C = window.AscCommon, m = C && C.global_mouseEvent;
+      return !!m && C.g_mouse_button_right !== undefined && m.ButtonOverride === C.g_mouse_button_right;
+    }
+    function hide() {
+      if (!open) return;
+      open = false;
+      H.command && H.command('editmenu', '');
+    }
+    // the next touch on the page or a key closes the native menu (it would point at a stale place after a scroll)
+    if (word) {
+      window.addEventListener('touchstart', hide, { capture: true, passive: true });
+      window.addEventListener('keydown', hide, true);
+    }
+    function take(data) {
+      if (!word || H.editMenu === '0' || !fromTouch()) return false;
+      var x = data.get_X ? data.get_X() : 0, y = data.get_Y ? data.get_Y() : 0;
+      // after the engine's own mouse up: the selection it made (caret at the finger, or a picture / table) is final
+      setTimeout(function () { show(x, y); }, 0);
+      return true;
+    }
+    function show(x, y) {
+      var api = window.__xrApi, ld = api && api.WordControl && api.WordControl.m_oLogicDocument, sel = false;
+      try {
+        // a press on a selection keeps it (that is "tap on a selection"); otherwise the word under the finger
+        if (ld && !(ld.IsSelectionUse() && !ld.IsSelectionEmpty()) && ld.SelectCurrentWord()) {
+          ld.UpdateSelection(); ld.UpdateInterface();
+        }
+        sel = !!ld && ld.IsSelectionUse() && !ld.IsSelectionEmpty();
+      } catch (e) { log('edit menu: select word', e && e.message || e); }
+      // web view points: the menu's point is relative to the editor area (#editor_sdk, where the desktop menu is
+      // placed), the editor area to this frame, the frame to the app's page (which never scrolls)
+      var ox = 0, oy = 0;
+      try {
+        var a = document.getElementById('editor_sdk'), r = a && a.getBoundingClientRect();
+        if (r) { ox += r.left; oy += r.top; }
+        var f = window.frameElement && window.frameElement.getBoundingClientRect();
+        if (f) { ox += f.left; oy += f.top; }
+      } catch (e) {}
+      open = true;
+      // the line around the finger: the menu shows above it, so it never covers the selected word
+      H.command && H.command('editmenu', JSON.stringify({ x: Math.round(ox + x - 30), y: Math.round(oy + y - 14), w: 60, h: 28,
+        type: hub.get('selection') || 'none', sel: sel }));
+    }
+    return { take: take };
+  })();
+  // The edit menu's actions (the app calls them on the tap): 'cut' | 'copy' | 'selectall' | 'bold' | 'italic'.
+  // Paste is the app's own (it reads the pasteboard on that tap, as for the ribbon's Paste). Returns 'ok' or why not.
+  window.__xrEditMenu = function (action) {
+    var api = window.__xrApi;
+    if (!api) return 'no editor';
+    try {
+      if (action === 'cut' || action === 'copy') { copyCut(action === 'cut'); return 'ok'; }
+      if (action === 'selectall') { api.asc_EditSelectAll(); return 'ok'; }
+      if (action === 'bold') { api.put_TextPrBold(!hub.get('bold')); return 'ok'; }
+      if (action === 'italic') { api.put_TextPrItalic(!hub.get('italic')); return 'ok'; }
+    } catch (e) { return 'error: ' + (e && e.message || e); }
+    return 'unknown action';
   };
 
   // ---- Undo / Redo from the app's top bar (plan M4a; EditorController.call on a tap, never per keystroke).
@@ -843,6 +920,8 @@
       } catch (e) { log('ready hook', e); }
       var send = api.sendEvent;           // report engine errors to the host log (with where they came from)
       api.sendEvent = function (name) {
+        // a long press on touch: the native edit menu instead of the desktop right-click menu (plan S5, editMenu)
+        if (name === 'asc_onContextMenu' && arguments[1] && editMenu.take(arguments[1])) return;
         if (name === 'asc_onError') log('engine error id=' + arguments[1] + ' level=' + arguments[2] + ' @ ' + (new Error().stack || '').split('\n').slice(2, 6).join(' <- ').replace(/https?:\/\/[^ )]*\//g, ''));
         return send.apply(this, arguments);
       };

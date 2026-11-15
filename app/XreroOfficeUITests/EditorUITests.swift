@@ -1147,18 +1147,32 @@ final class EditorUITests: XCTestCase {
              "sel='\(sel4)' menu=\(num(p4, "menu") ?? 0) \(focusInfo(p4))")
         shot(app, "52-touch-\(lang)-double-tap")
 
-        // 5) long press selects a word (iOS: the word, its handles and the edit menu)
+        // 5) long press selects a word (iOS: the word, its handles and the edit menu). Plan S5: the engine's desktop
+        //    right-click menu (which a long press used to open, selecting nothing) is swallowed on touch, the word under
+        //    the finger is selected and the app's native edit menu (UIEditMenuInteraction) is shown at it.
         tapEnd()
+        let em4 = num(probe(app), "em") ?? 0
         point(at(0.86), ly).press(forDuration: 1.2)
         let p5 = probe(app)
         let sel5 = str(p5, "sel").trimmingCharacters(in: .whitespacesAndNewlines)
         shot(app, "53-touch-\(lang)-long-press")
-        // KNOWN only for the shape seen today (the desktop menu opened, nothing selected): any other failure is a FAIL,
-        // so once long press is fixed a later regression of it is caught
         gate("long-press-selects-word", sel5.count >= 4 && !sel5.contains(" ") && t3.contains(sel5),
-             "sel='\(sel5)' web menu=\(num(p5, "menu") ?? 0) native menu=\(app.menuItems.count) \(focusInfo(p5))",
-             known: (num(p5, "menu") ?? 0) > 0 && sel5.isEmpty
-                ? "a long press opens the editor's desktop right-click menu (Cut/Copy/Paste/Paragraph...) and the keyboard can go down; no word is selected" : nil)
+             "sel='\(sel5)' web menu=\(num(p5, "menu") ?? 0) native menu=\(app.menuItems.count) \(focusInfo(p5))")
+        // the native menu was presented (iOS called the interaction's willPresent) and the desktop one stayed shut
+        let em5 = num(p5, "em") ?? 0
+        gate("long-press-native-menu", em5 > em4 && (num(p5, "menu") ?? 0) == 0,
+             "native presentations \(em4)->\(em5) web menu=\(num(p5, "menu") ?? 0) \(focusInfo(p5))")
+        // its Copy, tapped as a user taps it, runs the editor's copy (one bridge call): the answer comes back in the probe
+        let copyLabel = ar ? "\u{0646}\u{0633}\u{062E}" : "Copy"                                     // نسخ
+        let copyItem = app.menuItems[copyLabel].exists ? app.menuItems[copyLabel] : app.buttons[copyLabel]
+        if em5 > em4 && copyItem.exists && copyItem.isHittable {
+            copyItem.tap()
+            var pc = probe(app)
+            for _ in 0..<3 where str(pc, "ema").isEmpty { usleep(700_000); pc = probe(app) }
+            gate("edit-menu-copy", str(pc, "ema") == "copy:ok", "last action '\(str(pc, "ema"))' \(focusInfo(pc))")
+        } else {
+            info("edit-menu-copy", "Copy not found in the native menu (menu items: \(app.menuItems.count)); not tapped")
+        }
 
         // 6) a formatting tap keeps the keyboard: caret at the end, Bold, type on
         // close the menu the long press left with a tap in the page margin just above the line (the menu opens below

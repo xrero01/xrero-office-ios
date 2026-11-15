@@ -77,6 +77,13 @@ enum L {
     static var cannotOpen: String { ar ? "تعذّر فتح الملف" : "Couldn't open the file" }
     static var cannotCreate: String { ar ? "تعذّر إنشاء الملف" : "Couldn't create the file" }
     static var cannotPaste: String { ar ? "تعذّر اللصق" : "Couldn't paste" }
+    // the editor's native edit menu (plan S5; Bold / Italic as on the keyboard bar)
+    static var cut: String { ar ? "قص" : "Cut" }
+    static var copy: String { ar ? "نسخ" : "Copy" }
+    static var paste: String { ar ? "لصق" : "Paste" }
+    static var selectAll: String { ar ? "تحديد الكل" : "Select All" }
+    static var bold: String { ar ? "غامق" : "Bold" }
+    static var italic: String { ar ? "مائل" : "Italic" }
     static var noConnection: String { ar ? "لا يوجد اتصال بالإنترنت" : "No internet connection" }
     static var accountDisabled: String { ar ? "هذا الحساب موقوف" : "This account is disabled" }
     static func name(_ kind: OfficeKind) -> String {

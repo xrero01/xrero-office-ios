@@ -155,7 +155,8 @@ struct EditorWebView: UIViewRepresentable {
         /// window.XreroHost for every frame: the JS half of the bridge (xr-host.js uses it).
         func bridgeScript() -> String {
             let cfg: [String: String] = ["lang": parent.lang, "title": parent.title,
-                                         "theme": (web?.traitCollection.userInterfaceStyle == .dark) ? "dark" : "light"]
+                                         "theme": (web?.traitCollection.userInterfaceStyle == .dark) ? "dark" : "light",
+                                         "editMenu": EditMenu.enabled ? "1" : "0"]
             let json = String(data: (try? JSONSerialization.data(withJSONObject: cfg)) ?? Data("{}".utf8), encoding: .utf8) ?? "{}"
             return """
             (function () {
@@ -168,7 +169,7 @@ struct EditorWebView: UIViewRepresentable {
                 for (var i = 0; i < u.length; i += CH) s += String.fromCharCode.apply(null, u.subarray(i, i + CH)); return btoa(s); }
               function unb64(s) { var r = atob(s), u = new Uint8Array(r.length); for (var i = 0; i < r.length; i++) u[i] = r.charCodeAt(i); return u.buffer; }
               window.XreroHost = {
-                lang: cfg.lang, theme: cfg.theme, title: cfg.title,
+                lang: cfg.lang, theme: cfg.theme, title: cfg.title, editMenu: cfg.editMenu,
                 openFile: function () { return call({ cmd: 'open' }).then(function (r) { return { name: r.name, data: unb64(r.data) }; }); },
                 saveFile: function (name, bytes) { return call({ cmd: 'save', name: name, data: b64(bytes) }); },
                 exportFile: function (name, bytes) { return call({ cmd: 'export', name: name, data: b64(bytes) }); },
@@ -232,6 +233,7 @@ struct EditorWebView: UIViewRepresentable {
                 if c == "ready" { ready = true; watchdog?.cancel(); syncTheme() }   // a switch during loading
                 if c == "copied" { copied(p); return }
                 if c == "paste" { paste(); return }
+                if c == "editmenu" { editMenu(p); return }
                 parent.onCommand(c, p)
                 if c == "ready", let r = pendingRecovery {       // the reopened document is on screen again
                     pendingRecovery = nil
@@ -377,7 +379,7 @@ struct EditorWebView: UIViewRepresentable {
         /// Paste: the pasteboard is read only here, on the user's own Paste tap - never on launch or on becoming
         /// active - so iOS shows its "Allow Paste" question only when the user really pastes from another app.
         /// Phase 1: plain text (Xrero's own copies come back with full formatting from the editor's internal format).
-        private func paste() {
+        func paste() {
             let pb = UIPasteboard.general
             guard pb.hasStrings, let text = pb.string, !text.isEmpty else { pasteDone("empty"); return }
             // the text as a JS string literal (JSON-escaped inside a one-element array)
@@ -390,6 +392,37 @@ struct EditorWebView: UIViewRepresentable {
         private func pasteDone(_ result: String) {
             parent.onCommand("log", "paste: " + result)
             if result != "internal" && result != "text" { parent.onCommand("paste-failed", result) }
+        }
+
+        // MARK: the native edit menu (plan S5, EditMenu.swift)
+
+        /// xr-host.js after a long press on touch: show the edit menu at the selection ('' = close it).
+        private func editMenu(_ json: String) {
+            guard let web = web as? XRWebView else { return }
+            guard let r = EditMenu.Request(json) else { web.editMenuAnchor.dismiss(); return }
+            let anchor = web.editMenuAnchor
+            let controller = parent.controller
+            anchor.onPresent = { controller.editMenuShown += 1 }
+            anchor.perform = { [weak self] action in self?.editMenuAction(action) }
+            anchor.present(r)
+            parent.onCommand("log", "edit menu: at \(Int(r.rect.midX)),\(Int(r.rect.minY)) \(r.type) selected=\(r.selected)")
+        }
+
+        /// One edit-menu tap: one call into the editor frame (Paste: the app's own pasteboard read, as for the ribbon).
+        private func editMenuAction(_ action: String) {
+            let controller = parent.controller
+            if action == "paste" {
+                controller.editMenuLast = "paste:ok"
+                parent.onCommand("log", "edit menu: paste")
+                paste()
+                return
+            }
+            let safe = action.filter { $0.isLetter }
+            call("return window.__xrEditMenu ? __xrEditMenu('\(safe)') : 'no edit menu';") { [weak self] r, e in
+                let res = (r as? String) ?? e ?? "?"
+                controller.editMenuLast = safe + ":" + res
+                self?.parent.onCommand("log", "edit menu: \(safe) -> " + res)
+            }
         }
 
         // MARK: pictures
@@ -444,6 +477,10 @@ final class EditorController: ObservableObject {
     /// observe this object themselves (@ObservedObject var state: EditorState): it is deliberately not republished
     /// through the controller, so a caret move never re-renders the whole editor screen.
     let state = EditorState()
+    /// The native edit menu (plan S5): how often iOS presented it and the last action's answer ("copy:ok"), read by
+    /// the touch-gate probe. Plain values (not published): nothing on screen shows them.
+    var editMenuShown = 0
+    var editMenuLast = ""
 
     /// Runs a JavaScript function body in the editor frame (see Coordinator.call) - the one way native controls
     /// reach the engine, e.g. `call("__xrApi.put_TextPrBold(true)")`. On a tap only, never per keystroke.

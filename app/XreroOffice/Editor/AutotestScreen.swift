@@ -530,6 +530,9 @@ private struct ProbeLabel: View {
                 ?? ["err": e?.localizedDescription ?? "no result"]
             o["fr"] = Self.holdsFirstResponder(web)
             o["kb"] = keyboardUp
+            // the native edit menu (plan S5): presentations so far and the last action's answer
+            o["em"] = controller.editMenuShown
+            o["ema"] = controller.editMenuLast
             let line = "t=\(Int64(Date().timeIntervalSince1970 * 1000))|"
                 + ((try? JSONSerialization.data(withJSONObject: o)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}")
             // the simulator shares the Mac's file system: a file the test reads costs no accessibility query (each one

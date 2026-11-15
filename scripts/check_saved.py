@@ -74,7 +74,8 @@ TOUCH = {   # what EditorUITests.touchGate types per language: sentence, tapped-
 }
 # the checks every language must log (a missing line means the test stopped early: that is a failure too)
 TOUCH_CHECKS = ("editor-ready", "tap-places-caret-first-line", "typing", "line-direction", "tap-moves-caret-into-text",
-                "tap-then-type-inserts-there", "double-tap-selects-word", "long-press-selects-word", "caret-to-line-end",
+                "tap-then-type-inserts-there", "double-tap-selects-word", "long-press-selects-word", "long-press-native-menu",
+                "caret-to-line-end",
                 "bold-button-applies", "format-tap-keeps-keyboard", "type-after-format",
                 "kbar-shown", "kbar-bold-on", "kbar-keeps-keyboard", "kbar-next-word-bold", "kbar-align-cycles",
                 "enter-x5", "select-all",
