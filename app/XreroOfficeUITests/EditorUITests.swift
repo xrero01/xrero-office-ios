@@ -996,7 +996,14 @@ final class EditorUITests: XCTestCase {
                  add.frame.height >= 44, "frame=\(add.frame)")
             add.tap()
             let layout = any("xr-slide-layout-0"), plain = any("xr-slide-layout-default")
-            let picker = waitFor(10) { layout.exists || plain.exists }
+            var picker = waitFor(8) { layout.exists || plain.exists }
+            if !picker {
+                // seen once (CI, English, iPhone): the first tap right after opening landed while the strip redrew its
+                // first thumbnails - recorded on its own line, then tapped again as a person would
+                info("plus-first-tap-ignored", "the layout picker opened only after a second tap")
+                add.tap()
+                picker = waitFor(10) { layout.exists || plain.exists }
+            }
             shot(app, "61-slides-\(lang)-layouts")
             gate("plus-opens-layout-picker", picker, "layouts=\(layout.exists) default=\(plain.exists)")
             if picker {

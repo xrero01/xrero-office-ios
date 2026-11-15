@@ -939,6 +939,8 @@
     IsFilePrinting: function () { return false; },
     // the slide show asks the desktop window to go full screen: the app hides its bars itself (SlidesChrome, plan S4)
     SetFullscreen: noop,
+    // ... and runs a presenter window beside it: there is none on iOS (EndDemonstration calls endReporter)
+    startReporter: noop, endReporter: noop, sendToReporter: noop, sendFromReporter: noop,
     isSupportPlugins: function () { return false; },
     isSupportMacroses: function () { return false; },
     isSupportNetworkFunctionality: function () { return false; },

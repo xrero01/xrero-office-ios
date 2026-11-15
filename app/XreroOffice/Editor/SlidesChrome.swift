@@ -115,6 +115,8 @@ final class SlidesModel: ObservableObject {
     var stripOn = false
     /// The editor's current slide (0-based), kept by SlidesStateBridge.
     var current = 0
+    /// The data URL each thumbnail was made from (an unchanged picture is not published again).
+    private var urls: [Int: String] = [:]
     private var observers: [NSObjectProtocol] = []
     private var running = false
     private var queued = Set<Int>()
@@ -197,16 +199,26 @@ final class SlidesModel: ObservableObject {
             if let s = r as? String, let d = s.data(using: .utf8),
                let o = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] {
                 n = (o["n"] as? NSNumber)?.intValue ?? 0
-                var thumbs = self.thumbs, hidden = self.hidden
+                // published only when a picture or a hidden mark really changed: every publish redraws the strip, and
+                // a tap that lands during a redraw can be lost
+                var thumbs = self.thumbs, hidden = self.hidden, changed = false
                 for item in (o["slides"] as? [[String: Any]]) ?? [] {
                     guard let i = (item["i"] as? NSNumber)?.intValue else { continue }
-                    if let img = item["img"] as? String, let image = SlidesModel.image(dataURL: img) { thumbs[i] = image }
+                    if let img = item["img"] as? String, img != self.urls[i], let image = SlidesModel.image(dataURL: img) {
+                        self.urls[i] = img
+                        thumbs[i] = image
+                        changed = true
+                    }
                     if (item["hidden"] as? Bool) == true { hidden.insert(i) } else { hidden.remove(i) }
                 }
-                thumbs = thumbs.filter { $0.key < n }
+                if thumbs.keys.contains(where: { $0 >= n }) {
+                    thumbs = thumbs.filter { $0.key < n }
+                    self.urls = self.urls.filter { $0.key < n }
+                    changed = true
+                }
                 hidden = hidden.filter { $0 < n }
-                self.thumbs = thumbs
-                self.hidden = hidden
+                if changed { self.thumbs = thumbs }
+                if hidden != self.hidden { self.hidden = hidden }
             } else {
                 self.log("slide thumbs: " + ((r as? String) ?? e ?? "?"))
             }
