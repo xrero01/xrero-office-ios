@@ -81,6 +81,11 @@
   if (TABLET && narrowWindow()) {
     try { ['de', 'pe', 'sse', 'pdfe'].forEach(function (p) { localStorage.setItem(p + '-hide-right-settings', 'true'); }); } catch (e) {}
   }
+  // portrait iPads (plan S4): the slide strip on the left starts 160 pt wide instead of 300, so the slide gets the
+  // room (read by the editor's LeftMenu when the strip opens; dragging its edge still resizes it for this session)
+  if (TABLET && window.innerWidth < window.innerHeight && /presentationeditor/.test(location.pathname)) {
+    try { localStorage.setItem('pe-mainmenu-width', '160'); } catch (e) {}
+  }
   // ...and when the window turns portrait / narrow later (rotation, Split View), close it again through the panel's
   // own button (the editor's controller then keeps its state and the remembered setting in step). Only on a WIDTH
   // change: the keyboard changes the height alone, and a panel the user opened must not shut while they type.
@@ -154,6 +159,9 @@
               '@media not all and (any-pointer:fine){.toolbar .tabs .ribtab:has(>a[data-tab="file"]){display:none!important}}' +
               // File menu: recent files live on the app's home screen; "Suggest a Feature" opens a desktop form
               '#fm-btn-recent,#fm-btn-suggest{display:none!important}' +
+              // Slides' native Present (plan S4, __xrPresent): the app's full-screen overlay takes the taps, swipes and
+              // its own close button, so the slide show's web control bar is not shown while it runs
+              'body.xr-native-present #pe-preview .preview-controls{display:none!important}' +
               // File menu entries that would do nothing here (each checked in web-apps FileMenu + Desktop.js):
               // Open sends 'editor:event file:open', which the app has no handler for (files open from the home
               // screen); Print / Print preview call AscDesktopEditor.Print, a no-op without a printer bridge (M7b);
@@ -530,6 +538,22 @@
       hub.set('selection', selectionKind(objs));
       if (word) hub.set('list', wordList(api));
     });
+    // Slides (plan S4): the app's native slide strip and Present mode follow the slide count, the current slide and
+    // the slide show. These fire on a slide change / a show step only, never per keystroke (O(1) anyway).
+    if (/presentationeditor/.test(location.pathname)) {
+      hub.on(api, 'asc_onCountPages', function (n) { hub.set('slides', n | 0); });
+      hub.on(api, 'asc_onCurrentPage', function (i) { hub.set('slide', i | 0); });
+      // (also a show started from the editor's own Present pill: the app's overlay takes over, its web bar goes)
+      hub.on(api, 'asc_onStartDemonstration', function () {
+        hub.set('presenting', true);
+        if (document.body) document.body.classList.add('xr-native-present');
+      });
+      hub.on(api, 'asc_onEndDemonstration', function () {
+        hub.set('presenting', false);
+        if (document.body) document.body.classList.remove('xr-native-present');
+      });
+      hub.on(api, 'asc_onDemonstrationSlideChanged', function (i) { hub.set('showSlide', i | 0); });
+    }
   }
 
   // ---------------------------------------------------------------- x2t (WebAssembly) in a worker
@@ -794,6 +818,111 @@
       api.startGetDocInfo();
       return 'ok';
     } catch (e) { docInfoPending = false; post({}); return 'error: ' + (e && e.message || e); }
+  };
+
+  // ---- Slides on the phone (plan S4): the app's native slide strip and its native Present mode. Each call runs on a
+  // tap (or once after a slide change), never on the keystroke path. Engine names: xr-contract.json.
+  function slidesApi() {
+    var api = window.__xrApi;
+    if (!api || !/presentationeditor/.test(location.pathname)) return null;
+    var wc = api.WordControl;
+    return wc && wc.m_oLogicDocument ? api : null;
+  }
+
+  // Thumbnails for the native strip: slides from..to drawn by the engine itself (the same DrawPage call its own
+  // thumbnail panel makes, with empty placeholders left out) into one small canvas, as JPEG data URLs.
+  // Returns JSON {n, cur, w, h, slides: [{i, img, hidden}]}.
+  window.__xrSlideThumbs = function (from, to, width) {
+    var api = slidesApi();
+    if (!api) return 'no slides';
+    var wc = api.WordControl, doc = wc.m_oLogicDocument, dd = wc.m_oDrawingDocument, n = api.getCountPages();
+    var mmW = doc.GetWidthMM(), mmH = doc.GetHeightMM();
+    var w = Math.max(32, Math.min(480, (width | 0) || 192)), h = Math.max(18, Math.round(w * mmH / (mmW || 1)));
+    var c = document.createElement('canvas'), out = [];
+    c.width = w; c.height = h;
+    var ctx = c.getContext('2d');
+    var a = Math.max(0, from | 0), b = Math.min(n - 1, to == null ? n - 1 : to | 0);
+    for (var i = a; i <= b; i++) {
+      var img = '', hidden = false;
+      try {
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h);
+        var g = new AscCommon.CGraphics();
+        g.IsNoDrawingEmptyPlaceholder = true;
+        g.IsThumbnail = true;
+        g.init(ctx, w, h, mmW, mmH);
+        g.m_oFontManager = (dd && dd.m_oFontManager) || AscCommon.g_fontManager;
+        g.transform(1, 0, 0, 1, 0, 0);
+        var marks = api.ShowParaMarks;
+        api.ShowParaMarks = false;
+        try { doc.DrawPage(i, g); } finally { api.ShowParaMarks = marks; }
+        img = c.toDataURL('image/jpeg', 0.82);
+      } catch (e) { log('slide thumb', i, e && e.message || e); }
+      try { var s = doc.Slides && doc.Slides[i]; hidden = !!(s && s.isVisible && !s.isVisible()); } catch (e) {}
+      out.push({ i: i, img: img, hidden: hidden });
+    }
+    return JSON.stringify({ n: n, cur: api.getCurrentPage(), w: w, h: h, slides: out });
+  };
+
+  // The layouts the '+' tile offers (the editor's own "Add slide" list: title, picture, engine index).
+  window.__xrSlideLayouts = function () {
+    var c = null;
+    try { c = window.PE && PE.getCollection && PE.getCollection('SlideLayouts'); } catch (e) {}
+    if (!c || !c.length) return '[]';
+    return JSON.stringify(c.map(function (m) {
+      var d = m.get('data') || {};
+      return { idx: d.idx, title: String(m.get('title') || ''), img: String(m.get('imageUrl') || '') };
+    }));
+  };
+
+  // A strip action on slide i: go | add (arg = layout index, none = the engine's own choice) | duplicate | delete |
+  // hide (arg true / false) | earlier | later. The slide is made current first (GoToPage also selects it in the
+  // engine's thumbnail list, which DeleteSlide / HideSlides / the moves act on). Returns 'ok <count> <current>'.
+  window.__xrSlideDo = function (op, i, arg) {
+    var api = slidesApi();
+    if (!api) return 'no slides';
+    var n = api.getCountPages();
+    try {
+      if (typeof i === 'number' && i >= 0 && i < n && i !== api.getCurrentPage()) api.goToPage(i);
+      switch (op) {
+        case 'go': break;
+        case 'add': if (typeof arg === 'number') api.AddSlide(arg); else api.AddSlide(); break;
+        case 'duplicate': api.DublicateSlide(); break;
+        case 'delete': if (n <= 1) return 'last slide'; api.DeleteSlide(); break;
+        case 'hide': api.asc_HideSlides(!!arg); break;
+        case 'earlier': api.asc_moveSlidesPrevPos(); break;
+        case 'later': api.asc_moveSlidesNextPos(); break;
+        default: return 'unknown: ' + op;
+      }
+      return 'ok ' + api.getCountPages() + ' ' + api.getCurrentPage();
+    } catch (e) { return 'error: ' + (e && e.message || e); }
+  };
+
+  // Native Present: start = the editor's own slide show from the current slide (the status bar's Present path,
+  // 'preview:start'), with its web controls hidden - the app's full-screen overlay takes the taps and swipes;
+  // next / prev / end step or end it. The show's start / end / slide reach the app through the state channel.
+  window.__xrPresent = function (op) {
+    var api = slidesApi();
+    if (!api) return 'no slides';
+    try {
+      if (op === 'start') {
+        if (document.body) document.body.classList.add('xr-native-present');
+        if (window.Common && Common.UI && Common.UI.Menu && Common.UI.Menu.Manager) Common.UI.Menu.Manager.hideAll();
+        hub.set('showSlide', api.getCurrentPage() | 0);
+        Common.NotificationCenter.trigger('preview:start', api.getCurrentPage(), false, false, true);
+        hub.set('presenting', true);
+        return 'ok';
+      }
+      if (op === 'next') { api.DemonstrationNextSlide(); return 'ok'; }
+      if (op === 'prev') { api.DemonstrationPrevSlide(); return 'ok'; }
+      if (op === 'end') {
+        api.EndDemonstration();
+        hub.set('presenting', false);
+        if (document.body) document.body.classList.remove('xr-native-present');
+        return 'ok';
+      }
+      return 'unknown: ' + op;
+    } catch (e) { return 'error: ' + (e && e.message || e); }
   };
 
   var A = {

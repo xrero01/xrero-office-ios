@@ -39,6 +39,12 @@ final class EditorState: ObservableObject {
     @Published private(set) var direction = Direction.ltr
     @Published private(set) var list = ListKind.none
     @Published private(set) var title = ""
+    /// Presentations (plan S4): the slide count, the current slide (0-based), whether the slide show runs and the
+    /// slide it shows. Other editors leave the defaults.
+    @Published private(set) var slides = 0
+    @Published private(set) var slide = 0
+    @Published private(set) var presenting = false
+    @Published private(set) var showSlide = 0
     /// How many state messages have arrived since the editor page loaded (tests, diagnostics).
     @Published private(set) var updates = 0
 
@@ -61,6 +67,10 @@ final class EditorState: ObservableObject {
             case "direction": put(\.direction, (v as? String).flatMap(Direction.init(rawValue:)))
             case "list": put(\.list, (v as? String).flatMap(ListKind.init(rawValue:)))
             case "title": put(\.title, v as? String)
+            case "slides": put(\.slides, (v as? NSNumber)?.intValue)
+            case "slide": put(\.slide, (v as? NSNumber)?.intValue)
+            case "presenting": put(\.presenting, v as? Bool)
+            case "showSlide": put(\.showSlide, (v as? NSNumber)?.intValue)
             default: break
             }
         }
@@ -73,6 +83,7 @@ final class EditorState: ObservableObject {
         put(\.selection, Selection.none); put(\.bold, false); put(\.italic, false); put(\.underline, false)
         put(\.alignment, Alignment.none); put(\.direction, Direction.ltr); put(\.list, ListKind.none)
         put(\.title, ""); put(\.updates, 0)
+        put(\.slides, 0); put(\.slide, 0); put(\.presenting, false); put(\.showSlide, 0)
     }
 
     /// One line for logs and the CI probe, e.g. "undo:1 redo:0 mod:1 saved:0 sel:text b:0 i:0 u:0 al:left dir:rtl list:none n:4".

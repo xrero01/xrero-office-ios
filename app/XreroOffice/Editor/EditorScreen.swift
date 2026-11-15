@@ -32,6 +32,8 @@ struct EditorScreen: View {
     var body: some View {
         EditorWebView(document: $document, title: title, lang: lang, onCommand: handle, controller: controller)
             .ignoresSafeArea(.container, edges: [.bottom])
+            // presentations (plan S4): the phone's native slide strip with '+', and native Present
+            .slidesChrome(enabled: document.kind == .slide, controller: controller, ar: lang == "ar")
             .editorRecovery(notice: $recovered, tooLarge: tooLarge, ar: lang == "ar", share: shareDocument, back: leave)
             // one native bar (plan M4a): Back, name + Edited / Saved, Undo (+ Redo when wide), the ⋯ document menu
             // (plan M7b: Find, Redo, Save | Share, Export, Document info | Language, Account, About, All tools)
