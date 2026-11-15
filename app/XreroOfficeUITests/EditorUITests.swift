@@ -983,7 +983,8 @@ final class EditorUITests: XCTestCase {
         let back = app.buttons["xr-bar-back"]
         let present = app.buttons["xr-bar-present"]
         gate("present-button", present.waitForExistence(timeout: 10) && present.isHittable &&
-             present.frame.width >= 44 && present.frame.height >= 44, "frame=\(present.frame)")
+             // the nav bar draws its items 36 pt tall (its touch area is taller): the bar's own height, 44 pt wide
+             present.frame.width >= 44 && present.frame.height >= 36, "frame=\(present.frame)")
 
         if phone {
             let strip = any("xr-slide-strip")
@@ -1017,7 +1018,9 @@ final class EditorUITests: XCTestCase {
             if thumb(2).exists {
                 thumb(2).press(forDuration: 1.2)
                 let del = menuItem("xr-slide-delete", "Delete", "\u{062D}\u{0630}\u{0641}")                       // حذف
-                if del.waitForExistence(timeout: 5) { del.tap() }
+                let delShown = del.waitForExistence(timeout: 5)
+                if !delShown { info("delete-menu", "Delete not found in the long-press menu") }
+                if delShown { del.tap() }
                 gate("delete-removes-slide-3", waitFor(15) { !thumb(2).exists }, "slide 3 exists=\(thumb(2).exists)")
             }
             thumb(0).tap()

@@ -40,6 +40,7 @@
     { "kind": "global", "path": "Asc.editor.WordControl.m_oLogicDocument.GetWidthMM", "editors": ["slide"], "why": "native slide strip thumbnails: slide size" },
     { "kind": "global", "path": "Asc.editor.WordControl.m_oLogicDocument.GetHeightMM", "editors": ["slide"], "why": "native slide strip thumbnails: slide size" },
     { "kind": "global", "path": "Asc.editor.WordControl.m_oDrawingDocument", "editors": ["slide"], "why": "native slide strip thumbnails: font manager" },
+    { "kind": "global", "path": "Asc.editor.WordControl.Thumbnails.GetSelectedArray", "editors": ["slide"], "why": "native strip: Delete / Hide / Move act on the strip's slide" },
     { "kind": "global", "path": "PE.getCollection", "editors": ["slide"], "why": "native layout picker: the editor's slide layouts (__xrSlideLayouts)" },
 
     { "kind": "api", "name": "asc_registerCallback", "why": "ready hook, state channel" },

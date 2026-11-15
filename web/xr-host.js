@@ -884,6 +884,13 @@
     var n = api.getCountPages();
     try {
       if (typeof i === 'number' && i >= 0 && i < n && i !== api.getCurrentPage()) api.goToPage(i);
+      // Duplicate / Delete / Hide / Move act on the slides selected in the engine's thumbnail list, which holds no
+      // pages while that list is collapsed (phones): the strip's slide is the selection for this one call.
+      var th = api.WordControl.Thumbnails, own = th && th.hasOwnProperty('GetSelectedArray'), sel = th && th.GetSelectedArray;
+      if (th && sel && op !== 'go' && op !== 'add' && typeof i === 'number' && i >= 0 && i < n) {
+        th.GetSelectedArray = function () { return [i]; };
+      } else th = null;
+      try {
       switch (op) {
         case 'go': break;
         case 'add': if (typeof arg === 'number') api.AddSlide(arg); else api.AddSlide(); break;
@@ -894,6 +901,7 @@
         case 'later': api.asc_moveSlidesNextPos(); break;
         default: return 'unknown: ' + op;
       }
+      } finally { if (th) { if (own) th.GetSelectedArray = sel; else delete th.GetSelectedArray; } }
       return 'ok ' + api.getCountPages() + ' ' + api.getCurrentPage();
     } catch (e) { return 'error: ' + (e && e.message || e); }
   };
@@ -929,6 +937,8 @@
     // ---- identity / capabilities
     IsLocalFile: function () { return true; },
     IsFilePrinting: function () { return false; },
+    // the slide show asks the desktop window to go full screen: the app hides its bars itself (SlidesChrome, plan S4)
+    SetFullscreen: noop,
     isSupportPlugins: function () { return false; },
     isSupportMacroses: function () { return false; },
     isSupportNetworkFunctionality: function () { return false; },
