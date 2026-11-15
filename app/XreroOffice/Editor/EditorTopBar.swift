@@ -9,6 +9,8 @@ import SwiftUI
 /// still being composed). No keyboard shortcut is attached on purpose: the engine handles a hardware ⌘Z / ⇧⌘Z itself,
 /// and a second binding here would undo twice.
 ///
+/// A tap on the file name opens the title menu (plan M4b): Rename, Duplicate, Move… (the screen passes `titleMenu`).
+///
 /// The ⋯ menu (plan M7b) starts with Find, Redo (compact width) and Save; the screen adds the rest of the document
 /// menu (`more` = DocumentMenuItems: Share, Export, Document info, Language, Account, About, All tools).
 struct EditorTopBar<More: View>: ViewModifier {
@@ -24,6 +26,8 @@ struct EditorTopBar<More: View>: ViewModifier {
     /// Everything the ⋯ menu's entries depend on besides `ar` and the width (language, account, file kind): the menu
     /// is rebuilt only when this changes (MoreMenu).
     var menuKey: String
+    /// The title menu (plan M4b: Rename, Duplicate, Move…); nil = the title is not a button (CI screens without a file).
+    var titleMenu: TitleMenuActions? = nil
     @ViewBuilder var more: () -> More
     @Environment(\.horizontalSizeClass) var sizeClass      // not private: that would hide the memberwise init
 
@@ -57,7 +61,16 @@ struct EditorTopBar<More: View>: ViewModifier {
                     .accessibilityIdentifier("xr-bar-back")
                 }
                 ToolbarItem(placement: .principal) {
-                    BarTitle(title: title, state: state, status: status, ar: ar)
+                    // the title menu lies OVER the title rather than wrapping it: a Menu label is one button to
+                    // accessibility, so the name and its Edited / Saved line would stop being readable texts (VoiceOver
+                    // reads them on their own; the UI tests wait for them). A custom principal item replaces the
+                    // system title, so iOS 26's toolbarTitleMenu would not show - this is the same menu on every iOS.
+                    BarTitle(title: title, state: state, status: status, ar: ar, menu: titleMenu != nil)
+                        .overlay {
+                            if let titleMenu {
+                                TitleMenu(title: title, ar: ar, actions: titleMenu).equatable()
+                            }
+                        }
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     UndoButton(state: state, redo: false, ar: ar) { undo(false) }
@@ -80,10 +93,10 @@ struct EditorTopBar<More: View>: ViewModifier {
 extension View {
     func editorTopBar<More: View>(title: String, state: EditorState, status: EditorBarStatus, controller: EditorController,
                                   ar: Bool, back: @escaping () -> Void, save: @escaping () -> Void,
-                                  find: (() -> Void)? = nil, menuKey: String = "",
+                                  find: (() -> Void)? = nil, menuKey: String = "", titleMenu: TitleMenuActions? = nil,
                                   @ViewBuilder more: @escaping () -> More) -> some View {
         modifier(EditorTopBar(title: title, state: state, status: status, controller: controller, ar: ar,
-                              back: back, save: save, find: find, menuKey: menuKey, more: more))
+                              back: back, save: save, find: find, menuKey: menuKey, titleMenu: titleMenu, more: more))
     }
 }
 
@@ -133,6 +146,58 @@ enum BarText {
     static func saving(_ ar: Bool) -> String { ar ? "جارٍ الحفظ…" : "Saving…" }
     static func edited(_ ar: Bool) -> String { ar ? "معدَّل" : "Edited" }
     static func saved(_ ar: Bool) -> String { ar ? "محفوظ" : "Saved" }
+    // the title menu (plan M4b)
+    static func rename(_ ar: Bool) -> String { ar ? "إعادة التسمية" : "Rename" }
+    static func duplicate(_ ar: Bool) -> String { ar ? "تكرار" : "Duplicate" }
+    static func move(_ ar: Bool) -> String { ar ? "نقل…" : "Move…" }
+    static func titleMenuHint(_ ar: Bool) -> String { ar ? "إعادة التسمية أو التكرار أو النقل" : "Rename, duplicate or move" }
+    static func renameTitle(_ ar: Bool) -> String { ar ? "إعادة تسمية المستند" : "Rename Document" }
+    static func name(_ ar: Bool) -> String { ar ? "الاسم" : "Name" }
+    static func cancel(_ ar: Bool) -> String { ar ? "إلغاء" : "Cancel" }
+    static func ok(_ ar: Bool) -> String { ar ? "حسناً" : "OK" }
+    static func renameExists(_ ar: Bool) -> String {
+        ar ? "تعذّر تغيير الاسم — يوجد ملف بالاسم نفسه" : "Couldn't rename — a file with that name exists"
+    }
+    static func renameFailed(_ ar: Bool) -> String { ar ? "تعذّر تغيير اسم الملف" : "Couldn't rename the file" }
+    static func copyName(_ base: String, _ ar: Bool) -> String { ar ? base + " - نسخة" : base + " copy" }
+    static func copySaved(_ name: String, _ ar: Bool) -> String { (ar ? "حُفظت نسخة: " : "Copy saved: ") + name }
+    static func copyFailed(_ ar: Bool) -> String { ar ? "تعذّر إنشاء نسخة" : "Couldn't duplicate" }
+}
+
+/// What the title menu does (the screen's own actions; plan M4b).
+struct TitleMenuActions {
+    var rename: () -> Void
+    var duplicate: () -> Void
+    var move: () -> Void
+}
+
+/// The title menu: Rename, Duplicate, Move…, opened by a tap on the file name (as in Pages). Equatable on what it
+/// shows, like the ⋯ menu, so a redraw of the screen does not rebuild it while it is open.
+private struct TitleMenu: View, Equatable {
+    var title: String
+    var ar: Bool
+    var actions: TitleMenuActions
+
+    static func == (a: Self, b: Self) -> Bool { a.title == b.title && a.ar == b.ar }
+
+    var body: some View {
+        Menu {
+            Button(action: actions.rename) { Label(BarText.rename(ar), systemImage: "pencil") }
+                .accessibilityIdentifier("xr-title-rename")
+            Button(action: actions.duplicate) { Label(BarText.duplicate(ar), systemImage: "plus.square.on.square") }
+                .accessibilityIdentifier("xr-title-duplicate")
+            Button(action: actions.move) { Label(BarText.move(ar), systemImage: "folder") }
+                .accessibilityIdentifier("xr-title-move")
+        } label: {
+            // the whole title area is the target (at least 44 pt tall); what it shows is the title under it
+            Color.clear
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .accessibilityLabel(title)
+        .accessibilityHint(BarText.titleMenuHint(ar))
+        .accessibilityIdentifier("xr-bar-title-menu")
+    }
 }
 
 /// The file name (17 pt semibold, neutral, cut in the middle so the start and the end stay readable) over a 12 pt
@@ -143,6 +208,11 @@ private struct BarTitle: View {
     @ObservedObject var state: EditorState
     @ObservedObject var status: EditorBarStatus
     var ar: Bool
+    /// The title opens the title menu: a small chevron after the name says so (as in Pages / Files).
+    var menu = false
+    /// With VoiceOver on, the title menu button over the name already reads it: the name itself is then hidden so it
+    /// is not read twice (with VoiceOver off - as in the UI tests - it stays a readable text).
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
 
     private var line: String? {
         if !status.ready { return BarText.opening(ar) }
@@ -154,12 +224,21 @@ private struct BarTitle: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Text(title)
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .accessibilityIdentifier("xr-bar-title")
+            HStack(spacing: 4) {
+                Text(title)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .accessibilityIdentifier("xr-bar-title")
+                    .accessibilityHidden(menu && voiceOver)
+                if menu {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                }
+            }
             if let line {
                 Text(line)
                     .font(.system(size: 12))

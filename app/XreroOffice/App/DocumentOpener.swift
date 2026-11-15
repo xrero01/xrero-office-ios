@@ -180,11 +180,33 @@ final class RecentFiles: ObservableObject {
 
     init() { load() }
 
-    func add(_ url: URL) {
+    /// `behindFirst`: a copy made from the open document (title menu > Duplicate) goes right after it - the open file
+    /// stays the most recent one.
+    func add(_ url: URL, behindFirst: Bool = false) {
         guard let bm = try? url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil) else { return }
         var list = items.filter { $0.id != url.path }
-        list.insert(Item(id: url.path, name: url.lastPathComponent, date: Date(), bookmark: bm, place: Self.place(of: url)), at: 0)
+        let item = Item(id: url.path, name: url.lastPathComponent, date: Date(), bookmark: bm, place: Self.place(of: url))
+        list.insert(item, at: behindFirst ? min(1, list.count) : 0)
         items = Array(list.prefix(limit))
+        save()
+    }
+
+    /// The open file was renamed or moved (title menu, plan M4b): its row now points at the new place with a fresh
+    /// bookmark, keeping its position and date, so Home shows the new name and reopens the file where it is now.
+    func replace(_ old: URL, with new: URL) {
+        guard let bm = try? new.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil) else { return }
+        // compared in one form: the editor's file URL can differ from the opened one (/var vs /private/var), and a
+        // missed match would leave the old row behind, its bookmark now pointing at the renamed file (two rows)
+        func same(_ id: String) -> Bool {
+            URL(fileURLWithPath: id).standardizedFileURL.resolvingSymlinksInPath().path
+                == old.standardizedFileURL.resolvingSymlinksInPath().path
+        }
+        guard let i = items.firstIndex(where: { $0.id == old.path || same($0.id) }) else { add(new); return }
+        var list = items
+        list[i] = Item(id: new.path, name: new.lastPathComponent, date: list[i].date, bookmark: bm, place: Self.place(of: new))
+        // one row per file: an older row for the new path (a file once known by this name) goes
+        list = list.enumerated().filter { $0.offset == i || $0.element.id != new.path }.map(\.element)
+        items = list
         save()
     }
 
@@ -199,7 +221,16 @@ final class RecentFiles: ObservableObject {
     func resolve(_ item: Item) -> URL? {
         var stale = false
         guard let url = try? URL(resolvingBookmarkData: item.bookmark, options: [], relativeTo: nil, bookmarkDataIsStale: &stale)
-        else { return nil }
+        else {
+            // a bookmark made right after a rename can fail to resolve while the file is still there under its row's
+            // path (CI: the renamed file "gone" on reopen); the app's own folder needs no bookmark, so use that path
+            let here = URL(fileURLWithPath: item.id)
+            if Self.place(of: here) == "device", FileManager.default.fileExists(atPath: here.path) {
+                DispatchQueue.main.async { self.renew(item, at: here) }
+                return here
+            }
+            return nil
+        }
         if stale {
             // not during a view update: publishing from inside `body` is not allowed
             DispatchQueue.main.async { self.renew(item, at: url) }

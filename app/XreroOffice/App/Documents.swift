@@ -26,10 +26,130 @@ final class OpenDocumentModel: ObservableObject {
         }
     }
 
+    /// Where the file is now (the title menu's Rename / Move change it). Published so the editor's title, its ⋯ >
+    /// Document info and the Share copy follow at once; the editor page itself is never reloaded for it.
+    @Published private(set) var fileURL: URL
+    /// A place picked in Move… outside the app's own folder: held open while the document is (later saves go there).
+    private var scopedURL: URL?
+
     init?(file: OfficeFile) {
         guard let kind = OfficeKind(url: file.fileURL) else { return nil }
         self.file = file
+        self.fileURL = file.fileURL
         self.document = OfficeDocument(data: file.data, kind: kind)
+    }
+
+    deinit { scopedURL?.stopAccessingSecurityScopedResource() }
+
+    // MARK: the title menu (plan M4b): Rename, Duplicate, Move. Data-loss class, so every step is coordinated:
+    //  - pending changes are written to the CURRENT file first (flush), so nothing is left for the old place;
+    //  - the move itself is an NSFileCoordinator move off the main thread (Apple: never coordinate on the main thread);
+    //    the open UIDocument is a file presenter, so it is told (presentedItemDidMove) and writes every later save -
+    //    the editor's next Save, the autosave, the save on close - to the new place. No ghost file at the old name;
+    //  - the Recent entry is replaced by one for the new place (a fresh bookmark), so Home reopens the renamed file.
+    // The screen queues these behind a save that is being written (EditorScreen.afterSave).
+
+    enum FileOpError: Error { case exists, failed }
+
+    /// Writes changes UIDocument still holds to the file as it is now, then `then` (on the main thread).
+    func flush(then: @escaping () -> Void) {
+        guard file.hasUnsavedChanges else { then(); return }
+        file.save(to: file.fileURL, for: .forOverwriting) { _ in DispatchQueue.main.async { then() } }
+    }
+
+    /// Renames the open file in its folder; `base` is the new name without the extension (the extension never changes:
+    /// it is the format the editor saves). `done(nil)` once the file is at its new place.
+    func rename(to base: String, done: @escaping (FileOpError?) -> Void) {
+        let old = file.fileURL
+        let ext = old.pathExtension
+        let dest = old.deletingLastPathComponent().appendingPathComponent(base + (ext.isEmpty ? "" : "." + ext))
+        guard dest.standardizedFileURL.path != old.standardizedFileURL.path else { done(nil); return }
+        // only the letter case changes: on a case-insensitive volume the "existing" file is this one
+        let caseOnly = dest.path.lowercased() == old.path.lowercased()
+        if !caseOnly && FileManager.default.fileExists(atPath: dest.path) { done(.exists); return }
+        flush {
+            DispatchQueue.global(qos: .userInitiated).async {
+                let c = NSFileCoordinator(filePresenter: nil)
+                var cerr: NSError?
+                var failure: FileOpError?
+                c.coordinate(writingItemAt: old, options: .forMoving, writingItemAt: dest, options: .forReplacing,
+                             error: &cerr) { from, to in
+                    if !caseOnly && FileManager.default.fileExists(atPath: to.path) { failure = .exists; return }
+                    do {
+                        c.item(at: from, willMoveTo: to)
+                        try FileManager.default.moveItem(at: from, to: to)
+                        c.item(at: from, didMoveTo: to)
+                    } catch {
+                        NSLog("XR rename failed: %@", error.localizedDescription)
+                        failure = .failed
+                    }
+                }
+                if cerr != nil && failure == nil { failure = .failed }
+                DispatchQueue.main.async {
+                    if let failure { done(failure); return }
+                    self.adopt(dest, from: old)
+                    done(nil)
+                }
+            }
+        }
+    }
+
+    /// Move…: the system picker moved the file to `url` (UIDocumentPickerViewController, not a copy).
+    func didMove(to url: URL) {
+        let old = file.fileURL
+        if url.startAccessingSecurityScopedResource() {
+            scopedURL?.stopAccessingSecurityScopedResource()
+            scopedURL = url
+        }
+        adopt(url, from: old)
+    }
+
+    /// The open document now lives at `url`: the UIDocument writes there (the coordinator normally told it already; a
+    /// move made by the system picker may not, so it is told here as well - the same URL twice is harmless), the
+    /// screen shows the new name and Recent points at it.
+    private func adopt(_ url: URL, from old: URL) {
+        let f = file
+        if f.fileURL.standardizedFileURL != url.standardizedFileURL {
+            f.presentedItemOperationQueue.addOperation { f.presentedItemDidMove(to: url) }
+        }
+        fileURL = url
+        RecentFiles.shared.replace(old, with: url)
+        NSLog("XR document now at %@", url.lastPathComponent)
+    }
+
+    /// Duplicate: a copy of the document as last saved (`document.data`: the screen saves what is on screen first)
+    /// beside it - in the app's own folder when that folder cannot be written. Listed in Recent right after the open
+    /// file. `done` gets the copy's URL, nil when it could not be written.
+    func duplicate(as base: String, done: @escaping (URL?) -> Void) {
+        let src = file.fileURL
+        let ext = src.pathExtension
+        let fm = FileManager.default
+        var folder = src.deletingLastPathComponent()
+        if !fm.isWritableFile(atPath: folder.path),
+           let docs = try? fm.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true) {
+            folder = docs
+        }
+        var dest = folder.appendingPathComponent(base + "." + ext)
+        var n = 2
+        while fm.fileExists(atPath: dest.path) {
+            dest = folder.appendingPathComponent("\(base) \(n).\(ext)")
+            n += 1
+        }
+        let bytes = document.data
+        let target = dest
+        DispatchQueue.global(qos: .userInitiated).async {
+            var cerr: NSError?
+            var ok = false
+            NSFileCoordinator(filePresenter: nil).coordinate(writingItemAt: target, options: .forReplacing, error: &cerr) { url in
+                ok = (try? bytes.write(to: url, options: .atomic)) != nil
+            }
+            DispatchQueue.main.async {
+                if ok && cerr == nil {
+                    RecentFiles.shared.add(target, behindFirst: true)
+                    done(target)
+                } else { done(nil) }
+            }
+        }
     }
 }
 
@@ -42,7 +162,7 @@ struct EditorHost: View {
 
     var body: some View {
         NavigationStack {
-            EditorScreen(document: $model.document, fileURL: model.file.fileURL, onClose: onClose)
+            EditorScreen(document: $model.document, fileURL: model.fileURL, files: model, onClose: onClose)
         }
         .appLanguageEnvironment()
     }
