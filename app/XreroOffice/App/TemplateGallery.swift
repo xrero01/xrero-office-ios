@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// The template gallery (plan S8): UAE templates in English and Arabic, bundled with the app (works offline).
 /// The files and web/templates/gallery.json are written by scripts/make_gallery_templates.py; assemble_web.sh copies
@@ -65,7 +66,9 @@ struct TemplateGallerySheet: View {
     }
 
     private var columns: [GridItem] {
-        Array(repeating: GridItem(.flexible(), spacing: 16, alignment: .top), count: sizeClass == .regular ? 4 : 2)
+        // iPad: 4 columns (the sheet is page-sized there, GalleryPageSizing); iPhone: 2
+        let pad: Bool = UIDevice.current.userInterfaceIdiom == .pad || sizeClass == .regular
+        return Array(repeating: GridItem(.flexible(), spacing: 16, alignment: .top), count: pad ? 4 : 2)
     }
 
     var body: some View {
@@ -84,6 +87,7 @@ struct TemplateGallerySheet: View {
         .tint(Color.xrTeal)
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
+        .modifier(GalleryPageSizing())
         .accessibilityIdentifier("xr-templates")
     }
 
@@ -185,6 +189,14 @@ struct TemplateGallerySheet: View {
         .frame(minHeight: 44)
         .accessibilityAddTraits(traits)
         .accessibilityIdentifier("xr-template-cat-" + id)
+    }
+}
+
+/// iPad: the gallery as a page-sized sheet (iOS 18+), so its 4 columns of previews have room; iOS 17 keeps the
+/// system's default sheet.
+private struct GalleryPageSizing: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) { content.presentationSizing(.page) } else { content }
     }
 }
 
