@@ -1,2 +1,8 @@
 /* Info.plist words shown by iOS (permission prompts), English. The same text as Info.plist itself. */
 "NSPhotoLibraryUsageDescription" = "Xrero Office inserts the photos you choose into your document.";
+"NSCameraUsageDescription" = "Xrero Office uses the camera to scan paper documents into PDF files on this device.";
+/* Home Screen quick actions (Info.plist UIApplicationShortcutItems): the key is the English title */
+"New Document" = "New Document";
+"New Spreadsheet" = "New Spreadsheet";
+"New Presentation" = "New Presentation";
+"Scan to PDF" = "Scan to PDF";

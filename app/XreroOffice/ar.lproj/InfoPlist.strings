@@ -1,2 +1,8 @@
 /* Info.plist words shown by iOS (permission prompts), Arabic. */
 "NSPhotoLibraryUsageDescription" = "يُدرج Xrero Office الصور التي تختارها في مستندك.";
+"NSCameraUsageDescription" = "يستخدم Xrero Office الكاميرا لمسح المستندات الورقية وحفظها ملفات PDF على هذا الجهاز.";
+/* Home Screen quick actions (Info.plist UIApplicationShortcutItems): the key is the English title */
+"New Document" = "مستند جديد";
+"New Spreadsheet" = "جدول بيانات جديد";
+"New Presentation" = "عرض تقديمي جديد";
+"Scan to PDF" = "مسح إلى PDF";

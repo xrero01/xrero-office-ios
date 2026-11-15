@@ -12,6 +12,8 @@ struct HomeScene: View {
     @ObservedObject private var account = XreroAccount.shared
     /// The one language source (OfficeDocument.swift): observed so a switch in the More menu re-words Home at once.
     @ObservedObject private var language = AppLanguage.shared
+    /// Home Screen quick actions (plan S10, QuickActions.swift): run here once Home is up
+    @ObservedObject private var quick = QuickActionRouter.shared
     /// The optional account has been offered and answered: "Not now" on the Home card, signing in, or (20.1) the
     /// first-launch sheet. The key is the 20.1 one, so an update does not offer the account a second time.
     @AppStorage("xr.welcomeShown") private var accountOffered = false
@@ -76,6 +78,8 @@ struct HomeScene: View {
             get: { missing != nil }, set: { if !$0 { missing = nil } })) {
             Button(L.ok, role: .cancel) {}
         } message: { Text(missing ?? "") }
+        .onAppear { runQuickAction() }
+        .onChange(of: quick.pending) { _, _ in runQuickAction() }
         .onOpenURL { url in
             if url.isFileURL { opener.openExternal(url) }        // "Open in Xrero Office" from Files / Share
         }
@@ -84,6 +88,12 @@ struct HomeScene: View {
             await XreroAccount.shared.refresh()
             NSLog("XR start accountOffered=%ld signedIn=%ld", accountOffered ? 1 : 0, XreroAccount.shared.isSignedIn ? 1 : 0)
         }
+    }
+
+    /// New document / spreadsheet / presentation or Scan, chosen on the app icon (plan S10).
+    private func runQuickAction() {
+        guard let action = quick.take() else { return }
+        if let kind = action.kind { opener.create(kind) } else { DocumentScanner.shared.start(opener: opener) }
     }
 
     // MARK: header menu
@@ -210,6 +220,10 @@ struct HomeScene: View {
                 opener.browse([.pdf])
             }
             .accessibilityIdentifier("xr-home-pdf")
+            OpenRow(symbol: "doc.viewfinder", color: .xrTeal, title: ScanText.rowTitle, detail: ScanText.rowDetail) {
+                DocumentScanner.shared.start(opener: opener)
+            }
+            .accessibilityIdentifier("xr-home-scan")
         } header: {
             Text(ar ? "فتح" : "Open")
         }

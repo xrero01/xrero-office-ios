@@ -127,6 +127,44 @@
 	<!-- Arabic: ar.lproj/InfoPlist.strings (keep both in step with this text) -->
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Xrero Office inserts the photos you choose into your document.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Xrero Office uses the camera to scan paper documents into PDF files on this device.</string>
+	<!-- Home Screen quick actions (plan S10, QuickActions.swift); Arabic titles in ar.lproj/InfoPlist.strings -->
+	<key>UIApplicationShortcutItems</key>
+	<array>
+		<dict>
+			<key>UIApplicationShortcutItemType</key>
+			<string>com.xrero.office.new-document</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>New Document</string>
+			<key>UIApplicationShortcutItemIconSymbolName</key>
+			<string>doc.text</string>
+		</dict>
+		<dict>
+			<key>UIApplicationShortcutItemType</key>
+			<string>com.xrero.office.new-spreadsheet</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>New Spreadsheet</string>
+			<key>UIApplicationShortcutItemIconSymbolName</key>
+			<string>tablecells</string>
+		</dict>
+		<dict>
+			<key>UIApplicationShortcutItemType</key>
+			<string>com.xrero.office.new-presentation</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>New Presentation</string>
+			<key>UIApplicationShortcutItemIconSymbolName</key>
+			<string>rectangle.on.rectangle</string>
+		</dict>
+		<dict>
+			<key>UIApplicationShortcutItemType</key>
+			<string>com.xrero.office.scan</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>Scan to PDF</string>
+			<key>UIApplicationShortcutItemIconSymbolName</key>
+			<string>doc.viewfinder</string>
+		</dict>
+	</array>
 	<!-- the commit this build was made from: GitHub's builders set GITHUB_SHA (xcodebuild sees the environment as build
 	     settings), so About > "Source code of this version" links to exactly this source; empty in a local build -->
 	<key>XRSourceCommit</key>
