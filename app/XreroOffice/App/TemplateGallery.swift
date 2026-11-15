@@ -70,41 +70,16 @@ struct TemplateGallerySheet: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    languagePicker
-                    chips
-                    LazyVGrid(columns: columns, spacing: 20) {
-                        ForEach(shown) { t in
-                            Button { onPick(t, lang) } label: { TemplateCard(template: t, lang: lang) }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel(t.name.text(lang) + " (." + t.officeKind.fileExtension + ")")
-                                .accessibilityHint(ar ? "ينشئ ملفاً جديداً من هذا القالب" : "Creates a new file from this template")
-                                .accessibilityIdentifier("xr-template-" + t.id)
-                        }
+            ScrollView { content }
+                .background(Color(.systemGroupedBackground))
+                .navigationTitle(ar ? "القوالب" : "Templates")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button(L.cancel) { dismiss() }
+                            .accessibilityIdentifier("xr-templates-close")
                     }
-                    .padding(.horizontal, 16)
-                    .animation(.default, value: category)
-                    Text(ar ? "القوالب أمثلة جاهزة للتعديل. قالب الفاتورة الضريبية قالب فقط وليس استشارة ضريبية."
-                            : "Templates are examples for you to edit. The tax invoice is a template, not tax advice.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 24)
-                        .accessibilityIdentifier("xr-templates-note")
                 }
-                .padding(.top, 8)
-            }
-            .background(Color(.systemGroupedBackground))
-            .navigationTitle(ar ? "القوالب" : "Templates")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(L.cancel) { dismiss() }
-                        .accessibilityIdentifier("xr-templates-close")
-                }
-            }
         }
         .tint(Color.xrTeal)
         .presentationDetents([.large])
@@ -112,19 +87,57 @@ struct TemplateGallerySheet: View {
         .accessibilityIdentifier("xr-templates")
     }
 
+    private var content: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            languagePicker
+            chips
+            grid
+            note
+        }
+        .padding(.top, 8)
+    }
+
+    private var grid: some View {
+        LazyVGrid(columns: columns, spacing: 20) {
+            ForEach(shown) { t in card(t) }
+        }
+        .padding(.horizontal, 16)
+        .animation(.default, value: category)
+    }
+
+    private func card(_ t: TemplateManifest.Template) -> some View {
+        let label: String = t.name.text(lang) + " (." + t.officeKind.fileExtension + ")"
+        let hint: String = ar ? "ينشئ ملفاً جديداً من هذا القالب" : "Creates a new file from this template"
+        return Button { onPick(t, lang) } label: { TemplateCard(template: t, lang: lang) }
+            .buttonStyle(.plain)
+            .accessibilityLabel(label)
+            .accessibilityHint(hint)
+            .accessibilityIdentifier("xr-template-" + t.id)
+    }
+
+    private var note: some View {
+        let words: String = ar ? "القوالب أمثلة جاهزة للتعديل. قالب الفاتورة الضريبية قالب فقط وليس استشارة ضريبية."
+                               : "Templates are examples for you to edit. The tax invoice is a template, not tax advice."
+        return Text(words)
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 24)
+            .accessibilityIdentifier("xr-templates-note")
+    }
+
     /// The template's language, not the app's: an English user can still start an Arabic letter.
     private var languagePicker: some View {
-        HStack(spacing: 12) {
-            Text(ar ? "لغة القالب" : "Template language")
+        let caption: String = ar ? "لغة القالب" : "Template language"
+        let order: [String] = ar ? ["ar", "en"] : ["en", "ar"]
+        return HStack(spacing: 12) {
+            Text(caption)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
             Spacer(minLength: 8)
-            Picker(ar ? "لغة القالب" : "Template language", selection: $lang) {
-                ForEach(ar ? ["ar", "en"] : ["en", "ar"], id: \.self) { code in
-                    Text(verbatim: code == "ar" ? "ع" : "EN")
-                        .accessibilityLabel(code == "ar" ? "العربية" : "English")
-                        .tag(code)
-                }
+            Picker(caption, selection: $lang) {
+                ForEach(order, id: \.self) { code in langSegment(code) }
             }
             .pickerStyle(.segmented)
             .frame(width: 132)
@@ -133,31 +146,44 @@ struct TemplateGallerySheet: View {
         .padding(.horizontal, 16)
     }
 
+    private func langSegment(_ code: String) -> some View {
+        let short: String = code == "ar" ? "ع" : "EN"
+        let long: String = code == "ar" ? "العربية" : "English"
+        return Text(verbatim: short).accessibilityLabel(long).tag(code)
+    }
+
     private var chips: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        let all: String = ar ? "الكل" : "All"
+        let code: String = ar ? "ar" : "en"
+        return ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                chip("all", ar ? "الكل" : "All")
-                ForEach(manifest.categories) { c in chip(c.id, c.name.text(ar ? "ar" : "en")) }
+                chip("all", all)
+                ForEach(manifest.categories) { c in chip(c.id, c.name.text(code)) }
             }
             .padding(.horizontal, 16)
         }
     }
 
     private func chip(_ id: String, _ title: String) -> some View {
-        let on = category == id
+        let on: Bool = category == id
+        let fill: Color = on ? Color.xrTeal : Color(.secondarySystemGroupedBackground)
+        let ink: Color = on ? Color.xrOnTeal : Color.primary
+        let weight: Font.Weight = on ? .semibold : .regular
+        let border: CGFloat = on ? 0 : 0.5
+        let traits: AccessibilityTraits = on ? .isSelected : []
         return Button { category = id } label: {
             Text(title)
-                .font(.subheadline.weight(on ? .semibold : .regular))
-                .foregroundStyle(on ? Color.xrOnTeal : Color.primary)
+                .font(.subheadline.weight(weight))
+                .foregroundStyle(ink)
                 .padding(.horizontal, 16)
                 .frame(minHeight: 36)
-                .background(on ? Color.xrTeal : Color(.secondarySystemGroupedBackground), in: Capsule())
-                .overlay(Capsule().strokeBorder(Color(.separator), lineWidth: on ? 0 : 0.5))
+                .background(fill, in: Capsule())
+                .overlay(Capsule().strokeBorder(Color(.separator), lineWidth: border))
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .frame(minHeight: 44)
-        .accessibilityAddTraits(on ? .isSelected : [])
+        .accessibilityAddTraits(traits)
         .accessibilityIdentifier("xr-template-cat-" + id)
     }
 }
@@ -168,21 +194,25 @@ struct TemplateCard: View {
     let lang: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            TemplateThumbnail(layout: template.thumbnail, lang: lang, title: template.name.text(lang))
+        let name: String = template.name.text(lang)
+        let dir: LayoutDirection = lang == "ar" ? .rightToLeft : .leftToRight
+        let tile: HomeTile = HomeTile.of(template.officeKind)
+        let ext: String = "." + template.officeKind.fileExtension
+        return VStack(alignment: .leading, spacing: 8) {
+            TemplateThumbnail(layout: template.thumbnail, lang: lang, title: name)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color(.separator), lineWidth: 0.5))
                 .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
-            Text(template.name.text(lang))
+            Text(name)
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(.primary)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
-                .environment(\.layoutDirection, lang == "ar" ? .rightToLeft : .leftToRight)
+                .environment(\.layoutDirection, dir)
             HStack(spacing: 4) {
-                Image(systemName: HomeTile.of(template.officeKind).symbol)
-                    .foregroundStyle(HomeTile.of(template.officeKind).color)
-                Text(verbatim: "." + template.officeKind.fileExtension)
+                Image(systemName: tile.symbol)
+                    .foregroundStyle(tile.color)
+                Text(verbatim: ext)
                     .environment(\.layoutDirection, .leftToRight)
             }
             .font(.caption)
@@ -207,15 +237,16 @@ struct TemplateThumbnail: View {
     private static let line = Color(red: 0.72, green: 0.77, blue: 0.79)
 
     var body: some View {
-        GeometryReader { g in
-            let u = g.size.width / 150
+        let dir: LayoutDirection = lang == "ar" ? .rightToLeft : .leftToRight
+        return GeometryReader { g in
+            let u: CGFloat = g.size.width / 150
             page(u)
                 .padding(12 * u)
                 .frame(width: g.size.width, height: g.size.height, alignment: .topLeading)
         }
         .aspectRatio(3 / 4, contentMode: .fit)
         .background(Color.white)
-        .environment(\.layoutDirection, lang == "ar" ? .rightToLeft : .leftToRight)
+        .environment(\.layoutDirection, dir)
         .environment(\.colorScheme, .light)
         .accessibilityHidden(true)
     }
@@ -265,26 +296,34 @@ struct TemplateThumbnail: View {
     /// a table row: widths in page units; the first column carries a label bar, the rest numbers at the end side
     private func row(_ kind: Row, _ widths: [CGFloat], _ u: CGFloat, labelFill: Bool = false) -> some View {
         HStack(spacing: 0) {
-            ForEach(widths.indices, id: \.self) { i in
-                ZStack(alignment: i == 0 ? .leading : .trailing) {
-                    Rectangle().fill(cellFill(kind, i, widths.count, labelFill))
-                    Rectangle().strokeBorder(Self.line, lineWidth: 0.4 * u)
-                    if i == 0 || kind != .section {
-                        bar(min(widths[i] * (i == 0 ? 0.6 : 0.45), 40), u, h: 1.8, cellInk(kind))
-                            .padding(.horizontal, 2 * u)
-                    }
-                }
-                .frame(width: widths[i] * u, height: 7 * u)
+            ForEach(widths.indices, id: \.self) { i in cell(kind, widths, i, u, labelFill) }
+        }
+    }
+
+    private func cell(_ kind: Row, _ widths: [CGFloat], _ i: Int, _ u: CGFloat, _ labelFill: Bool) -> some View {
+        let align: Alignment = i == 0 ? .leading : .trailing
+        let share: CGFloat = i == 0 ? 0.6 : 0.45
+        let w: CGFloat = min(widths[i] * share, 40)
+        let showBar: Bool = i == 0 || kind != .section
+        return ZStack(alignment: align) {
+            Rectangle().fill(cellFill(kind, i, widths.count, labelFill))
+            Rectangle().strokeBorder(Self.line, lineWidth: 0.4 * u)
+            if showBar {
+                bar(w, u, h: 1.8, cellInk(kind)).padding(.horizontal, 2 * u)
             }
         }
+        .frame(width: widths[i] * u, height: 7 * u)
     }
 
     private func cellFill(_ kind: Row, _ i: Int, _ count: Int, _ labelFill: Bool) -> Color {
         switch kind {
         case .header: return Self.accent
         case .section, .total: return Self.light
-        case .input: return i > 0 && i < count - 1 ? Self.input : (labelFill && i == 0 ? Self.light : .white)
-        case .plain: return labelFill && i == 0 ? Self.light : .white
+        case .input:
+            if i > 0 && i < count - 1 { return Self.input }
+            return labelFill && i == 0 ? Self.light : Color.white
+        case .plain:
+            return labelFill && i == 0 ? Self.light : Color.white
         }
     }
 
