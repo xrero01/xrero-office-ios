@@ -639,7 +639,8 @@ struct RealDocumentHarness: View {
                 Text(hit).font(.system(size: 9)).accessibilityIdentifier("xr-real-hit")
             }
         }
-        .background(PresenterAnchor(opener: opener))
+        // 0 x 0, as on Home: a full-size anchor view was hit-tested above the buttons after a form sheet (iPad)
+        .background(PresenterAnchor(opener: opener).frame(width: 0, height: 0))
         .onAppear(perform: start)
         .onOpenURL { url in
             guard url.scheme == "xrero-autotest", url.host == "hit" else { return }
@@ -652,7 +653,7 @@ struct RealDocumentHarness: View {
     private func count(_ b: String) { taps[b, default: 0] += 1 }
 
     /// "hit:<window class>@<level>[*key]=<hit view class> ..." for every visible window of the scene at a screen point:
-    /// the top one that answers gets a touch there (CI, iPad: taps on Home-like buttons got lost after a form sheet).
+    /// the top one that answers gets a touch there (CI, iPad: it found the full-size anchor view taking the taps).
     @MainActor static func hitReport(_ p: CGPoint) -> String {
         guard let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first else { return "hit:no scene" }
         let parts = scene.windows.sorted { $0.windowLevel.rawValue > $1.windowLevel.rawValue }.map { w -> String in

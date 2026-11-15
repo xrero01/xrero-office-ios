@@ -92,14 +92,6 @@ final class DocumentOpener: NSObject, ObservableObject, UIDocumentPickerDelegate
     func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
         lastPicker += " cancelled"
         NSLog("XR picker cancelled")
-        // the picker closes itself on Cancel. Should it stay presented (CI, iPad: Home stopped taking taps after the
-        // second picker's Cancel, with nothing visible over it), it is dismissed here - after its own dismissal had
-        // its chance to start, so a closing picker is never dismissed twice
-        DispatchQueue.main.async {
-            guard controller.presentingViewController != nil, !controller.isBeingDismissed else { return }
-            NSLog("XR picker still presented after Cancel - dismissing it")
-            controller.dismiss(animated: true)
-        }
     }
 
     private final class Once { var done = false }
@@ -388,6 +380,13 @@ struct PresenterAnchor: UIViewControllerRepresentable {
 
     final class AnchorController: UIViewController {
         var onAppear: (() -> Void)?
+        /// Only an anchor: its view never takes a touch. Given a size (the Autotest harness had it as a full-size
+        /// background), UIKit hit-tested it above the SwiftUI buttons once a form sheet had been up (CI, iPad): taps
+        /// on them went nowhere. Home keeps it 0 x 0 as well.
+        override func viewDidLoad() {
+            super.viewDidLoad()
+            view.isUserInteractionEnabled = false
+        }
         override func viewDidAppear(_ animated: Bool) {
             super.viewDidAppear(animated)
             onAppear?()
