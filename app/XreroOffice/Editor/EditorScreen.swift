@@ -216,13 +216,15 @@ extension EditorScreen {
         final class Once { var done = false }
         let once = Once()
         DispatchQueue.main.asyncAfter(deadline: .now() + 45) {
-            if !once.done { once.done = true; showToast(BarText.copyFailed(ar)) }
+            if !once.done { once.done = true; showToast(BarText.copyFailed(ar), seconds: 4) }
         }
         controller.save(onlyIfModified: true) {
             guard !once.done else { return }
             once.done = true
             files.duplicate(as: base) { url in
-                showToast(url.map { BarText.copySaved($0.deletingPathExtension().lastPathComponent, ar) } ?? BarText.copyFailed(ar))
+                // 4 s, not the paste notice's 2: it names the new file, which takes longer to read
+                showToast(url.map { BarText.copySaved($0.deletingPathExtension().lastPathComponent, ar) } ?? BarText.copyFailed(ar),
+                          seconds: 4)
             }
         }
     }
@@ -249,10 +251,10 @@ extension EditorScreen {
         }
     }
 
-    fileprivate func showToast(_ text: String) {
+    fileprivate func showToast(_ text: String, seconds: Double = 2) {
         toast = text
         UIAccessibility.post(notification: .announcement, argument: text)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { if toast == text { toast = nil } }
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { if toast == text { toast = nil } }
     }
 }
 

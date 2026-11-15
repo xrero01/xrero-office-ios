@@ -813,7 +813,8 @@ final class EditorUITests: XCTestCase {
 
             // 4. Duplicate: a copy beside it, said in a short notice
             if titleMenu("xr-title-duplicate") {
-                let toast = app.staticTexts["xr-toast"]
+                // any element type (the capsule's text may surface as other than a static text); the notice stays 4 s
+                let toast = app.descendants(matching: .any).matching(identifier: "xr-toast").firstMatch
                 XCTAssertTrue(toast.waitForExistence(timeout: 15), "no notice after Duplicate (\(run.lang))")
                 print("XR title menu \(run.lang): duplicate notice = \(toast.exists ? toast.label : "-")")
                 shot(app, "64-ren-\(run.lang)-duplicated")
