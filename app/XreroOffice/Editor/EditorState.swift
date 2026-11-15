@@ -54,6 +54,12 @@ final class EditorState: ObservableObject {
     @Published private(set) var cell = ""
     @Published private(set) var math = SelectionMath.none
     @Published private(set) var cellEdit = false
+    /// Presentations (plan S4): the slide count, the current slide (0-based), whether the slide show runs and the
+    /// slide it shows. Other editors leave the defaults.
+    @Published private(set) var slides = 0
+    @Published private(set) var slide = 0
+    @Published private(set) var presenting = false
+    @Published private(set) var showSlide = 0
     /// How many state messages have arrived since the editor page loaded (tests, diagnostics).
     @Published private(set) var updates = 0
 
@@ -85,6 +91,10 @@ final class EditorState: ObservableObject {
             case "cell": put(\.cell, v as? String)
             case "math": put(\.math, (v as? String).map(SelectionMath.init(wire:)))
             case "cellEdit": put(\.cellEdit, v as? Bool)
+            case "slides": put(\.slides, (v as? NSNumber)?.intValue)
+            case "slide": put(\.slide, (v as? NSNumber)?.intValue)
+            case "presenting": put(\.presenting, v as? Bool)
+            case "showSlide": put(\.showSlide, (v as? NSNumber)?.intValue)
             default: break
             }
         }
@@ -99,6 +109,7 @@ final class EditorState: ObservableObject {
         put(\.title, ""); put(\.fontName, ""); put(\.fontSize, 0); put(\.strikeout, false); put(\.style, "")
         put(\.lineSpacing, -1); put(\.textColor, ""); put(\.cell, ""); put(\.math, SelectionMath.none)
         put(\.cellEdit, false); put(\.updates, 0)
+        put(\.slides, 0); put(\.slide, 0); put(\.presenting, false); put(\.showSlide, 0)
     }
 
     /// One line for logs and the CI probe, e.g. "undo:1 redo:0 mod:1 saved:0 sel:text b:0 i:0 u:0 al:left dir:rtl list:none

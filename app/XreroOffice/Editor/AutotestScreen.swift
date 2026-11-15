@@ -54,7 +54,9 @@ struct AutotestScreen: View {
             NavigationStack {
                 // the real ⋯ document menu (plan M7b); the actions that would leave the test's editor (language
                 // switch, share sheet) report in the state label instead
-                screen.editorTopBar(title: (name as NSString).deletingPathExtension, state: controller.state,
+                // the real presentation chrome (plan S4): slide strip, layout picker, Present
+                screen.slidesChrome(enabled: document.kind == .slide, controller: controller, ar: lang == "ar")
+                      .editorTopBar(title: (name as NSString).deletingPathExtension, state: controller.state,
                                     status: barStatus, controller: controller, ar: lang == "ar",
                                     back: { state = "back" }, save: { controller.userSave() },
                                     find: { controller.find() }, menuKey: "\(lang)|\(document.kind.rawValue)",

@@ -40,6 +40,8 @@ struct EditorScreen: View {
     var body: some View {
         EditorWebView(document: $document, title: title, lang: lang, onCommand: handle, controller: controller)
             .ignoresSafeArea(.container, edges: [.bottom])
+            // presentations (plan S4): the phone's native slide strip with '+', and native Present
+            .slidesChrome(enabled: document.kind == .slide, controller: controller, ar: lang == "ar")
             .editorRecovery(notice: $recovered, tooLarge: tooLarge, ar: lang == "ar", share: shareDocument, back: leave)
             // spreadsheets (plan S3): the selection's Sum capsule and its Sum / Average / Min / Max / Count sheet
             .sheetSum(kind: document.kind, state: controller.state, controller: controller, ar: lang == "ar")

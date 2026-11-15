@@ -1112,6 +1112,155 @@ final class EditorUITests: XCTestCase {
         XCTAssertEqual(left, "back", "Back did not leave the editor")
     }
 
+    // MARK: - Slides touch gate (plan S4)
+
+    /// Presentations (plan S4) under the native bar (XR_BAR=1), English then Arabic, iPhone and iPad. iPhone: the
+    /// native slide strip is shown with the first slide current; its '+' is a 44 pt target and opens the native layout
+    /// picker, whose first layout adds slide 2 (current); a long press on a thumbnail offers Duplicate (slide 3) and
+    /// Delete (back to 2); a tap on a thumbnail makes it current; the strip hides while the keyboard is up. Every
+    /// device: the nav bar's Present starts the native show (nav bar hidden, strip hidden), a tap advances (iPhone,
+    /// 2 slides), ✕ ends it (nav bar back), a double tap ends it too; then Save. Each result is printed as
+    /// "XR touch slides <lang> <check>: PASS|FAIL|INFO" and asserted (recorded, the test goes on).
+    func testZSlidesStripAndPresent() {
+        for lang in ["en", "ar"] { slidesGate(lang) }
+    }
+
+    private func slidesGate(_ lang: String) {
+        let ar = lang == "ar"
+        let phone = UIDevice.current.userInterfaceIdiom == .phone
+        let app = launch(["XR_KIND": "slide", "XR_BAR": "1", "XR_LANG": lang, "XR_NEW_NAME": "xr-slides-\(lang).pptx"])
+        let keep = continueAfterFailure
+        continueAfterFailure = true
+        defer { app.terminate(); continueAfterFailure = keep }
+        func gate(_ name: String, _ ok: Bool, _ detail: String = "") {
+            let line = "touch slides \(lang) \(name): \(ok ? "PASS" : "FAIL") \(detail)"
+            print("XR " + line)
+            XCTAssertTrue(ok, line)
+        }
+        func info(_ name: String, _ detail: String) { print("XR touch slides \(lang) \(name): INFO \(detail)") }
+        func any(_ id: String, label: String? = nil) -> XCUIElement {
+            let p = label == nil ? NSPredicate(format: "identifier == %@", id)
+                                 : NSPredicate(format: "identifier == %@ OR label == %@", id, label!)
+            return app.descendants(matching: .any).matching(p).firstMatch
+        }
+        func waitFor(_ timeout: TimeInterval, _ check: () -> Bool) -> Bool {
+            let end = Date().addingTimeInterval(timeout)
+            while Date() < end { if check() { return true }; Thread.sleep(forTimeInterval: 0.5) }
+            return check()
+        }
+        func thumb(_ i: Int) -> XCUIElement { app.buttons["xr-slide-thumb-\(i)"] }
+        func menuItem(_ id: String, _ en: String, _ arLabel: String) -> XCUIElement { any(id, label: ar ? arLabel : en) }
+
+        let ready = waitState(app, prefix: "ready", timeout: 120)
+        gate("editor-ready", ready == "ready", ready)
+        guard ready == "ready" else { return }
+        sleep(3)
+        shot(app, "60-slides-\(lang)-ready")
+        let back = app.buttons["xr-bar-back"]
+        let present = app.buttons["xr-bar-present"]
+        gate("present-button", present.waitForExistence(timeout: 10) && present.isHittable &&
+             // the nav bar draws its items 36 pt tall (its touch area is taller): the bar's own height, 44 pt wide
+             present.frame.width >= 44 && present.frame.height >= 36, "frame=\(present.frame)")
+
+        if phone {
+            let strip = any("xr-slide-strip")
+            gate("strip-shown", strip.waitForExistence(timeout: 15), "frame=\(strip.frame)")
+            gate("first-slide-current", thumb(0).waitForExistence(timeout: 10) && waitFor(10) { thumb(0).isSelected },
+                 "exists=\(thumb(0).exists)")
+            let add = app.buttons["xr-slide-add"]
+            gate("plus-target-44pt", add.waitForExistence(timeout: 5) && add.isHittable && add.frame.width >= 44 &&
+                 add.frame.height >= 44, "frame=\(add.frame)")
+            add.tap()
+            let layout = any("xr-slide-layout-0"), plain = any("xr-slide-layout-default")
+            var picker = waitFor(8) { layout.exists || plain.exists }
+            if !picker {
+                // seen once (CI, English, iPhone): the first tap right after opening landed while the strip redrew its
+                // first thumbnails - recorded on its own line, then tapped again as a person would
+                info("plus-first-tap-ignored", "the layout picker opened only after a second tap")
+                add.tap()
+                picker = waitFor(10) { layout.exists || plain.exists }
+            }
+            shot(app, "61-slides-\(lang)-layouts")
+            gate("plus-opens-layout-picker", picker, "layouts=\(layout.exists) default=\(plain.exists)")
+            if picker {
+                (layout.exists ? layout : plain).tap()
+                gate("layout-adds-slide-2", waitFor(15) { thumb(1).exists && thumb(1).isSelected },
+                     "slide 2 exists=\(thumb(1).exists)")
+            }
+            sleep(2)
+            shot(app, "62-slides-\(lang)-added")
+            if thumb(1).exists {
+                thumb(1).press(forDuration: 1.2)
+                let dup = menuItem("xr-slide-duplicate", "Duplicate", "\u{062A}\u{0643}\u{0631}\u{0627}\u{0631}")   // تكرار
+                let shown = dup.waitForExistence(timeout: 5)
+                shot(app, "63-slides-\(lang)-menu")
+                gate("long-press-menu", shown, "")
+                if shown { dup.tap() }
+                gate("duplicate-adds-slide-3", waitFor(15) { thumb(2).exists }, "slide 3 exists=\(thumb(2).exists)")
+            }
+            if thumb(2).exists {
+                thumb(2).press(forDuration: 1.2)
+                let del = menuItem("xr-slide-delete", "Delete", "\u{062D}\u{0630}\u{0641}")                       // حذف
+                let delShown = del.waitForExistence(timeout: 5)
+                if !delShown { info("delete-menu", "Delete not found in the long-press menu") }
+                if delShown { del.tap() }
+                gate("delete-removes-slide-3", waitFor(15) { !thumb(2).exists }, "slide 3 exists=\(thumb(2).exists)")
+            }
+            thumb(0).tap()
+            gate("tap-makes-slide-current", waitFor(10) { thumb(0).isSelected }, "")
+            // the strip makes way for the keyboard: two taps into the first slide's title (the first selects the box)
+            let web = app.webViews.firstMatch
+            let centre = web.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
+            centre.tap(); sleep(1); centre.tap()
+            if app.keyboards.firstMatch.waitForExistence(timeout: 5) {
+                gate("strip-hides-with-keyboard", waitFor(5) { !strip.exists }, "strip exists=\(strip.exists)")
+            } else {
+                info("strip-hides-with-keyboard", "no keyboard after two taps into the title - not checked")
+            }
+        }
+
+        // native Present
+        present.tap()
+        let overlay = any("xr-present-overlay")
+        var started = overlay.waitForExistence(timeout: 10)
+        if !started {
+            // seen once (CI, iPad, Arabic): the bar's first tap after the editor opened never reached the app (no
+            // "present start" in its log) - the same lost first tap the ⋯ menu test records; noted, then tapped again
+            info("present-first-tap-ignored", "the show started only after a second tap")
+            present.tap()
+            started = overlay.waitForExistence(timeout: 15)
+        }
+        sleep(2)
+        shot(app, "64-slides-\(lang)-present")
+        gate("present-starts", started, "")
+        gate("present-hides-nav-bar", waitFor(5) { !back.exists || !back.isHittable }, "back exists=\(back.exists)")
+        if phone {
+            gate("present-hides-strip", !any("xr-slide-strip").exists, "")
+            let before = (overlay.value as? String) ?? ""
+            overlay.tap()
+            let advanced = waitFor(8) { ((overlay.value as? String) ?? "").contains("2") }
+            gate("tap-advances", advanced, "value \(before) -> \((overlay.value as? String) ?? "-")")
+        }
+        let end = app.buttons["xr-present-end"]
+        gate("close-target-44pt", end.exists && end.frame.width >= 44 && end.frame.height >= 44, "frame=\(end.frame)")
+        end.tap()
+        gate("close-ends-show", waitFor(10) { !overlay.exists }, "")
+        gate("nav-bar-back", waitFor(10) { back.exists && back.isHittable }, "")
+        if phone { gate("strip-back-after-show", waitFor(10) { any("xr-slide-strip").exists }, "") }
+        shot(app, "65-slides-\(lang)-after-show")
+        // a double tap ends it as well
+        present.tap()
+        if overlay.waitForExistence(timeout: 15) {
+            sleep(2)
+            overlay.doubleTap()
+            gate("double-tap-ends-show", waitFor(10) { !overlay.exists }, "")
+        } else {
+            gate("double-tap-ends-show", false, "the show did not start again")
+        }
+        let saved = save(app)
+        gate("save", saved.hasPrefix("saved"), saved)
+    }
+
     private func waitLabel(_ app: XCUIApplication, _ id: String, prefix: String, timeout: TimeInterval) -> String {
         let label = app.staticTexts[id]
         let end = Date().addingTimeInterval(timeout)
