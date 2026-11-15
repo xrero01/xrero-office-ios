@@ -3,12 +3,13 @@ import UIKit
 import UniformTypeIdentifiers
 
 /// Opens documents over the home screen: new ones (written straight into "On My iPhone > Xrero Office"), files picked
-/// in the system document browser, files handed over by Files / Share ("Open in Xrero Office") and recent files.
+/// in the system document picker, files handed over by Files / Share ("Open in Xrero Office") and recent files.
 ///
 /// New documents are created by the app itself and opened by their file URL. The document browser's own
-/// create-and-import path fails on the app's very first launch (the system imports the new file, then cannot resolve
-/// the item it just imported: "Unable to Import Document", DocumentManager error 1).
-final class DocumentOpener: NSObject, ObservableObject, UIDocumentBrowserViewControllerDelegate {
+/// create-and-import path failed on the app's very first launch (the system imports the new file, then cannot resolve
+/// the item it just imported: "Unable to Import Document", DocumentManager error 1) - one reason the full-screen
+/// browser is gone (plan S9).
+final class DocumentOpener: NSObject, ObservableObject, UIDocumentPickerDelegate {
     /// Any controller in the home screen's window; documents are presented from the window's root.
     weak var anchor: UIViewController?
     private var pending: URL?                 // asked to open while the window or another document was not ready
@@ -19,6 +20,14 @@ final class DocumentOpener: NSObject, ObservableObject, UIDocumentBrowserViewCon
     /// The open editor and the controller that presented it.
     private weak var editorHost: UIViewController?
     private weak var editorPresenter: UIViewController?
+    /// New files this app made in this session (New, a template), not yet closed, with the bytes they were made
+    /// with (plan S9). Closed again without any change, such a file is removed - a tap on New by mistake or a look at a
+    /// template leaves no "Document 3" behind. Only these: a file the user brought (Browse, Recent, Open in, a file
+    /// this list once held and that was kept) is never deleted. Blank templates are a few KB.
+    private var fresh: [String: Data] = [:]
+    /// What the last picker was, for the Autotest harness (RealDocumentHarness): "<class> <style> presenter=<0|1>
+    /// types=<...>", then " picked" / " cancelled". Plain text, not published: nothing on Home shows it.
+    private(set) var lastPicker = ""
 
     private var root: UIViewController? {
         if let r = anchor?.view.window?.rootViewController { lastRoot = r; return r }
@@ -33,50 +42,113 @@ final class DocumentOpener: NSObject, ObservableObject, UIDocumentBrowserViewCon
     // MARK: entry points from the home screen
 
     func create(_ kind: OfficeKind) {
-        do { open(try NewDocuments.create(kind)) }
+        do { open(remember(try NewDocuments.create(kind))) }
         catch { alert(L.cannotCreate, error.localizedDescription) }
     }
 
     /// A new file from a gallery template (plan S8), opened in the editor at once.
     func create(from template: TemplateManifest.Template, lang: String) {
-        do { open(try NewDocuments.create(from: template, lang: lang)) }
+        do { open(remember(try NewDocuments.create(from: template, lang: lang))) }
         catch { alert(L.cannotCreate, error.localizedDescription) }
     }
 
-    /// The system document browser (Recents / Shared / Browse, like the Files app), optionally for one kind of file.
+    /// The system document picker (plan S9) - Recents / Shared / Browse like the Files app, optionally for one kind of
+    /// file - as a sheet over Home, with its standard Cancel: a page sheet on iPhone, a form sheet on iPad (which UIKit
+    /// itself turns into a page sheet in a narrow Split View or Slide Over window). Home stays visible behind it.
+    /// The file is opened where it is (asCopy: false - no copy in the app's folder), so its saves go back into it;
+    /// open() holds its security-scoped access while the editor is up, and Recent keeps a bookmark to it.
     func browse(_ types: [UTType] = [.docx, .xlsx, .pptx, .pdf]) {
         guard let root, !editorOpen else { return }
-        let browser = UIDocumentBrowserViewController(forOpening: types)
-        browser.allowsDocumentCreation = false
-        browser.allowsPickingMultipleItems = false
-        browser.delegate = self
-        browser.view.tintColor = .xrTeal
-        let done = UIBarButtonItem(systemItem: .close, primaryAction: UIAction { [weak browser] _ in
-            browser?.dismiss(animated: true)
-        })
-        done.accessibilityIdentifier = "xr-browser-close"
-        browser.additionalLeadingNavigationBarButtonItems = [done]
-        browser.modalPresentationStyle = .fullScreen
-        top(of: root).present(browser, animated: true)
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: false)
+        picker.allowsMultipleSelection = false
+        picker.shouldShowFileExtensions = true
+        picker.delegate = self
+        picker.view.tintColor = .xrTeal
+        let pad = UIDevice.current.userInterfaceIdiom == .pad
+        picker.modalPresentationStyle = pad ? .formSheet : .pageSheet
+        let what = "\(type(of: picker)) \(pad ? "formSheet" : "pageSheet")"
+        let kinds = types.map { $0.preferredFilenameExtension ?? $0.identifier }.joined(separator: ",")
+        lastPicker = what + " shown"
+        top(of: root).present(picker, animated: true) { [weak self] in
+            // the presenter's view is still in the window: a sheet over Home, not a full-screen cover
+            let behind = root.view.window != nil
+            self?.lastPicker = "\(what) presenter=\(behind ? 1 : 0) types=\(kinds)"
+            NSLog("XR picker %@", self?.lastPicker ?? "")
+        }
     }
 
     /// A document handed to the app by the system (Files "Open in", Share).
     func openExternal(_ url: URL) { open(url) }
 
-    // MARK: browser delegate
+    // MARK: picker delegate
 
-    func documentBrowser(_ controller: UIDocumentBrowserViewController, didPickDocumentsAt documentURLs: [URL]) {
-        guard let url = documentURLs.first else { return }
-        controller.dismiss(animated: true) { self.open(url) }
+    func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+        lastPicker += " picked"
+        guard let url = urls.first else { return }
+        // the picker closes itself after a pick: the editor is presented once it has gone, never during its slide
+        afterDismissal(of: controller) { self.open(url) }
     }
 
-    func documentBrowser(_ controller: UIDocumentBrowserViewController, didImportDocumentAt sourceURL: URL,
-                         toDestinationURL destinationURL: URL) {
-        controller.dismiss(animated: true) { self.open(destinationURL) }
+    func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+        lastPicker += " cancelled"
+        NSLog("XR picker cancelled")
     }
 
-    func documentBrowser(_ controller: UIDocumentBrowserViewController, failedToImportDocumentAt documentURL: URL, error: Error?) {
-        alert(L.cannotOpen, error?.localizedDescription ?? documentURL.lastPathComponent)
+    private final class Once { var done = false }
+
+    /// `then`, exactly once (a second open() would queue the same file again), as soon as `vc` has left the screen:
+    /// at once when it already has; else it is dismissed here unless its own dismissal is under way, and watched every
+    /// 0.1 s - 2 s at most, so a dismissal UIKit dropped never leaves the picked file unopened.
+    private func afterDismissal(of vc: UIViewController, _ then: @escaping () -> Void) {
+        let once = Once()
+        let finish = { if !once.done { once.done = true; then() } }
+        if vc.presentingViewController != nil && !vc.isBeingDismissed { vc.dismiss(animated: true) { finish() } }
+        watchDismissal(of: vc, n: 0, finish)
+    }
+
+    private func watchDismissal(of vc: UIViewController, n: Int, _ finish: @escaping () -> Void) {
+        if vc.presentingViewController == nil || n >= 20 { finish(); return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { self.watchDismissal(of: vc, n: n + 1, finish) }
+    }
+
+    // MARK: new files closed without a change (plan S9)
+
+    private static func key(_ url: URL) -> String { url.standardizedFileURL.resolvingSymlinksInPath().path }
+
+    /// A file just made by create(): remembered with its bytes until its editor closes.
+    private func remember(_ url: URL) -> URL {
+        fresh[Self.key(url)] = (try? Data(contentsOf: url)) ?? Data()
+        return url
+    }
+
+    /// The editor of `url` has closed (its UIDocument too). A file this app made in this session is removed when
+    /// nothing happened to it: the engine never reported an edit, nothing was saved into it, it was not renamed,
+    /// moved or duplicated (OpenDocumentModel.touched), it is still where it was made, and its bytes are still the
+    /// ones it was made with. Any doubt keeps the file. Its Recent row goes first, so Home never shows it.
+    private func closed(_ url: URL, _ model: OpenDocumentModel) {
+        guard let made = fresh.removeValue(forKey: Self.key(url)) else { return }     // the first close only
+        let here = Self.key(model.fileURL) == Self.key(url)
+        let same = !made.isEmpty && (try? Data(contentsOf: url)) == made
+        guard !model.touched, here, same else {
+            NSLog("XR new file kept: %@ (touched=%ld moved=%ld changed=%ld)", url.lastPathComponent,
+                  model.touched ? 1 : 0, here ? 0 : 1, same ? 0 : 1)
+            return
+        }
+        RecentFiles.shared.forget(url)
+        DispatchQueue.global(qos: .utility).async {
+            var cerr: NSError?
+            var removed = false
+            // coordinated, as every other write to a document: the Files app may be presenting the folder
+            NSFileCoordinator(filePresenter: nil).coordinate(writingItemAt: url, options: .forDeleting, error: &cerr) { u in
+                removed = (try? FileManager.default.removeItem(at: u)) != nil
+            }
+            let ok = removed && cerr == nil
+            DispatchQueue.main.async {
+                NSLog("XR untouched new file %@: %@", url.lastPathComponent, ok ? "removed" : "not removed")
+                // could not be removed: it stays a normal file, listed in Recent again
+                if !ok && FileManager.default.fileExists(atPath: url.path) { RecentFiles.shared.add(url) }
+            }
+        }
     }
 
     // MARK: opening
@@ -97,6 +169,7 @@ final class DocumentOpener: NSObject, ObservableObject, UIDocumentBrowserViewCon
             guard ok, let model = OpenDocumentModel(file: file) else {
                 if scoped { url.stopAccessingSecurityScopedResource() }
                 self.editorOpen = false
+                self.fresh.removeValue(forKey: Self.key(url))           // never shown: never removed by the app later
                 self.alert(L.cannotOpen, url.lastPathComponent)
                 return
             }
@@ -109,6 +182,7 @@ final class DocumentOpener: NSObject, ObservableObject, UIDocumentBrowserViewCon
                     // the editor is closed as far as opening the next file goes, whatever the animation does
                     self.editorOpen = false
                     NSLog("XR editor closed")
+                    self.closed(url, model)
                     self.dismissEditor { self.openPending() }
                 }
             })
@@ -219,6 +293,15 @@ final class RecentFiles: ObservableObject {
     func remove(_ item: Item) {
         items.removeAll { $0.id == item.id }
         save()
+    }
+
+    /// The row(s) of a file the app removed itself (an untouched new file, plan S9), compared in one form (/var vs
+    /// /private/var) as in replace().
+    func forget(_ url: URL) {
+        let p = url.standardizedFileURL.resolvingSymlinksInPath().path
+        let before = items.count
+        items.removeAll { $0.id == url.path || URL(fileURLWithPath: $0.id).standardizedFileURL.resolvingSymlinksInPath().path == p }
+        if items.count != before { save() }
     }
 
     /// The file's current location (it may have been moved or renamed since), nil when it is gone. A stale bookmark

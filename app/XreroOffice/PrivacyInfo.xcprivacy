@@ -50,7 +50,7 @@
 		<dict>
 			<!-- File timestamps (20.3, Home Recent, plan M8): the modification date of a recent file keys its cached
 			     first-page thumbnail, so an edited document gets a new picture. Only files in the app's own folder
-			     (C617.1) or files the user picked in the system document browser (3B52.1); never sent off the device.
+			     (C617.1) or files the user picked in the system document picker (3B52.1); never sent off the device.
 			     No other required-reason API: no system boot time, no disk space, no active keyboards. -->
 			<key>NSPrivacyAccessedAPIType</key>
 			<string>NSPrivacyAccessedAPICategoryFileTimestamp</string>

@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import UniformTypeIdentifiers
 
 #if XR_AUTOTEST
 /// CI only (build configuration "Autotest"). Opens one document straight in the editor so XCUITest can type into
@@ -600,17 +601,32 @@ private struct ProbeLabel: View {
 /// title menu, ⋯ menu, save on close), exactly as from Home. Back closes it again; "reopen" opens the first Recent
 /// entry by its bookmark, as Home's Recent row does. The test renames through the title menu, edits, saves and
 /// reopens; check_saved.py then finds the content in the renamed file and no file left at the old name.
+/// XR_REAL_IDLE=1 (plan S9): nothing opens at start; the buttons below do what Home's Browse files / Open a PDF /
+/// New document do (the same opener calls), "list" shows the office files in Documents and what the last picker was.
 struct RealDocumentHarness: View {
     @StateObject private var opener = DocumentOpener()
     @ObservedObject private var recents = RecentFiles.shared
     @State private var state = "starting"
+    @State private var files = "files:"
+    @State private var picker = "picker:none"
     private let name = ProcessInfo.processInfo.environment["XR_NEW_NAME"] ?? "xr-real.docx"
+    private let idle = ProcessInfo.processInfo.environment["XR_REAL_IDLE"] == "1"
 
     var body: some View {
         VStack(spacing: 12) {
             Text(state).accessibilityIdentifier("xr-state")
             Text(recents.items.first?.name ?? "none").accessibilityIdentifier("xr-real-recent")
             Button("reopen") { reopen() }.accessibilityIdentifier("xr-real-reopen")
+            if idle {
+                HStack(spacing: 16) {
+                    Button("browse") { opener.browse() }.accessibilityIdentifier("xr-real-browse")
+                    Button("pdf") { opener.browse([.pdf]) }.accessibilityIdentifier("xr-real-pdf")
+                    Button("new") { opener.create(.word) }.accessibilityIdentifier("xr-real-new")
+                    Button("list") { list() }.accessibilityIdentifier("xr-real-list")
+                }
+                Text(files).font(.system(size: 9)).accessibilityIdentifier("xr-real-files")
+                Text(picker).font(.system(size: 9)).accessibilityIdentifier("xr-real-picker")
+            }
         }
         .background(PresenterAnchor(opener: opener))
         .onAppear(perform: start)
@@ -624,6 +640,7 @@ struct RealDocumentHarness: View {
         if !FileManager.default.fileExists(atPath: url.path) {
             try? OfficeDocument.blank(kind).write(to: url, options: .atomic)
         }
+        if idle { state = "idle"; list(); return }       // the file is there for the picker to find
         state = "opened " + name
         opener.open(url)
     }
@@ -632,6 +649,15 @@ struct RealDocumentHarness: View {
         guard let item = recents.items.first, let url = recents.resolve(item) else { state = "no recent"; return }
         state = "reopened " + url.lastPathComponent
         opener.open(url)
+    }
+
+    /// "files:a.docx|b.xlsx" (office files only, sorted) and "picker:<DocumentOpener.lastPicker>".
+    private func list() {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let names = ((try? FileManager.default.contentsOfDirectory(atPath: docs.path)) ?? [])
+            .filter { OfficeKind(url: URL(fileURLWithPath: $0)) != nil }.sorted()
+        files = "files:" + names.joined(separator: "|")
+        picker = "picker:" + (opener.lastPicker.isEmpty ? "none" : opener.lastPicker)
     }
 }
 #endif

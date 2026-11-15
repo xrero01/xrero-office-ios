@@ -20,6 +20,7 @@ final class OpenDocumentModel: ObservableObject {
     @Published var document: OfficeDocument {
         didSet {
             guard document.data != oldValue.data else { return }
+            touched = true
             file.data = document.data
             file.updateChangeCount(.done)
             file.autosave(completionHandler: nil)
@@ -31,6 +32,15 @@ final class OpenDocumentModel: ObservableObject {
     @Published private(set) var fileURL: URL
     /// A place picked in Move… outside the app's own folder: held open while the document is (later saves go there).
     private var scopedURL: URL?
+    /// Something happened to the file beyond being looked at: the engine reported an edit (noteEdited), the editor
+    /// wrote into it, or it was renamed, moved or duplicated. A new file the app made in this session is removed on
+    /// close only while this is false (plan S9, DocumentOpener.closed). Sticky: an edit undone still counts.
+    /// A plain value, not published: it is set while typing (the first edit) and nothing on screen shows it.
+    private(set) var touched = false
+
+    /// The engine's "document modified" mark went on (EditorScreen: the "modified" 1 message, once per change of the
+    /// mark - O(1), it can arrive while typing).
+    func noteEdited() { touched = true }
 
     init?(file: OfficeFile) {
         guard let kind = OfficeKind(url: file.fileURL) else { return nil }
@@ -108,6 +118,7 @@ final class OpenDocumentModel: ObservableObject {
     /// move made by the system picker may not, so it is told here as well - the same URL twice is harmless), the
     /// screen shows the new name and Recent points at it.
     private func adopt(_ url: URL, from old: URL) {
+        touched = true
         let f = file
         if f.fileURL.standardizedFileURL != url.standardizedFileURL {
             f.presentedItemOperationQueue.addOperation { f.presentedItemDidMove(to: url) }
@@ -121,6 +132,7 @@ final class OpenDocumentModel: ObservableObject {
     /// beside it - in the app's own folder when that folder cannot be written. Listed in Recent right after the open
     /// file. `done` gets the copy's URL, nil when it could not be written.
     func duplicate(as base: String, done: @escaping (URL?) -> Void) {
+        touched = true
         let src = file.fileURL
         let ext = src.pathExtension
         let fm = FileManager.default

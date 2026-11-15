@@ -9,6 +9,7 @@ the touch / typing gate (plan M14 + F1, EditorUITests.testZZTouchGateCaretSelect
 PASS (or KNOWN: a reported app gap of the exact shape seen) for EN and AR (results also to out/qa/touch-gate.json), and its saved xr-touch-<lang>.docx must hold the sentence with the tapped-in letter inside it,
 the word typed after the Bold tap and the word typed after the keyboard bar's Bold (plan M5) in bold runs, and the
 5 Enter presses.
+The Files gate (plan S9) must find the typed new document kept and no untouched new document left behind.
 Every editor log must be free of 'missing AscDesktopEditor.*' lines (engine contract: a member the editors ask the
 shell for that xr-host.js does not define). Prints each editor log."""
 import json, os, re, sys, zipfile
@@ -382,6 +383,26 @@ def title_menu(d):
     return good
 
 
+def files_gate(d):
+    """Files (plan S9, EditorUITests.testFilesPickerSheetAndUntouchedNewFile, the real UIDocument path): the new
+    document typed into ("Kept") was kept, under the name the untouched new document before it had freed again by being
+    removed on close - so Document.docx holds "Kept" and no "Document 2.docx" (an untouched file left behind) exists."""
+    p = os.path.join(d, "Document.docx")
+    if not os.path.exists(p):
+        print("Document.docx: MISSING (Files: a new document typed into must be kept)")
+        return False
+    try:
+        s = text(p)
+    except Exception as e:
+        print("Document.docx: cannot read:", e)
+        return False
+    left = sorted(f for f in os.listdir(d) if re.match(r"Document \d+\.docx$", f))
+    good = "Kept" in s and not left
+    print("Document.docx (Files: new, typed into, kept): 'Kept' inside=%s  untouched new files left=%s  text=%r -> %s"
+          % ("Kept" in s, left or "none", s[:80], "OK" if good else "WRONG"))
+    return good
+
+
 def gallery(d):
     """The template gallery (plan S8, TemplateGalleryUITests): every template, EN + AR, was made from the gallery,
     opened and saved by the engine (an x2t round trip) under its name in that language; each saved copy still holds its
@@ -571,6 +592,7 @@ for dev in sorted(os.listdir(root)) if os.path.isdir(root) else []:
         print("ar_letter.pdf: MISSING (PDF edit + save)"); ok = False
     ok &= doc_menu(d)
     ok &= title_menu(d)
+    ok &= files_gate(d)
     ok &= gallery(d)
 if not (os.path.isdir(root) and os.listdir(root)):
     print("no saved files from any simulator"); ok = False

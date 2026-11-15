@@ -1,11 +1,12 @@
 import XCTest
 
 /// App Review screen recording (review-video.yml records the simulator while this runs). Drives the REAL app (Debug/Release
-/// configuration: the system document browser + editor, no test overlay) the way a user does: Home screen -> tap the icon
+/// configuration: the system document picker + editor, no test overlay) the way a user does: Home screen -> tap the icon
 /// -> home screen (the optional account card: Sign in opens the account, Not now hides it) > New document -> type English +
-/// Arabic with Bold -> Save -> close -> Home's Recent (search, context menu, swipe) -> open a spreadsheet and a presentation
-/// from Files -> switch the interface to Arabic in the editor's ⋯ > Language menu (Home follows) -> Settings > Xrero Office >
-/// Licences -> relaunch (no account card, still Arabic). Steps are best-effort (the recording
+/// Arabic with Bold -> Save -> close -> Home's Recent (search, context menu, swipe) -> Open a PDF (the picker as a sheet,
+/// Cancel) -> open a spreadsheet and a presentation from Files (Browse files: the picker sheet, plan S9) -> switch the
+/// interface to Arabic in the editor's ⋯ > Language menu (Home follows) -> Settings > Xrero Office > Licences ->
+/// relaunch (no account card, still Arabic). Steps are best-effort (the recording
 /// matters more than any single step); every step leaves a screenshot and the element tree when something is missing.
 final class ReviewVideoTests: XCTestCase {
 
@@ -98,7 +99,7 @@ final class ReviewVideoTests: XCTestCase {
         return false
     }
 
-    /// Back to the document browser with the editor's navigation (system back button of the document scene).
+    /// Back to Home with the editor's navigation (its Back button, "Documents").
     private func closeDocument() {
         let back = app.buttons.matching(NSPredicate(format: "label == 'Documents' OR label == 'المستندات'")).firstMatch
         let nav = back.exists ? back : app.navigationBars.buttons.element(boundBy: 0)
@@ -117,10 +118,18 @@ final class ReviewVideoTests: XCTestCase {
         return true
     }
 
-    /// Home > Browse files > Browse > On My iPhone > Xrero Office > <name>
+    /// The system document picker's standard Cancel (plan S9: a sheet over Home, not a full-screen browser).
+    private func pickerCancel() -> XCUIElement {
+        app.buttons.matching(NSPredicate(format: "label IN {'Cancel', 'Close'}")).firstMatch
+    }
+
+    /// Home > Browse files (the picker sheet) > Browse > On My iPhone > Xrero Office > <name>
     private func openFromFiles(_ name: String) -> Bool {
         if let h = find(app.buttons, "identifier == 'xr-home-browse'", timeout: 10) { h.tap(); pause(3) } else { dump("home-browse") }
-        // the browser slides in over the home screen: wait for its own tab bar, then Browse (tap again if still on Recents)
+        // the picker slides up as a sheet over Home, with its Cancel; then its Browse tab (tap again if still on Recents)
+        XCTAssertTrue(pickerCancel().waitForExistence(timeout: 15), "Browse files: no document picker with a Cancel")
+        print("XR picker over Home: home list still there=\(app.descendants(matching: .any).matching(identifier: "xr-home-list").firstMatch.exists)")
+        shot("picker-" + (name as NSString).deletingPathExtension)
         if let b = find(app.buttons, "label == 'Browse'", timeout: 15) {
             b.tap(); pause(2)
             if app.staticTexts["No Recents"].exists || !b.isSelected { b.tap(); pause(2) }
@@ -254,9 +263,24 @@ final class ReviewVideoTests: XCTestCase {
         shot("04-home")
         checkRecent()
 
+        // 3c. Open a PDF (plan S9): the system picker, PDFs only, as a sheet over Home; its Cancel goes back to Home
+        if let pdf = find(app.buttons, "identifier == 'xr-home-pdf'", timeout: 10) {
+            pdf.tap(); pause(2.5)
+            let cancel = pickerCancel()
+            XCTAssertTrue(cancel.waitForExistence(timeout: 15), "Open a PDF: no document picker with a Cancel")
+            shot("04e-pdf-picker")
+            if cancel.exists { cancel.tap() } else { dump("pdf-picker"); app.swipeDown() }
+            pause(2)
+            let home = app.buttons.matching(identifier: "xr-home-pdf").firstMatch
+            XCTAssertTrue(home.waitForExistence(timeout: 5) && home.isHittable, "Cancel in the PDF picker did not go back to Home")
+            shot("04f-pdf-picker-cancelled")
+        } else { XCTFail("no Open a PDF on Home"); dump("home-pdf") }
+
         var arabic = false                                          // step 6 switched the interface to Arabic
         // 4. A spreadsheet from Files: edit a cell, save
-        if openFromFiles("sales_en.xlsx") && waitEditor("sheet") {
+        let sheetPicked = openFromFiles("sales_en.xlsx")
+        XCTAssertTrue(sheetPicked, "the spreadsheet could not be opened from the document picker")
+        if sheetPicked && waitEditor("sheet") {
             app.webViews.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.45)).doubleTap()
             pause(1)
             typeSlowly("1250")
@@ -268,7 +292,9 @@ final class ReviewVideoTests: XCTestCase {
         }
 
         // 5. A presentation from Files: go through the slides
-        if openFromFiles("deck_en.pptx") && waitEditor("deck") {
+        let deckPicked = openFromFiles("deck_en.pptx")
+        XCTAssertTrue(deckPicked, "the presentation could not be opened from the document picker")
+        if deckPicked && waitEditor("deck") {
             let web = app.webViews.firstMatch
             for _ in 0..<3 {
                 web.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55)).press(forDuration: 0.05,
