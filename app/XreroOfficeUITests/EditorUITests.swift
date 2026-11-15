@@ -931,6 +931,15 @@ final class EditorUITests: XCTestCase {
         func cancelButton() -> XCUIElement {
             app.buttons.matching(NSPredicate(format: "label IN {'Cancel', 'Close'}")).firstMatch
         }
+        /// nothing presented over the screen any more (the harness's live label, read without a tap), 10 s at most
+        func nothingPresented() -> Bool {
+            let end = Date().addingTimeInterval(10)
+            while Date() < end {
+                if text("xr-real-picker").hasSuffix(" presented:none") { return true }
+                Thread.sleep(forTimeInterval: 0.3)
+            }
+            return false
+        }
 
         // 1. Browse files and Open a PDF: the system picker as a sheet over the screen, closed by its Cancel
         for (button, kind) in [("xr-real-browse", "files"), ("xr-real-pdf", "pdf")] {
@@ -944,12 +953,14 @@ final class EditorUITests: XCTestCase {
             let end = Date().addingTimeInterval(10)
             while Date() < end && (cancel.exists || !(listButton.exists && listButton.isHittable)) { Thread.sleep(forTimeInterval: 0.3) }
             XCTAssertFalse(cancel.exists, "the picker did not close on Cancel (\(kind))")
+            // gone for real: nothing left presented over the screen (an invisible leftover would swallow every tap)
+            XCTAssertTrue(nothingPresented(), "something is still presented after Cancel (\(kind)): \(text("xr-real-picker"))")
             XCTAssertTrue(listButton.exists && listButton.isHittable, "the screen behind the picker is not usable again (\(kind))")
             let r = list()
             print("XR files picker \(kind): \(r.picker)")
             let want = "picker:UIDocumentPickerViewController \(pad ? "formSheet" : "pageSheet") presenter=1"
             XCTAssertTrue(r.picker.hasPrefix(want), "not the document picker as a sheet (\(kind)): \(r.picker), want \(want)")
-            XCTAssertTrue(r.picker.hasSuffix(" cancelled"), "Cancel did not end the picker through its delegate (\(kind)): \(r.picker)")
+            XCTAssertTrue(r.picker.contains(" cancelled"), "Cancel did not end the picker through its delegate (\(kind)): \(r.picker)")
             if kind == "pdf" { XCTAssertTrue(r.picker.contains("types=pdf"), "Open a PDF offers more than PDFs: \(r.picker)") }
             shot(app, "71-files-\(kind)-cancelled")
         }
@@ -999,14 +1010,15 @@ final class EditorUITests: XCTestCase {
             shot(app, "73-files-picked-open")
             if closeEditor("picked") {
                 XCTAssertEqual(text("xr-real-recent"), "xr-pick.docx", "the picked file is not in Recent")
-                XCTAssertTrue(list().picker.hasSuffix(" picked"), "the picker did not report the pick")
+                XCTAssertTrue(list().picker.contains(" picked"), "the picker did not report the pick")
             }
         } else {
             shot(app, "73-files-pick-not-opened")
             let c = cancelButton()
             if c.exists { c.tap() } else if !listButton.exists { app.swipeDown() }
             _ = listButton.waitForExistence(timeout: 10)
-            sleep(2)
+            XCTAssertTrue(nothingPresented(), "the picker is still presented after Cancel: \(text("xr-real-picker"))")
+            sleep(1)
             let r = list()
             print("XR files pick: tapped=\(picked) nothing opened; \(r.picker)")
             // the picker handed the file over (its delegate said picked) and the app did not open it: the app's fault.

@@ -92,6 +92,14 @@ final class DocumentOpener: NSObject, ObservableObject, UIDocumentPickerDelegate
     func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
         lastPicker += " cancelled"
         NSLog("XR picker cancelled")
+        // the picker closes itself on Cancel. Should it stay presented (CI, iPad: Home stopped taking taps after the
+        // second picker's Cancel, with nothing visible over it), it is dismissed here - after its own dismissal had
+        // its chance to start, so a closing picker is never dismissed twice
+        DispatchQueue.main.async {
+            guard controller.presentingViewController != nil, !controller.isBeingDismissed else { return }
+            NSLog("XR picker still presented after Cancel - dismissing it")
+            controller.dismiss(animated: true)
+        }
     }
 
     private final class Once { var done = false }
@@ -109,6 +117,13 @@ final class DocumentOpener: NSObject, ObservableObject, UIDocumentPickerDelegate
     private func watchDismissal(of vc: UIViewController, n: Int, _ finish: @escaping () -> Void) {
         if vc.presentingViewController == nil || n >= 20 { finish(); return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { self.watchDismissal(of: vc, n: n + 1, finish) }
+    }
+
+    /// For the Autotest harness: what is presented over the window's root right now - "none", or its class, with
+    /// " dismissing" while it goes.
+    var presentedNow: String {
+        guard let p = root?.presentedViewController else { return "none" }
+        return "\(type(of: p))" + (p.isBeingDismissed ? " dismissing" : "")
     }
 
     // MARK: new files closed without a change (plan S9)

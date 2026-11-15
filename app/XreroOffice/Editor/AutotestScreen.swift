@@ -602,13 +602,14 @@ private struct ProbeLabel: View {
 /// entry by its bookmark, as Home's Recent row does. The test renames through the title menu, edits, saves and
 /// reopens; check_saved.py then finds the content in the renamed file and no file left at the old name.
 /// XR_REAL_IDLE=1 (plan S9): nothing opens at start; the buttons below do what Home's Browse files / Open a PDF /
-/// New document do (the same opener calls), "list" shows the office files in Documents and what the last picker was.
+/// New document do (the same opener calls), "list" shows the office files in Documents; a label refreshed every 0.5 s
+/// (no tap needed, so it also reports while something swallows taps) says what the last picker was and what is
+/// presented over the screen now.
 struct RealDocumentHarness: View {
     @StateObject private var opener = DocumentOpener()
     @ObservedObject private var recents = RecentFiles.shared
     @State private var state = "starting"
     @State private var files = "files:"
-    @State private var picker = "picker:none"
     @State private var listed = 0                   // "files#<n>:": the test sees that its tap refreshed the labels
     private let name = ProcessInfo.processInfo.environment["XR_NEW_NAME"] ?? "xr-real.docx"
     private let idle = ProcessInfo.processInfo.environment["XR_REAL_IDLE"] == "1"
@@ -626,7 +627,10 @@ struct RealDocumentHarness: View {
                     Button("list") { list() }.accessibilityIdentifier("xr-real-list")
                 }
                 Text(files).font(.system(size: 9)).accessibilityIdentifier("xr-real-files")
-                Text(picker).font(.system(size: 9)).accessibilityIdentifier("xr-real-picker")
+                TimelineView(.periodic(from: .now, by: 0.5)) { _ in
+                    Text("picker:" + (opener.lastPicker.isEmpty ? "none" : opener.lastPicker) + " presented:" + opener.presentedNow)
+                        .font(.system(size: 9)).accessibilityIdentifier("xr-real-picker")
+                }
             }
         }
         .background(PresenterAnchor(opener: opener))
@@ -652,14 +656,13 @@ struct RealDocumentHarness: View {
         opener.open(url)
     }
 
-    /// "files#<n>:a.docx|b.xlsx" (office files only, sorted) and "picker:<DocumentOpener.lastPicker>".
+    /// "files#<n>:a.docx|b.xlsx" (office files only, sorted).
     private func list() {
         listed += 1
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let names = ((try? FileManager.default.contentsOfDirectory(atPath: docs.path)) ?? [])
             .filter { OfficeKind(url: URL(fileURLWithPath: $0)) != nil }.sorted()
         files = "files#\(listed):" + names.joined(separator: "|")
-        picker = "picker:" + (opener.lastPicker.isEmpty ? "none" : opener.lastPicker)
     }
 }
 #endif
