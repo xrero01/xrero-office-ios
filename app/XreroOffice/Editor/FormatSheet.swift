@@ -19,6 +19,13 @@ final class FormatSheetModel: ObservableObject {
     /// false when the sheet closes for something that takes the screen next (photo picker, All tools) or inserts a
     /// table / page break: the keyboard then stays down instead of flashing up behind the next screen.
     var restoreKeyboard = true
+    /// Opened while the keyboard was up: the sheet is then modal (dimmed, no background interaction), so UIKit hides
+    /// the keyboard for it and gives it back on dismissal - its own input-view preservation, the path the About sheet
+    /// takes (CI: kb=true after it). A responder resigned by hand and taken back later is first responder again but
+    /// WebKit starts no input session for it: no keyboard (CI rounds 1-2: fr=true kb=false). Set before `shown`.
+    var modal = false
+    /// The software keyboard is on screen (keyboardWillShow / WillHide), for the check after the sheet came up.
+    var keyboardVisible = false
 }
 
 /// Format sheet words, EN + AR.
@@ -64,7 +71,9 @@ struct FormatSheetPresenter: ViewModifier {
                     .presentationCompactAdaptation(.sheet)          // iPhone: a real sheet...
                     .presentationDetents([.height(320), .large])     // ...at thumb height, or full
                     .presentationDragIndicator(.visible)
-                    .presentationBackgroundInteraction(.enabled(upThrough: .height(320)))
+                    // typing (keyboard was up): modal, see FormatSheetModel.modal; otherwise the page stays usable above
+                    .presentationBackgroundInteraction(model.modal ? .disabled : .enabled(upThrough: .height(320)))
+                    .onAppear { controller.formatShown() }
             }
             .onChange(of: model.shown) { _, shown in
                 if !shown { controller.formatClosed(restore: model.restoreKeyboard) }
@@ -73,7 +82,11 @@ struct FormatSheetPresenter: ViewModifier {
             // the page stays usable beside the 320 pt sheet: a tap there that brings the keyboard up means the user
             // wants to type - the sheet steps aside instead of sitting under the keyboard
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
-                if model.shown { model.shown = false }
+                model.keyboardVisible = true
+                if model.shown && !model.modal { model.shown = false }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+                model.keyboardVisible = false
             }
     }
 }

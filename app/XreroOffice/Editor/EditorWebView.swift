@@ -505,8 +505,9 @@ final class EditorController: ObservableObject {
     }
 
     /// Aa: opens the format sheet - never over a word still being composed (plan S1 risk): the marked text is
-    /// committed natively (UITextInput.unmarkText) and in the engine (__xrEndComposition), THEN the keyboard goes down
-    /// (the sheet opens at thumb height with the text visible above it, M14) and the sheet comes up.
+    /// committed natively (UITextInput.unmarkText) and in the engine (__xrEndComposition), THEN the sheet comes up.
+    /// With the keyboard up the sheet is modal and UIKit itself takes the keyboard down for it (the sheet opens at
+    /// thumb height with the text visible above it, M14) and brings it back on dismissal (FormatSheetModel.modal).
     func showFormat() {
         guard !formatSheet.shown, let web = coordinator?.web else { return }
         let owner = XRWebView.firstResponder(in: web)
@@ -518,23 +519,43 @@ final class EditorController: ObservableObject {
                 "marked text \(marked ? "committed" : "none"), engine composition: \((r as? String) ?? e ?? "?"))")
             self.keyboardOwner = owner
             self.formatBase = Self.topController(web.window)
-            _ = owner?.resignFirstResponder()
+            self.formatSheet.modal = owner != nil
             self.formatSheet.shown = true
         }
     }
 
-    /// The sheet closed (Done, swipe, tap outside the iPad popover): the keyboard and the caret come back where they
-    /// were when it was opened with the keyboard up (M14 rule). The engine kept its caret and its input field focus;
-    /// only the responder is handed back - the same thing UIKit does after a modal sheet. Not while the sheet is still
-    /// being dismissed: a responder taken back then is first responder again but UIKit's dismissal puts back the
-    /// input views it saved at presentation (none: the keyboard was down), so the keyboard never shows (CI round 1:
-    /// fr=true kb=false). It waits until the presenter is the top controller again and no transition runs.
-    /// `restore` false (photo, All tools, table, page break): the keyboard stays down - the next screen takes over.
+    /// The sheet is on screen. On a phone the keyboard must be down by now (UIKit hid it for the modal sheet); if it
+    /// is still up the responder is resigned by hand - the sheet is never left under the keyboard (that keyboard
+    /// would not come back by itself on close: see FormatSheetModel.modal; the log says which path ran).
+    func formatShown() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            guard let self, self.formatSheet.shown, let web = self.coordinator?.web else { return }
+            let phone = UIDevice.current.userInterfaceIdiom == .phone
+            let up = self.formatSheet.keyboardVisible
+            if phone && up, let r = XRWebView.firstResponder(in: web) { _ = r.resignFirstResponder() }
+            self.coordinator?.parent.onCommand("log", "format sheet: shown (keyboard \(up ? (phone ? "stayed up: resigned" : "stays up beside the popover") : "down"))")
+        }
+    }
+
+    /// The sheet closed (Done, swipe, tap outside): the keyboard and the caret come back where they were when it was
+    /// opened with the keyboard up (M14 rule). The engine kept its caret and its input field focus. UIKit gives the
+    /// keyboard back itself after a modal sheet; this only makes sure, once the dismissal is over (the presenter is
+    /// the top controller again, no transition), that the editor holds the responder again.
+    /// `restore` false (photo, All tools, table, page break): the keyboard goes down - the next screen takes over.
     func formatClosed(restore: Bool = true) {
         let saved = keyboardOwner, base = formatBase
         keyboardOwner = nil
         formatBase = nil
+        formatSheet.modal = false
         guard let owner = saved, restore else {
+            // now and once more after the dismissal: UIKit's restore after a modal sheet could bring the keyboard back
+            let down = { [weak self] in
+                if let web = self?.coordinator?.web, let r = XRWebView.firstResponder(in: web) { _ = r.resignFirstResponder() }
+            }
+            down()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                if self?.formatSheet.shown == false { down() }
+            }
             coordinator?.parent.onCommand("log", "format sheet: closed (\(saved == nil ? "keyboard was down" : "keyboard stays down"))")
             return
         }

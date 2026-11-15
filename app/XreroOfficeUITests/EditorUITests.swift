@@ -1323,7 +1323,13 @@ final class EditorUITests: XCTestCase {
         let f1 = probe(app)
         shot(app, "55b-touch-\(lang)-format-sheet")
         gate("fmt-sheet-opens", fmtShown, "Aa in the keyboard bar: \(aaShown) \(focusInfo(f0))")
-        gate("fmt-sheet-keyboard-down", fmtShown && !flag(f1, "fr"), focusInfo(f1))
+        // the keyboard is off the screen under the phone's sheet (UIKit may keep the responder: kb, not fr, is what the
+        // user sees); the iPad popover hangs from the top bar and may leave the keyboard up beside it
+        if UIDevice.current.userInterfaceIdiom == .pad && flag(f1, "kb") {
+            gate("fmt-sheet-keyboard-down", fmtShown, "iPad popover, keyboard stays up beside it: \(focusInfo(f1))")
+        } else {
+            gate("fmt-sheet-keyboard-down", fmtShown && !flag(f1, "kb"), focusInfo(f1))
+        }
         var sizes: [Double] = [fontSize()]
         if fmtShown {
             for b in [sizeUp, sizeDown] {
