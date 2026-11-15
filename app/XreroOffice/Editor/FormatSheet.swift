@@ -49,8 +49,10 @@ struct FormatSheetPresenter: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            // anchored under the top bar's trailing edge (where Aa sits; leading in Arabic, mirrored with the bar)
-            .popover(isPresented: $model.shown, attachmentAnchor: .point(.topTrailing), arrowEdge: .top) {
+            // anchored under the top bar's trailing edge, where Aa sits. UnitPoint is not mirrored by the layout
+            // direction (CI, iPad in Arabic: the popover hung on the right while Aa was on the left), so Arabic
+            // anchors on the left itself
+            .popover(isPresented: $model.shown, attachmentAnchor: .point(ar ? .topLeading : .topTrailing), arrowEdge: .top) {
                 FormatSheet(state: controller.state, controller: controller, ar: ar) { model.shown = false }
                     .frame(idealWidth: 375, idealHeight: 560)
                     .presentationCompactAdaptation(.sheet)          // iPhone: a real sheet...
