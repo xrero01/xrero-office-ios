@@ -2276,4 +2276,115 @@ final class EditorUITests: XCTestCase {
         let saved = save(app)
         gate("save", saved.hasPrefix("saved"), saved)
     }
+
+    // MARK: accessibility (plan S12)
+
+    /// Home and the editor's top bar at the largest accessibility text size (AX5), in English and Arabic: every key
+    /// control exists, is hittable, is at least 44 pt (bar items: 44 pt wide; on iOS 26 the bar draws 36 pt glass
+    /// capsules and extends the touch area itself, as in testTopBar), and has a VoiceOver label in the interface
+    /// language. The editor also shows the honest note that VoiceOver cannot read the drawn page (forced here:
+    /// the simulator cannot turn VoiceOver on), with a 44 pt Close.
+    func testA11yLargeTextHomeAndBar() {
+        continueAfterFailure = true                        // the Arabic half still reports when English fails
+        let ax5 = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        func arabic(_ s: String) -> Bool { s.unicodeScalars.contains { (0x0600...0x06FF).contains($0.value) } }
+        func latin(_ s: String) -> Bool { s.unicodeScalars.contains { $0.isASCII && CharacterSet.letters.contains($0) } }
+        var failures: [String] = [], lines: [String] = []
+        // scrolls the Home list by a slow drag on the list itself (app.swipeUp did not move it at AX5 on CI)
+        func scrollTo(_ app: XCUIApplication, _ e: XCUIElement) -> Bool {
+            let list = app.collectionViews["xr-home-list"].firstMatch
+            for _ in 0..<12 {
+                if e.exists && e.isHittable { return true }
+                guard list.exists else { break }
+                list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8))
+                    .press(forDuration: 0.05, thenDragTo: list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35)))
+                usleep(700_000)
+            }
+            return e.exists && e.isHittable
+        }
+        func check(_ app: XCUIApplication, _ id: String, _ where_: String, bar: Bool = false, hittable: Bool = true,
+                   lang: String) -> XCUIElement {
+            var e = app.buttons[id].firstMatch
+            if !e.exists { e = app.descendants(matching: .any)[id].firstMatch }
+            let found = (bar ? e.waitForExistence(timeout: 10) : scrollTo(app, e)) && e.exists
+            let f = found ? e.frame : .zero
+            let label = found ? e.label : ""
+            let minH: CGFloat = bar ? 35.5 : 43.5
+            var bad: [String] = []
+            if !found { bad.append("missing") }
+            if found && hittable && !e.isHittable { bad.append("not hittable") }
+            if found && (f.width < 43.5 || f.height < minH) { bad.append("small \(f.size)") }
+            if found && label.trimmingCharacters(in: .whitespaces).isEmpty { bad.append("no label") }
+            if found && lang == "ar" && !arabic(label) { bad.append("label not Arabic") }
+            if found && lang == "en" && (arabic(label) || !latin(label)) { bad.append("label not English") }
+            let line = "XR a11y \(where_) \(lang) \(id): \(bad.isEmpty ? "ok" : bad.joined(separator: ", ")) frame=\(f) label=\(label)"
+            print(line)
+            lines.append(line)
+            if !bad.isEmpty { failures.append(line) }
+            XCTAssertTrue(bad.isEmpty, line)
+            return e
+        }
+        for lang in ["en", "ar"] {
+            // Home (the real start screen; XR_HOME=1 in the Autotest build)
+            let home = XCUIApplication()
+            home.launchEnvironment = ["XR_HOME": "1"]
+            home.launchArguments = ["-xr.lang", lang, "-xr.welcomeShown", "NO"] + ax5
+            home.launch()
+            XCTAssertTrue(home.descendants(matching: .any)["xr-home-list"].waitForExistence(timeout: 30), "Home did not open (\(lang))")
+            sleep(1)
+            shot(home, "60-a11y-home-\(lang)-ax5")
+            _ = check(home, "xr-home-more", "home", bar: true, lang: lang)
+            // the account card's two buttons (stacked at AX5); not tapped, so nothing is stored in the simulator
+            _ = check(home, "xr-home-signin", "home", lang: lang)
+            _ = check(home, "xr-home-signin-later", "home", lang: lang)
+            // at accessibility sizes the create tiles stack in one column: the large text really is applied
+            // (one column = each tile about the window's width; in a row each is under a third of it)
+            let word = check(home, "xr-home-word", "home", lang: lang)
+            let wf = word.frame, screen = home.windows.firstMatch.frame
+            print("XR a11y home \(lang) word tile: \(wf) window: \(screen)")
+            XCTAssertGreaterThan(wf.width, screen.width * 0.5, "create tiles not in one column at AX5 (\(lang)): \(wf)")
+            _ = check(home, "xr-home-cell", "home", lang: lang)
+            _ = check(home, "xr-home-slide", "home", lang: lang)
+            _ = check(home, "xr-home-browse", "home", lang: lang)
+            _ = check(home, "xr-home-pdf", "home", lang: lang)
+            shot(home, "61-a11y-home-\(lang)-ax5-scrolled")
+            home.terminate()
+
+            // the editor under its native top bar, with the canvas note
+            let ed = XCUIApplication()
+            ed.launchEnvironment = ["XR_KIND": "word", "XR_BAR": "1", "XR_LANG": lang, "XR_NEW_NAME": "xr-a11y-\(lang).docx"]
+            ed.launchArguments = ["-xr.lang", lang, "-xr.canvasNote", "YES"] + ax5
+            ed.launch()
+            XCTAssertEqual(waitState(ed, prefix: "ready", timeout: 120), "ready", "editor did not become ready (\(lang))")
+            sleep(1)
+            shot(ed, "62-a11y-bar-\(lang)-ax5")
+            _ = check(ed, "xr-bar-back", "bar", bar: true, lang: lang)
+            _ = check(ed, "xr-bar-undo", "bar", bar: true, hittable: false, lang: lang)     // disabled: nothing to undo yet
+            _ = check(ed, "xr-bar-format", "bar", bar: true, lang: lang)
+            _ = check(ed, "xr-bar-more", "bar", bar: true, lang: lang)
+            // the bar stays one bar tall at AX5 (its text is capped; long-press shows the Large Content Viewer)
+            let nav = ed.navigationBars.firstMatch
+            print("XR a11y bar \(lang) navigation bar: \(nav.exists ? "\(nav.frame)" : "missing")")
+            if nav.exists { XCTAssertLessThanOrEqual(nav.frame.height, 140, "top bar grew with the text size (\(lang)): \(nav.frame)") }
+            // the honest note: VoiceOver cannot read the drawn page
+            let note = ed.staticTexts["xr-a11y-canvas-note"]
+            XCTAssertTrue(note.waitForExistence(timeout: 10), "no canvas accessibility note (\(lang))")
+            let noteText = note.exists ? note.label : ""
+            print("XR a11y note \(lang): \(noteText)")
+            XCTAssertTrue(noteText.contains("VoiceOver") && (lang == "ar" ? arabic(noteText) : !arabic(noteText)),
+                          "canvas note text (\(lang)): \(noteText)")
+            let close = check(ed, "xr-a11y-canvas-close", "note", lang: lang)
+            if close.exists && close.isHittable {
+                close.tap()
+                for _ in 0..<10 where note.exists { usleep(300_000) }
+                XCTAssertFalse(note.exists, "canvas note did not close (\(lang))")
+            }
+            shot(ed, "63-a11y-bar-\(lang)-note-closed")
+            ed.terminate()
+        }
+        let result = "XR a11y RESULT \(failures.isEmpty ? "PASS" : "FAIL (\(failures.count))")"
+        print(result)
+        let summary = XCTAttachment(string: (lines + [result]).joined(separator: "\n"))
+        summary.name = "a11y-summary"; summary.lifetime = .keepAlways; add(summary)
+    }
 }

@@ -51,6 +51,7 @@ struct EditorTopBar<More: View>: ViewModifier {
                                 Text(BarText.documents(ar)).lineLimit(1)
                             }
                             .fixedSize()                   // its whole width (CI: a capsule cut to 44 pt showed "ocum")
+                            .dynamicTypeSize(...DynamicTypeSize.accessibility1)   // the bar stays one bar tall (S12)
                         } else {
                             Image(systemName: "chevron.backward")
                                 .frame(minWidth: 44, minHeight: 44)
@@ -61,6 +62,8 @@ struct EditorTopBar<More: View>: ViewModifier {
                     // be compact when the bar is first laid out
                     .id(wide)
                     .accessibilityLabel(BarText.documents(ar))
+                    .accessibilityHint(A11yText.backHint(ar))
+                    .accessibilityShowsLargeContentViewer()        // capped text: long-press shows it large (S12)
                     .accessibilityIdentifier("xr-bar-back")
                 }
                 ToolbarItem(placement: .principal) {
@@ -81,6 +84,8 @@ struct EditorTopBar<More: View>: ViewModifier {
                     if format {
                         Button { controller.showFormat() } label: { FormatGlyph() }
                             .accessibilityLabel(FormatText.format(ar))
+                            .accessibilityHint(A11yText.formatHint(ar))
+                            .accessibilityShowsLargeContentViewer()
                             .accessibilityIdentifier("xr-bar-format")
                     }
                     // equatable: the menu is rebuilt only when what it shows changes (language, width, account...),
@@ -277,6 +282,8 @@ private struct UndoButton: View {
         }
         .disabled(!can)     // the bar's own disabled tint: an extra opacity would dim it twice
         .accessibilityLabel(redo ? BarText.redo(ar) : BarText.undo(ar))
+        .accessibilityHint(redo ? A11yText.redoHint(ar) : A11yText.undoHint(ar))
+        .accessibilityShowsLargeContentViewer()
         .accessibilityIdentifier(redo ? "xr-bar-redo" : "xr-bar-undo")
     }
 }
@@ -318,6 +325,8 @@ private struct MoreMenu<More: View>: View, Equatable {
                 .contentShape(Rectangle())
         }
         .accessibilityLabel(BarText.more(ar))
+        .accessibilityHint(A11yText.moreHint(ar))
+        .accessibilityShowsLargeContentViewer()
         .accessibilityIdentifier("xr-bar-more")
     }
 }

@@ -82,7 +82,8 @@ struct EditorScreen: View {
                         .accessibilityIdentifier("xr-toast")
                 }
             }
-            .animation(.easeInOut(duration: 0.2), value: toast)
+            .xrAnimation(.easeInOut(duration: 0.2), value: toast)         // none with Reduce Motion (S12)
+            .canvasAccessibilityNote(ar: lang == "ar")                   // S12: VoiceOver cannot read the page
             .saveAsCopy(formats: $saveAsFormats, lang: lang, controller: controller)
             // the editor's page has to reopen in the other language, which clears its undo history: say so first, in
             // the language being switched to (Home and this bar flip at once; the page follows after its save)

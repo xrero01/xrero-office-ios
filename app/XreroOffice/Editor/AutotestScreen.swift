@@ -73,6 +73,7 @@ struct AutotestScreen: View {
                 }
                 .documentMenuChrome(model: menu, kind: document.kind, name: name, size: document.data.count,
                                     fileURL: docs.appendingPathComponent(name), ar: lang == "ar")
+                .canvasAccessibilityNote(ar: lang == "ar")            // S12 (the test forces it: -xr.canvasNote YES)
             }
             .environment(\.layoutDirection, lang == "ar" ? .rightToLeft : .leftToRight)
             .background(UIKitLayoutDirection(rtl: lang == "ar"))

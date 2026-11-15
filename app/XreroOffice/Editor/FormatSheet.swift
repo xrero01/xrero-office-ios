@@ -106,6 +106,7 @@ struct FormatSheet: View {
     var close: (_ keyboard: Bool) -> Void
     @State private var tab = Tab.text
     @State private var showFonts = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     enum Tab: Hashable { case text, paragraph, insert }
 
@@ -199,7 +200,7 @@ struct FormatSheet: View {
             }
             card {
                 // font: the current one; a tap unfolds the list, each family drawn in itself
-                Button { withAnimation(.easeInOut(duration: 0.2)) { showFonts.toggle() } } label: {
+                Button { withAnimation(reduceMotion ? nil : Animation.easeInOut(duration: 0.2)) { showFonts.toggle() } } label: {
                     HStack {
                         Text(ar ? "الخط" : "Font").foregroundStyle(.primary)
                         Spacer()
