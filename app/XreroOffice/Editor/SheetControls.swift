@@ -161,7 +161,6 @@ struct SumSheet: View {
                                     .environment(\.layoutDirection, .leftToRight)
                                     .accessibilityIdentifier("xr-sum-value-" + row.id)
                             }
-                            .accessibilityElement(children: .combine)
                             Spacer(minLength: 8)
                             Button { insert(row.fn) } label: {
                                 Text(ar ? "إدراج أسفل" : "Insert below")

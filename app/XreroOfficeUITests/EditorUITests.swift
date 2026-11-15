@@ -1494,7 +1494,7 @@ final class EditorUITests: XCTestCase {
         }
         /// one formula key, tapped as a user taps it (scrolled to when the row overflows a narrow phone)
         func key(_ id: String) -> Bool {
-            let b = app.buttons["xr-fk-" + id]
+            let b = app.buttons["xr-fk-" + id].firstMatch
             guard b.waitForExistence(timeout: 5) else { return false }
             if !b.isHittable {
                 let row = app.scrollViews.containing(.button, identifier: "xr-fk-equals").firstMatch
@@ -1525,8 +1525,8 @@ final class EditorUITests: XCTestCase {
 
         // 3) the range through the chip; the Sum capsule shows its total (1,288; Western digits in both languages)
         let p2 = goTo("A1:A3")
-        let capsule = app.buttons["xr-sum"]
-        let hideKey = app.buttons["xr-fk-hide"]
+        let capsule = app.buttons["xr-sum"].firstMatch
+        let hideKey = app.buttons["xr-fk-hide"].firstMatch
         if flag(p2, "fr") && hideKey.exists && hideKey.isHittable { hideKey.tap() }
         let shown = capsule.waitForExistence(timeout: 10)
         let capLabel = shown ? capsule.label : ""
@@ -1538,14 +1538,14 @@ final class EditorUITests: XCTestCase {
         // 4) the capsule opens the sheet: Sum, Average, Min, Max, Count; 5) its Insert below writes =SUM(A1:A3) in A4
         if shown && capsule.isHittable {
             capsule.tap()
-            let avg = app.staticTexts["xr-sum-value-average"]
+            let avg = app.staticTexts["xr-sum-value-average"].firstMatch
             if avg.waitForExistence(timeout: 10) {
-                func v(_ id: String) -> String { let e = app.staticTexts["xr-sum-value-" + id]; return e.exists ? e.label : "-" }
+                func v(_ id: String) -> String { let e = app.staticTexts["xr-sum-value-" + id].firstMatch; return e.exists ? e.label : "-" }
                 let got = ["sum": v("sum"), "average": v("average"), "min": v("min"), "max": v("max"), "count": v("count")]
                 let ok = got["sum"] == "1,288" && got["average"] == "429.33" && got["min"] == "12" && got["max"] == "1,246" && got["count"] == "3"
                 gate("sum-sheet", ok, "values \(got)")
                 shot(app, "62-sheet-\(lang)-sum-sheet")
-                let ins = app.buttons["xr-sum-insert-sum"]
+                let ins = app.buttons["xr-sum-insert-sum"].firstMatch
                 if ins.exists && ins.isHittable { ins.tap() }
                 for _ in 0..<10 where avg.exists { usleep(500_000) }
             } else {
@@ -1563,7 +1563,7 @@ final class EditorUITests: XCTestCase {
         // 6) the formula keys build =MAX(A1:A3,A4) in B1 between typed letters, then ✓ commits
         _ = goTo("B1")
         let p4 = editBar()
-        let equals = app.buttons["xr-fk-equals"]
+        let equals = app.buttons["xr-fk-equals"].firstMatch
         let rowShown = equals.waitForExistence(timeout: 10) && equals.isHittable
         gate("fkeys-shown", rowShown, "row over the keyboard: \(rowShown) \(sinfo(p4))")
         var pressed: [String] = []
