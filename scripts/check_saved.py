@@ -9,6 +9,9 @@ the touch / typing gate (plan M14 + F1, EditorUITests.testZZTouchGateCaretSelect
 PASS (or KNOWN: a reported app gap of the exact shape seen) for EN and AR (results also to out/qa/touch-gate.json), and its saved xr-touch-<lang>.docx must hold the sentence with the tapped-in letter inside it,
 the word typed after the Bold tap and the word typed after the keyboard bar's Bold (plan M5) in bold runs, and the
 5 Enter presses.
+The window gate (plan S6, EditorUITests.testZZZZWindowLayoutAndKeyCommands) must log every check as PASS: the
+design follows the window (compact on the iPhone, regular on the full-screen iPad, compact for a narrow iPad window),
+Cmd+B from the hardware keyboard and the menu bar's Format > Bold each toggle Bold exactly once.
 Every editor log must be free of 'missing AscDesktopEditor.*' lines (engine contract: a member the editors ask the
 shell for that xr-host.js does not define). Prints each editor log."""
 import json, os, re, sys, zipfile
@@ -433,6 +436,32 @@ def gallery(d):
     return good
 
 
+WINDOW_CHECKS = ("editor-ready", "layout-follows-window", "live-narrow-class", "cmd-b-on-once", "cmd-b-off-once",
+                 "cmd-b-types-nothing", "menu-bold-once")
+
+
+def window_gate(d):
+    """plan S6: the gate lines testZZZZWindowLayoutAndKeyCommands logged (xr-window.docx, and on the iPad also the
+    narrow-window run xr-window-narrow.docx); every check must be PASS. A missing line = the test stopped early = fail."""
+    res = {}
+    for f in sorted(os.listdir(d)):
+        if f.startswith("xr-log-xr-window") and f.endswith(".txt"):
+            log = open(os.path.join(d, f), encoding="utf-8", errors="replace").read()
+            for m in re.finditer(r"^window-gate ([\w-]+): (PASS|FAIL|INFO)\s*(.*)$", log, re.M):
+                res[m.group(1)] = (m.group(2), m.group(3))
+    need = list(WINDOW_CHECKS)
+    if "layout1:regular" in res.get("layout-follows-window", ("", ""))[1]:   # the iPad: its narrow-window run too
+        need.append("ipad-narrow-window-compact")
+    good = True
+    print("Window gate (plan S6):")
+    for name in need + [k for k in res if k not in need]:
+        st, why = res.get(name, ("NOT LOGGED", ""))
+        print("  %-28s %-10s %s" % (name, st, why[:200]))
+        if (name in need and st != "PASS") or st == "FAIL":
+            good = False
+    return good
+
+
 root = sys.argv[1]
 ok = True
 def text(p):
@@ -572,6 +601,7 @@ for dev in sorted(os.listdir(root)) if os.path.isdir(root) else []:
     ok &= doc_menu(d)
     ok &= title_menu(d)
     ok &= gallery(d)
+    ok &= window_gate(d)
 if not (os.path.isdir(root) and os.listdir(root)):
     print("no saved files from any simulator"); ok = False
 try:   # out/qa/touch-gate.json beside out/saved: the gate's results per device + language (published in the evidence)

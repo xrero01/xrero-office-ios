@@ -69,9 +69,37 @@
 
   // Xrero header controls that need the Windows shell (account, PDF->Word converter, Designs): not on this platform.
   // EN/AR and Share stay: the app handles 'xrero:lang:<code>' and 'xrero:share'.
-  // iPad (and Mac "Designed for iPad" with touch): touch-sized rows, the full ribbon
-  var TABLET = Math.min(screen.width, screen.height) >= 600 &&
-    ((navigator.maxTouchPoints || 0) > 1 || /xrtouch/.test((function () { try { return top.location.search; } catch (e) { return ''; } })()));
+  // Plan S6: the design follows the WINDOW the editor opened in, not the device. The app passes layout=compact|regular
+  // (and platform=mac on a Mac) in the launcher page's query (EditorWebView.Coordinator.layout): compact = the phone
+  // design (an iPhone, or a window under 600 pt wide - iPad Split View / Slide Over, a small Stage Manager or Mac
+  // window), regular = the tablet design. Read from the top page in every frame, so the editor frame and the launcher
+  // (xr-editor.html, same rule) always agree. Without the parameter (the browser harness) the screen size decides,
+  // as before. The design is fixed for the page's life: later resizes only adjust CSS (markWindow below).
+  var TOPQ = (function () { try { return top.location.search; } catch (e) { return ''; } })();
+  var topParam = function (k) { var m = new RegExp('[?&]' + k + '=([^&]*)').exec(TOPQ); return m ? decodeURIComponent(m[1]) : ''; };
+  var LAYOUT = /^(compact|regular)$/.test(topParam('layout')) ? topParam('layout')
+    : (Math.min(screen.width, screen.height) < 600 ? 'compact' : 'regular');
+  var MAC = topParam('platform') === 'mac';
+  var PHONE = LAYOUT === 'compact';
+  // the regular design on a touch screen (iPad): touch-sized rows, the full ribbon. A Mac keeps pointer density.
+  var TABLET = LAYOUT === 'regular' && !MAC && ((navigator.maxTouchPoints || 0) > 1 || /xrtouch/.test(TOPQ));
+
+  // Plan S6, live resize: the page is never reloaded for a new window size (a reload loses undo and the selection),
+  // so a window resized after opening only gets CSS-level adjustments. html.xr-compact = the design the page opened
+  // with; html.xr-narrow = the window is under 600 pt NOW. Set at start and again at the end of a resize drag (300 ms
+  // quiet), never on the typing path; static CSS below (hideDesktopOnly) reacts to them.
+  function markWindow() {
+    var h = document.documentElement;
+    if (!h || !h.classList) return;
+    h.classList.toggle('xr-compact', PHONE);
+    h.classList.toggle('xr-narrow', window.innerWidth < 600);
+  }
+  markWindow();
+  document.addEventListener('DOMContentLoaded', markWindow);
+  (function () {
+    var t = 0;
+    window.addEventListener('resize', function () { clearTimeout(t); t = setTimeout(markWindow, 300); });
+  })();
 
   // portrait (or narrow) iPads: the settings panel on the right takes a third of the width - start every document
   // with it closed (the editors remember "closed by the user" per editor; the panel's side button still opens it).
@@ -173,7 +201,8 @@
               saveAsTiles());
     // phones: the status bar keeps what a finger needs (page/slide count, Present, zoom); the text-language picker,
     // spell-check toggle and fit-to-page/width icons go (pinch and the zoom buttons cover fitting)
-    if (Math.min(screen.width, screen.height) < 600) {
+    // (PHONE = the compact design: an iPhone or a narrow window, plan S6 - no longer the screen size)
+    if (PHONE) {
       // header: 46 pt tabs with 16 pt labels (the title row is hidden above: the app's top bar replaces it)
       css += '.toolbar .tabs>ul>li>a,.toolbar .tabs .ribtab>a{font-size:15px!important;line-height:46px!important;height:46px!important;' +
           'padding:0 12px!important}' +
@@ -291,7 +320,12 @@
             'margin-top:5px!important;padding-top:0!important;padding-bottom:0!important}' +
           '#statusbar #status-sheets-bar li:not(.icon-visible)>span{padding-left:14px!important;padding-right:14px!important}' +
           '#statusbar #status-sheets-bar li.active>span,#statusbar #status-sheets-bar li.selected>span{' +
-            'box-shadow:inset 0 -2px 0 var(--highlight-toolbar-tab-underline-spreadsheet,#1E9E5A)!important}');
+            'box-shadow:inset 0 -2px 0 var(--highlight-toolbar-tab-underline-spreadsheet,#1E9E5A)!important}') +
+        // plan S6 live resize: an iPad editor opened full width, then narrowed (Split View / Slide Over / Stage
+        // Manager) keeps its tablet design; only the tab row tightens so more tabs fit beside each other (the right
+        // panel closes through narrowWindow above; the ribbon's own overflow takes the groups that no longer fit)
+        'html.xr-narrow:not(.xr-compact) .toolbar .tabs>ul>li>a,html.xr-narrow:not(.xr-compact) .toolbar .tabs .ribtab>a{' +
+          'padding:0 9px!important;font-size:13px!important}';
     }
     var add = function () {
       if (document.getElementById('xr-host-css')) return;
@@ -312,7 +346,7 @@
   (function sheetTouch() {
     if (!/spreadsheeteditor/.test(location.pathname)) return;
     var css = '@media not all and (any-pointer:fine){#statusbar #status-math-box{display:none!important}}';
-    if (Math.min(screen.width, screen.height) < 600) {
+    if (PHONE) {                                   // the compact design (plan S6)
       css += 'body{--celleditor-height:44px!important;--celleditor-line-height:24px!important}' +
         '#cell-editing-box .ce-group-name{display:flex!important;align-items:center;height:44px!important}' +
         '#cell-editing-box #ce-cell-name{width:76px!important;height:36px!important;margin:0 4px!important;padding:0 8px!important;' +
@@ -1515,7 +1549,7 @@
   // the local-mode module installs its own versions after the base ones)
   // phones: touch-sized header rows. The editors lay their rows out with fixed heights (title 28, tabs 32) read from
   // InternalSettings when the viewport is built - set larger ones as soon as the settings exist, before that.
-  var PHONE = Math.min(screen.width, screen.height) < 600;
+  // (PHONE / TABLET: the design chosen from the window at open, top of this file - plan S6)
   function phoneHeights() {
     var S = window.Common && Common.Utils && Common.Utils.InternalSettings;
     if (!S || S.get('xr-phone')) return;

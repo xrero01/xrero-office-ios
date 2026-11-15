@@ -82,6 +82,9 @@ struct HomeScene: View {
             }) { ShareSheet(items: [$0.url]) }
         }
         .background(PresenterAnchor(opener: opener).frame(width: 0, height: 0))
+        // the menu bar on iPad / Mac (plan S6, XreroCommands): File > New Document / Spreadsheet / Presentation and
+        // Open… use this window's opener
+        .focusedSceneValue(\.xrHome, opener)
         .sheet(isPresented: $showAccount) { AccountView() }
         .onChange(of: account.isSignedIn) { _, signedIn in if signedIn { accountOffered = true } }
         .alert(ar ? "تعذّر العثور على الملف" : "File not found", isPresented: Binding(

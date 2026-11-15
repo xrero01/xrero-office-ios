@@ -233,6 +233,15 @@ final class XRWebView: WKWebView {
     }
     private var anchor: EditMenuAnchor?
 
+    /// Called each time the view enters a window: EditorWebView loads the editor page only then, because the page's
+    /// layout (compact / regular, plan S6) is chosen from the window's width.
+    var onWindow: (() -> Void)?
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window != nil { onWindow?() }
+    }
+
     override var inputAccessoryView: UIView? {
         guard let bar = keyboardBar else { return super.inputAccessoryView }
         // iPhone landscape (under 400 pt tall): the document needs every point; WebKit's slim bar keeps its Done

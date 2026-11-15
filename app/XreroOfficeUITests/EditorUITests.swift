@@ -2256,4 +2256,125 @@ final class EditorUITests: XCTestCase {
         let saved = save(app)
         gate("save", saved.hasPrefix("saved"), saved)
     }
+
+    /// Plan S6 window gate, iPhone and iPad. Runs last (a hardware-keyboard event must never come before the typing
+    /// tests). Every check is logged as "window-gate <check>: PASS|FAIL|INFO" into the editor log (check_saved.py) and
+    /// printed as "XR window ...":
+    /// - the design follows the WINDOW the editor opened in: compact (phone design, 46 pt tabs) on the iPhone, regular
+    ///   (tablet design, 40 pt tabs) in the full-screen iPad window; html.xr-narrow says whether the window is under
+    ///   600 pt now (the live CSS-level class); on the iPad a narrow window gets the compact design (XR_LAYOUT stands
+    ///   in for a Split View window, which CI cannot make);
+    /// - ⌘B from the hardware keyboard toggles Bold EXACTLY once - on and still on 2 s later, then off and still off
+    ///   (the menu bar's Format > Bold has no key equivalent, so the key reaches the editor alone) - and types nothing;
+    /// - the menu bar's Format > Bold action (XreroCommands -> EditorMenuTarget.bold) toggles it once too;
+    /// - ⌘W (File > Close) reaching the editor through the menu bar and focusedSceneValue: recorded (INFO).
+    func testZZZZWindowLayoutAndKeyCommands() {
+        let pad = UIDevice.current.userInterfaceIdiom == .pad
+        let keep = continueAfterFailure
+        continueAfterFailure = true                      // every check is recorded; one failure must not hide the others
+        defer { continueAfterFailure = keep }
+        var notes: [String] = []
+        func gate(_ name: String, _ ok: Bool, _ detail: String) {
+            let line = "window-gate \(name): \(ok ? "PASS" : "FAIL") \(detail)".replacingOccurrences(of: "\n", with: " ")
+            print("XR " + line)
+            notes.append(line)
+            XCTAssertTrue(ok, line)
+        }
+        func field(_ s: String, _ k: String) -> String {
+            guard let m = s.range(of: " " + k + "=") else { return "" }
+            return String(s[m.upperBound...].prefix { $0 != " " })
+        }
+        var run = 0
+        func layoutProbe(_ app: XCUIApplication) -> String {
+            run += 1
+            XCUIDevice.shared.system.open(URL(string: "xrero-autotest://layout?n=\(run)")!)
+            return waitState(app, prefix: "layout\(run):", timeout: 20)
+        }
+        func editorState(_ app: XCUIApplication) -> String {
+            let p = app.staticTexts["xr-editor-state"]
+            return p.exists ? p.label : "missing"
+        }
+        func bold(_ app: XCUIApplication) -> String {
+            editorState(app).components(separatedBy: " ").first { $0.hasPrefix("b:") }.map { String($0.dropFirst(2)) } ?? "?"
+        }
+        /// Bold reaches `want` within 5 s and is STILL `want` 2 s later (a second, late toggle would flip it back)
+        func boldSettles(_ app: XCUIApplication, _ want: String) -> (reached: Bool, after: String) {
+            var reached = false
+            for _ in 0..<20 { if bold(app) == want { reached = true; break }; usleep(250_000) }
+            sleep(2)
+            return (reached, bold(app))
+        }
+
+        // 1) the design follows the window
+        let app = launch(["XR_KIND": "word", "XR_NEW_NAME": "xr-window.docx"])
+        let ready = waitState(app, prefix: "ready", timeout: 120)
+        gate("editor-ready", ready == "ready", ready)
+        guard ready == "ready" else { autotest("note", notes.joined(separator: "\n")); return }
+        let web = app.webViews.firstMatch
+        XCTAssertTrue(web.waitForExistence(timeout: 10))
+        sleep(2)
+        let l1 = layoutProbe(app)
+        shot(app, "70-window-\(pad ? "regular" : "compact")")
+        let want = pad ? "regular" : "compact"
+        // the tab row: 46 pt in the phone design, 40 pt in the tablet one (a point either way for a border)
+        func tabs(_ s: String) -> Int { Int(field(s, "tabs")) ?? 0 }
+        gate("layout-follows-window", l1.hasPrefix("layout1:\(want) ") && field(l1, "compact") == (pad ? "0" : "1")
+             && abs(tabs(l1) - (pad ? 40 : 46)) <= 1, l1)
+        let narrowNow = (Int(field(l1, "w")) ?? 0) < 600
+        gate("live-narrow-class", field(l1, "narrow") == (narrowNow ? "1" : "0"), l1)
+
+        // 2) ⌘B from the hardware keyboard, on a selected word: Bold on exactly once, then off exactly once
+        tapFirstLine(app, fallback: CGVector(dx: 0.35, dy: pad ? 0.19 : 0.3))
+        sleep(1)
+        typeSlowly(app, "Keys")
+        sleep(1)
+        autotest("selectall")                            // the engine's Select All (asc_EditSelectAll), keyboard kept
+        let b0 = bold(app)
+        app.typeKey("b", modifierFlags: .command)
+        let on = boldSettles(app, "1")
+        shot(app, "71-window-cmd-b-on")
+        gate("cmd-b-on-once", b0 == "0" && on.reached && on.after == "1",
+             "before=\(b0) reached=\(on.reached) 2 s later=\(on.after) | \(editorState(app))")
+        app.typeKey("b", modifierFlags: .command)
+        let off = boldSettles(app, "0")
+        shot(app, "72-window-cmd-b-off")
+        gate("cmd-b-off-once", off.reached && off.after == "0",
+             "reached=\(off.reached) 2 s later=\(off.after) | \(editorState(app))")
+        XCUIDevice.shared.system.open(URL(string: "xrero-autotest://doctext")!)
+        let t = waitState(app, prefix: "doctext:", timeout: 15)
+        let text = t.dropFirst("doctext:".count).trimmingCharacters(in: .whitespacesAndNewlines)
+        gate("cmd-b-types-nothing", text == "Keys", "document text '\(text)'")
+
+        // 3) the menu bar's Format > Bold: the action XreroCommands runs toggles Bold once (on, then off)
+        autotest("menucmd?c=bold")
+        let m1 = boldSettles(app, "1")
+        autotest("menucmd?c=bold")
+        let m2 = boldSettles(app, "0")
+        gate("menu-bold-once", m1.reached && m1.after == "1" && m2.reached && m2.after == "0",
+             "on: reached=\(m1.reached) later=\(m1.after) off: reached=\(m2.reached) later=\(m2.after)")
+        // the results into the editor log now: ⌘W below may close the editor
+        autotest("note", notes.joined(separator: "\n"))
+        notes = []
+
+        // 4) File > Close ⌘W: the menu bar's key equivalent reaching this editor through focusedSceneValue (recorded)
+        app.typeKey("w", modifierFlags: .command)
+        let closed = waitState(app, prefix: "closed", timeout: 8)
+        print("XR window-gate cmd-w-close: INFO state=\(closed)")
+
+        // 5) iPad: a narrow window (Split View) gets the compact design on the same iPad screen
+        guard pad else { app.terminate(); return }
+        let app2 = launch(["XR_KIND": "word", "XR_NEW_NAME": "xr-window-narrow.docx", "XR_LAYOUT": "compact"])
+        let ready2 = waitState(app2, prefix: "ready", timeout: 120)
+        if ready2 == "ready" {
+            sleep(2)
+            let l2 = layoutProbe(app2)
+            shot(app2, "73-window-ipad-narrow-compact")
+            gate("ipad-narrow-window-compact", l2.hasPrefix("layout\(run):compact ") && field(l2, "compact") == "1"
+                 && abs(tabs(l2) - 46) <= 1, l2)
+        } else {
+            gate("ipad-narrow-window-compact", false, "editor not ready: \(ready2)")
+        }
+        autotest("note", notes.joined(separator: "\n"))
+        app2.terminate()
+    }
 }

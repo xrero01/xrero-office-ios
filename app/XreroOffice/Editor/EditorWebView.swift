@@ -62,6 +62,9 @@ struct EditorWebView: UIViewRepresentable {
         // implemented, so loading, the xrero:// / ascdesktop:// schemes and links keep WebKit's default behaviour.
         web.navigationDelegate = c
         controller.coordinator = c
+        // the page's design comes from the WINDOW (plan S6, Coordinator.layout): SwiftUI puts this view in its window
+        // only after makeUIView, so load() waits for it and runs again from here
+        web.onWindow = { [weak c] in c?.loadIfWaiting() }
         c.load()
         return web
     }
@@ -135,8 +138,40 @@ struct EditorWebView: UIViewRepresentable {
             DispatchQueue.main.asyncAfter(deadline: .now() + 40, execute: item)
         }
 
+        /// load() was asked for before the web view had a window (makeUIView): the window decides the layout.
+        private var waitingForWindow = false
+
+        /// The web view entered a window (XRWebView.onWindow): the first load runs now.
+        func loadIfWaiting() {
+            guard waitingForWindow else { return }
+            load()
+        }
+
+        /// Plan S6: the editor's design follows the WINDOW it opens in, not the device. "compact" (the phone design) on
+        /// an iPhone and in any window under 600 pt wide - iPad Split View / Slide Over, a small Stage Manager or Mac
+        /// window; "regular" (the tablet design) otherwise. Chosen when the page loads (also after a language switch
+        /// or a crash recovery, which reload it anyway); a later resize never reloads the editor, because a reload
+        /// loses undo and the selection - xr-host.js only adjusts CSS then (html.xr-narrow).
+        static func layout(for window: UIWindow?) -> String {
+            #if XR_AUTOTEST
+            // CI cannot make a Split View window: XR_LAYOUT stands in for a narrow iPad window (EditorUITests)
+            if let f = ProcessInfo.processInfo.environment["XR_LAYOUT"], f == "compact" || f == "regular" { return f }
+            #endif
+            if UIDevice.current.userInterfaceIdiom == .phone { return "compact" }
+            guard let w = window?.bounds.width, w > 0 else { return "regular" }
+            return w < 600 ? "compact" : "regular"
+        }
+
         func load(keepReloadCount: Bool = false) {
             guard let web else { return }
+            guard let window = web.window else {
+                // not in a window yet (makeUIView): XRWebView.onWindow brings this back. The language is noted now, so
+                // the view updates in between do not ask for the same load again.
+                waitingForWindow = true
+                loadedLang = parent.lang
+                return
+            }
+            waitingForWindow = false
             if !keepReloadCount { reloads = 0 }
             ready = false
             edited = false
@@ -157,10 +192,19 @@ struct EditorWebView: UIViewRepresentable {
                 ucc.addUserScript(WKUserScript(source: host, injectionTime: .atDocumentStart, forMainFrameOnly: false))
             }
             var c = URLComponents(string: "xrero://app/editors/web-apps/apps/api/documents/xr-editor.html")!
+            let layout = Self.layout(for: window)
             c.queryItems = [URLQueryItem(name: "doctype", value: parent.document.kind.rawValue),
                             URLQueryItem(name: "title", value: parent.title),
                             URLQueryItem(name: "lang", value: parent.lang),
-                            URLQueryItem(name: "theme", value: web.traitCollection.userInterfaceStyle == .dark ? "dark" : "light")]
+                            URLQueryItem(name: "theme", value: web.traitCollection.userInterfaceStyle == .dark ? "dark" : "light"),
+                            // plan S6: the phone or the tablet design (xr-editor.html, xr-host.js PHONE / TABLET);
+                            // a Mac keeps pointer density (no touch-sized rows)
+                            URLQueryItem(name: "layout", value: layout)]
+            let mac = ProcessInfo.processInfo.isiOSAppOnMac
+            if mac { c.queryItems?.append(URLQueryItem(name: "platform", value: "mac")) }
+            let note = "layout: \(layout) (window \(Int(window.bounds.width)) x \(Int(window.bounds.height)) pt\(mac ? ", Mac" : ""))"
+            let log = parent.onCommand
+            DispatchQueue.main.async { log("log", note) }       // after this view update (load() can run inside one)
             web.load(URLRequest(url: c.url!))
         }
 
@@ -634,6 +678,10 @@ final class EditorController: ObservableObject {
 
     /// ⋯ > Find: the editor's own Find & Replace panel.
     func find() { menuCall("find", "return window.__xrFind ? __xrFind() : 'no find';") }
+
+    /// File > Close in the menu bar (plan S6): the same way out as the editor's own close request (onRequestClose ->
+    /// 'close' in xr-editor.html): the screen saves when something changed, then goes back to the documents.
+    func close() { coordinator?.parent.onCommand("close", "") }
 
     /// ⋯ > All tools: the editor's File backstage (its File tab is hidden on touch).
     func allTools() { menuCall("all tools", "return window.__xrAllTools ? __xrAllTools() : 'no all tools';") }

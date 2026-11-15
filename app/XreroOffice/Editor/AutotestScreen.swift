@@ -371,9 +371,44 @@ struct AutotestScreen: View {
                     state = res
                 }
             }
+            if url.host == "layout" {           // window gate (plan S6): the design the page opened with (layout= from
+                                                // the app), the live classes xr-host.js keeps on the editor frame
+                                                // (html.xr-compact / xr-narrow) and the tab row's height, which tells
+                                                // the phone design (46 pt) from the tablet one (40 pt)
+                let n = (URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "n" }?.value ?? "")
+                    .filter(\.isNumber)
+                let js = """
+                (function(){var f=document.querySelector('iframe');var w=f&&f.contentWindow;var d=w&&w.document;
+                 if(!d||!d.body)return 'layout\(n):fail no editor';
+                 var m=/[?&]layout=([a-z]+)/.exec(location.search),c=d.documentElement.classList,
+                 t=d.querySelector('#toolbar .toolbar .box-tabs'),tb=d.querySelector('#toolbar .toolbar');
+                 return 'layout\(n):'+(m?m[1]:'none')+' compact='+(c.contains('xr-compact')?1:0)+' narrow='+(c.contains('xr-narrow')?1:0)+
+                  ' tabs='+(t?Math.round(t.getBoundingClientRect().height):0)+' folded='+(tb&&tb.classList.contains('folded')?1:0)+
+                  ' w='+w.innerWidth+' mac='+(/[?&]platform=mac/.test(location.search)?1:0);})()
+                """
+                controller.coordinator?.web?.evaluateJavaScript(js) { r, e in
+                    let res = (r as? String) ?? "layout\(n):fail " + (e?.localizedDescription ?? "no result")
+                    handle("log", res)
+                    state = res
+                }
+            }
+            if url.host == "menucmd" {          // window gate (plan S6): what the menu bar's Format > Bold / Italic /
+                                                // Underline and Edit > Find run (XreroCommands calls the same methods)
+                let c = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "c" }?.value ?? ""
+                let target = EditorMenuTarget(controller: controller, kind: document.kind)
+                switch c {
+                case "bold": target.bold()
+                case "italic": target.italic()
+                case "underline": target.underline()
+                case "find": target.find()
+                default: handle("log", "menucmd: unknown \(c)")
+                }
+            }
         }
         .sheet(isPresented: $showAbout) { AboutSheet() }
         .sheet(isPresented: $showAccount) { AccountView() }
+        // the menu bar (plan S6, XreroCommands) reaches this editor the way it reaches EditorScreen's
+        .focusedSceneValue(\.xrEditor, EditorMenuTarget(controller: controller, kind: document.kind))
     }
 
     /// Bridge check (20.3 F0): a native call reaches the engine and the engine's answer comes back through the state
@@ -424,7 +459,8 @@ struct AutotestScreen: View {
         let url = Bundle.main.resourceURL!.appendingPathComponent("web/xr-contract.json")
         guard let manifest = try? String(contentsOf: url, encoding: .utf8) else { state = "contract:fail no xr-contract.json"; return }
         let js = """
-        var M=\(manifest), kind='\(document.kind.rawValue)', device=Math.min(screen.width,screen.height)>=600?'tablet':'phone';
+        var M=\(manifest), kind='\(document.kind.rawValue)', lay=/[?&]layout=(compact|regular)/.exec(top.location.search),
+            device=lay?(lay[1]==='compact'?'phone':'tablet'):(Math.min(screen.width,screen.height)>=600?'tablet':'phone');
         var apps={word:'DE',cell:'SSE',slide:'PE',pdf:'PDFE'}, miss=[], n=0;
         function get(o,p){var a=p.split('.');for(var i=0;i<a.length;i++){if(o==null)return undefined;o=o[a[i]];}return o;}
         M.checks.forEach(function(c){
@@ -452,6 +488,7 @@ struct AutotestScreen: View {
         menu.note(cmd, param)
         switch cmd {
         case "ready": state = "ready"; tooLarge = false
+        case "close": state = "closed"       // the editor asked to close (File > Close in the menu bar, plan S6)
         case "modified": modified = param
         case "recovered":
             recovery = "recovered:" + param
