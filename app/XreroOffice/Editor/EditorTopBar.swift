@@ -15,8 +15,10 @@ import SwiftUI
 /// The ⋯ menu (plan M7b) starts with Find, Redo (compact width) and Save; the screen adds the rest of the document
 /// menu (`more` = DocumentMenuItems: Share, Export, Document info, Language, Account, About, All tools).
 ///
-/// Reading view (plan S2, ReadingView.swift): Word documents and PDFs get a trailing text button, Edit while reading and
-/// Done while editing, just before ⋯. While reading, Undo / Redo and Aa are not shown (nothing can be edited).
+/// Reading view (plan S2, ReadingView.swift): Word documents and PDFs get a trailing text button just before ⋯: Edit
+/// while reading, Done while editing. While reading, Undo / Redo and Aa are not shown (nothing can be edited). On a
+/// phone (compact width) Done is the first entry of ⋯ ("Reading View") instead: a fifth item in the bar left no room
+/// for the file name and its Edited / Saved line (CI: the title was dropped by the bar).
 struct EditorTopBar<More: View>: ViewModifier {
     var title: String
     var state: EditorState
@@ -92,14 +94,14 @@ struct EditorTopBar<More: View>: ViewModifier {
                                 .accessibilityIdentifier("xr-bar-format")
                         }
                     }
-                    if reading.available {
+                    if reading.available && (reading.reading || wide) {
                         ReadingButton(model: reading, ar: ar, action: toggleReading)
                     }
                     // equatable: the menu is rebuilt only when what it shows changes (language, width, account,
                     // reading...), never because the screen redrew - a menu rebuilt while it is open stays on screen
                     // with every tap ignored (CI: the dead ⋯ menu after Document info / Language)
-                    MoreMenu(key: menuKey, wide: wide, ar: ar, reading: reading.reading, state: state, find: find, save: save,
-                             redo: { undo(true) }, more: more)
+                    MoreMenu(key: menuKey, wide: wide, ar: ar, reading: reading.reading, canRead: reading.available,
+                             state: state, find: find, save: save, redo: { undo(true) }, toReading: toggleReading, more: more)
                         .equatable()
                 }
             }
@@ -194,6 +196,7 @@ enum BarText {
     static func pageNumber(_ ar: Bool) -> String { ar ? "رقم الصفحة" : "Page number" }
     static func go(_ ar: Bool) -> String { ar ? "انتقال" : "Go" }
     static func pageRange(_ n: Int, _ ar: Bool) -> String { ar ? "من 1 إلى \(n)" : "1 to \(n)" }
+    static func readingView(_ ar: Bool) -> String { ar ? "وضع القراءة" : "Reading View" }
 }
 
 /// What the title menu does (the screen's own actions; plan M4b).
@@ -312,22 +315,29 @@ private struct MoreMenu<More: View>: View, Equatable {
     var key: String
     var wide: Bool
     var ar: Bool
-    /// Reading view (plan S2): no Redo here while reading (nothing can be edited).
+    /// Reading view (plan S2): no Redo here while reading (nothing can be edited); on a phone, while editing, the
+    /// way back to reading ("Reading View", the bar's Done on wide widths) is the menu's first entry.
     var reading: Bool
+    var canRead: Bool
     var state: EditorState
     var find: (() -> Void)?
     var save: () -> Void
     var redo: () -> Void
+    var toReading: () -> Void
     var more: () -> More
 
     static func == (a: Self, b: Self) -> Bool {
-        a.key == b.key && a.wide == b.wide && a.ar == b.ar && a.reading == b.reading && (a.find == nil) == (b.find == nil)
-            && a.state === b.state
+        a.key == b.key && a.wide == b.wide && a.ar == b.ar && a.reading == b.reading && a.canRead == b.canRead
+            && (a.find == nil) == (b.find == nil) && a.state === b.state
     }
 
     var body: some View {
         Menu {
             Section {
+                if canRead && !reading && !wide {
+                    Button(action: toReading) { Label(BarText.readingView(ar), systemImage: "book") }
+                        .accessibilityIdentifier("xr-menu-reading")
+                }
                 if let find {
                     Button(action: find) { Label(BarText.find(ar), systemImage: "magnifyingglass") }
                         .accessibilityIdentifier("xr-menu-find")

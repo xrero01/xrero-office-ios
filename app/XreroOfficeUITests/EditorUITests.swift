@@ -886,6 +886,8 @@ final class EditorUITests: XCTestCase {
     func testReadingViewEditDoneThenType() throws {
         guard let b64 = ProcessInfo.processInfo.environment["XR_SAMPLE_B64"] else { throw XCTSkip("no sample passed") }
         continueAfterFailure = true                        // the Arabic half still reports when English fails
+        // iPad: Done is in the bar; iPhone: ⋯ > Reading View (the bar keeps the file name)
+        let wide = UIDevice.current.userInterfaceIdiom == .pad
         func launchReal(_ lang: String, _ file: String, _ bytes: String, setting: Bool = true) -> XCUIApplication {
             let app = XCUIApplication()
             app.launchArguments = ["-xr.lang", lang] + (setting ? [] : ["-xr.readingView", "NO"])
@@ -931,15 +933,34 @@ final class EditorUITests: XCTestCase {
             let reading = ["read=1", "view=1", "input=ro", "toolbar=0", "status=0", "app=1"]
             let editing = ["read=0", "view=0", "input=rw", "toolbar=1", "status=1", "app=0"]
             func editButton() -> XCUIElement { app.buttons["xr-bar-edit"] }
+            /// Edit (bar) / Done (bar on iPad, ⋯ > Reading View on iPhone)
+            func tapSwitch(_ toReading: Bool) {
+                if toReading && !wide {
+                    app.buttons["xr-bar-more"].tap()
+                    let item = app.buttons["xr-menu-reading"]
+                    if item.waitForExistence(timeout: 5) { item.tap() } else { XCTFail("no Reading View in ⋯ (\(lang))") }
+                } else {
+                    editButton().tap()
+                }
+            }
+            /// the bar after a switch: Edit while reading; Done while editing on iPad (none in the bar on iPhone); the
+            /// file name always there (a fifth item once pushed it out of the bar)
+            func checkBar(_ isReading: Bool, _ what: String) {
+                let label = editButton().exists ? editButton().label : "(none)"
+                if isReading || wide { XCTAssertEqual(label, isReading ? editWord : doneWord, "Edit / Done label \(what) (\(lang))") }
+                else { XCTAssertFalse(editButton().exists, "Done in the iPhone bar \(what) (\(lang)): it belongs in ⋯") }
+                XCTAssertTrue(app.staticTexts["xr-bar-title"].exists, "the file name left the bar \(what) (\(lang))")
+            }
             func toggle(_ toReading: Bool, _ i: Int) -> Bool {
                 let n0 = applied(snap("xr-read-probe"))
-                editButton().tap()
+                tapSwitch(toReading)
                 let s = waitRead(toReading ? reading : editing, after: n0)
                 let ok = (toReading ? reading : editing).allSatisfy { s.contains($0) } && applied(s) > n0
                 let label = editButton().exists ? editButton().label : "(none)"
-                print("XR read \(lang) switch \(i) -> \(toReading ? "reading" : "editing"): \(ok ? "PASS" : "FAIL") label=\(label) | \(s)")
+                print("XR read \(lang) switch \(i) -> \(toReading ? "reading" : "editing"): \(ok ? "PASS" : "FAIL") label=\(label) " +
+                      "title=\(app.staticTexts["xr-bar-title"].exists) | \(s)")
                 XCTAssertTrue(ok, "switch \(i) did not reach the editor (\(lang)): \(s)")
-                XCTAssertEqual(label, toReading ? editWord : doneWord, "Edit / Done label after switch \(i) (\(lang))")
+                checkBar(toReading, "after switch \(i)")
                 return ok
             }
             func saveNow() -> Bool {
@@ -1059,7 +1080,7 @@ final class EditorUITests: XCTestCase {
                 print("XR read en reopened after editing: \(s)")
                 shot(app, "76-read-en-reopened-editing")
                 XCTAssertTrue(editing.allSatisfy { s.contains($0) }, "a file left in editing did not reopen in editing: \(s)")
-                XCTAssertEqual(editButton().exists ? editButton().label : "", doneWord, "Done label after reopening in editing")
+                checkBar(false, "after reopening in editing")
                 _ = toggle(true, 12)
                 if reopen("reopened-reading") {
                     let r = waitRead(reading)
@@ -1098,7 +1119,7 @@ final class EditorUITests: XCTestCase {
             XCTAssertTrue(pe.contains("read=0"), "Edit did not reach the PDF editor: \(pe)")
             XCTAssertTrue(barShown, "no PDF tool bar after Edit")
             let n1 = applied(snap("xr-read-probe"))
-            editButton().tap()
+            tapSwitch(true)
             let pd = waitRead(["read=1", "toolbar=0", "app=1"], after: n1)
             for _ in 0..<10 where bar.exists { Thread.sleep(forTimeInterval: 0.5) }
             print("XR read pdf done: \(pd) | pdf bar=\(bar.exists)")

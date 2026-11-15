@@ -143,6 +143,7 @@
     { "kind": "controller", "name": "Toolbar", "path": "toolbar.isExpanded", "editors": ["word", "pdf"], "why": "reading view (S2): is a ribbon panel dropped" },
     { "kind": "controller", "name": "Toolbar", "path": "toolbar.processPanelVisible", "editors": ["word", "pdf"], "devices": ["tablet"], "why": "reading view (S2): the iPad ribbon measures its groups again when shown" },
     { "kind": "dom", "selector": "#toolbar", "editors": ["word", "pdf"], "why": "reading view (S2): the tab row + ribbon, hidden while reading" },
+    { "kind": "callback", "name": "asc_onChangeRestrictions", "why": "reading view (S2): the editor's own restriction change (DocProtection) while reading is followed" },
     { "kind": "dom", "selector": "#statusbar", "why": "touch status bar" },
     { "kind": "dom", "selector": "#toolbar .toolbar .box-tabs", "why": "touch ribbon (fitRibbon)" },
     { "kind": "dom", "selector": "#toolbar .toolbar .box-controls", "why": "touch ribbon (fitRibbon)" },

@@ -8,8 +8,9 @@ import UIKit
 ///
 /// What reading state is lives in the editor (web/xr-host.js "reading view"): the engine's own view restriction
 /// (asc_setRestriction, no reload - undo, selection and zoom stay), its keyboard input field read-only and the edit chrome
-/// hidden by CSS. The app's side: the Edit / Done button (EditorTopBar), Undo / Aa / the PDF tool bar hidden while
-/// reading, and a floating page capsule ("3 / 12") that fades 1.5 s after scrolling; a tap on it opens Go to Page.
+/// hidden by CSS. The app's side: the Edit / Done button (EditorTopBar; on a phone Done is ⋯ > Reading View, so the bar
+/// keeps the file name), Undo / Aa / the PDF tool bar hidden while reading, and a floating page capsule ("3 / 12") that
+/// fades 1.5 s after scrolling; a tap on it opens Go to Page.
 ///
 /// The mode is remembered per file (ReadingMemory): a file last left in editing reopens in editing. The setting
 /// "Open Files in Reading View" (Home ⋯ menu, UserDefaults "xr.readingView", default on) turns read-first opening off.
@@ -190,6 +191,9 @@ private struct PageCapsule: View {
                 .padding(.horizontal, 12)
                 .frame(minHeight: 28)
                 .background(.regularMaterial, in: Capsule())
+                // a hairline and a soft shadow: the material alone all but vanished on the grey canvas (CI shot)
+                .overlay(Capsule().strokeBorder(Color(uiColor: .separator), lineWidth: 0.5))
+                .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
                 .environment(\.layoutDirection, .leftToRight)
                 .frame(minWidth: 44, minHeight: 44)
                 .contentShape(Rectangle())

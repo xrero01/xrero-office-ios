@@ -1326,7 +1326,7 @@
   // editor's own DocProtection has applied the document's protection (a promise right after content-ready).
   // Never on the keystroke path: the only per-event cost is the reading check in the touch listeners (O(1)).
   var READS = /documenteditor|pdfeditor/.test(location.pathname), PDFED = /pdfeditor/.test(location.pathname);
-  var read = { on: false, want: H.read === '1', ready: false, prev: null, poll: 0, last: 0 };
+  var read = { on: false, want: H.read === '1', ready: false, prev: null, poll: 0, last: 0, setting: false, watching: false };
   (function readingCss() {
     if (!READS) return;
     var css = 'html.xr-read #toolbar,html.xr-read #statusbar{display:none!important}' +
@@ -1381,19 +1381,40 @@
     if (ic.isDisableKeyboard !== want) { ic.isDisableKeyboard = want; ic.setReadOnlyWrapper(false); }
     return ic.HtmlArea && ic.HtmlArea.readOnly ? 'ro' : 'rw';
   }
+  function readSet(api, v) {
+    read.setting = true;                                     // our own change: readWatch leaves it alone
+    try { api.asc_setRestriction(v); } finally { read.setting = false; }
+  }
   function readRestriction() {
     var api = window.__xrApi, R = window.Asc && Asc.c_oAscRestrictionType;
     if (!api || !R || !api.asc_setRestriction) return;
+    readWatch(api);
     var cur = typeof api.restrictions === 'number' ? api.restrictions : R.None;
     if (read.on) {
       if (read.prev === null) read.prev = cur;               // what the document had: put back on Edit
-      if (!(cur & R.View)) api.asc_setRestriction(cur | R.View);
+      if (!(cur & R.View)) readSet(api, cur | R.View);
     } else if (read.prev !== null) {
       var p = read.prev;
       read.prev = null;
-      if (cur !== p) api.asc_setRestriction(p);
+      if (cur !== p) readSet(api, p);
     }
     readKeyboard(read.on);
+  }
+  // The editor sets its own restriction after opening (DocProtection applies the document's protection at app:ready,
+  // which can come after this page's first reading switch - CI: a letter opened in reading state was writable again
+  // for a while) or when a protection changes. While reading, such a change is what the document wants on Edit (prev)
+  // and the view restriction + read-only input field are put back right after it (asc_setRestriction's checkViewMode
+  // resets the input field). Fires only on restriction changes, never per keystroke.
+  function readWatch(api) {
+    if (read.watching || !api.asc_registerCallback) return;
+    read.watching = true;
+    api.asc_registerCallback('asc_onChangeRestrictions', function (r) {
+      if (read.setting || !read.on) return;
+      if (typeof r === 'number') read.prev = r;
+      setTimeout(function () {
+        try { if (read.on) readRestriction(); } catch (e) { log('reading view: restriction', e && e.message || e); }
+      }, 0);
+    });
   }
   // the chrome's height goes to the page (and comes back): the editors' own window-resize path re-lays the viewport
   // out (hidden layout items take no room) and resizes the canvas. iPad: once the ribbon is shown again it is measured
@@ -1462,6 +1483,7 @@
   // engine one task later
   function readOpen() {
     read.ready = true;
+    if (READS && window.__xrApi) { try { readWatch(window.__xrApi); } catch (e) {} }
     if (!READS || !read.want) return;
     try { readChrome(true); readKeyboard(true); } catch (e) { log('reading view: open', e && e.message || e); }
     setTimeout(function () {
