@@ -198,6 +198,57 @@ def doc_menu(d):
     return good
 
 
+def gallery(d):
+    """The template gallery (plan S8, TemplateGalleryUITests): every template, EN + AR, was made from the gallery,
+    opened and saved by the engine (an x2t round trip) under its name in that language; each saved copy still holds its
+    template text, the Arabic ones are still right-to-left, the spreadsheets keep their formulas; the letters hold the
+    English (and, if the keyboard could type it, the Arabic) text typed into them, which the test also read back after
+    a relaunch."""
+    man = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "web", "templates", "gallery.json"),
+                         encoding="utf-8"))
+    good = True
+    typed_en, typed_ar = "Typed in template.", "كتابة في القالب"
+    for t in man["templates"]:
+        ext = t["file"]["en"].rsplit(".", 1)[1]
+        for lang in ("en", "ar"):
+            f = "%s.%s" % (t["name"][lang], ext)
+            p = os.path.join(d, f)
+            if not os.path.exists(p):
+                print("template %s (%s) %s: MISSING" % (t["id"], lang, f)); good = False; continue
+            try:
+                z = zipfile.ZipFile(p)
+                xml = {n: z.read(n).decode("utf-8", "replace") for n in z.namelist() if n.endswith(".xml")}
+                marker = t["marker"][lang]
+                if ext == "docx":
+                    s = text(p)
+                    kept = marker in s
+                    rtl, why = arabic_blank_docx(p, marker) if lang == "ar" else (True, "")
+                    extra = ""
+                    if t["id"] == "letter":
+                        flat = re.sub(r"[‎‏]", "", s)
+                        en, ar = typed_en in flat, typed_ar in flat
+                        extra = "  English typed=%s  Arabic typed=%s" % (en, ar)
+                        kept &= en
+                    g = kept and rtl
+                    print("template %s (%s) %s: template text kept=%s%s%s -> %s"
+                          % (t["id"], lang, f, marker in s, extra, ("  right-to-left: " + why) if lang == "ar" else "",
+                             "OK" if g else "WRONG"))
+                else:
+                    sheets = "".join(v for n, v in xml.items() if n.startswith("xl/worksheets/"))
+                    strings = "".join(xml.values())
+                    kept = marker in strings
+                    formulas = sheets.count("<f>") + sheets.count("<f ")
+                    rtl = re.search(r'<(?:\w+:)?sheetView[^>]*rightToLeft="(?:1|true)"', sheets) is not None
+                    g = kept and formulas >= 5 and (rtl or lang == "en")
+                    print("template %s (%s) %s: template text kept=%s formulas=%d%s -> %s"
+                          % (t["id"], lang, f, kept, formulas, ("  sheet right-to-left=%s" % rtl) if lang == "ar" else "",
+                             "OK" if g else "WRONG"))
+            except Exception as e:
+                g = False; print("template %s (%s) %s: cannot read: %s" % (t["id"], lang, f, e))
+            good &= g
+    return good
+
+
 root = sys.argv[1]
 ok = True
 def text(p):
@@ -331,6 +382,7 @@ for dev in sorted(os.listdir(root)) if os.path.isdir(root) else []:
     else:
         print("ar_letter.pdf: MISSING (PDF edit + save)"); ok = False
     ok &= doc_menu(d)
+    ok &= gallery(d)
 if not (os.path.isdir(root) and os.listdir(root)):
     print("no saved files from any simulator"); ok = False
 try:   # out/qa/touch-gate.json beside out/saved: the gate's results per device + language (published in the evidence)

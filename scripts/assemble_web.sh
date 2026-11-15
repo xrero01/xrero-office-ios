@@ -14,6 +14,11 @@ cp "$ROOT/web/xr-contract.json" "$OUT/xr-contract.json"
 # ar-SA ones, so a new file made while the app is in Arabic starts right-to-left; templates/en stay as packaged
 mkdir -p "$OUT/templates/ar"
 cp "$ROOT/web/templates/ar/new.docx" "$ROOT/web/templates/ar/new.xlsx" "$ROOT/web/templates/ar/new.pptx" "$OUT/templates/ar/"
+# the template gallery (plan S8, scripts/make_gallery_templates.py): EN + AR files and the manifest Home reads
+mkdir -p "$OUT/templates/en"
+cp -R "$ROOT/web/templates/en/gallery" "$OUT/templates/en/gallery"
+cp -R "$ROOT/web/templates/ar/gallery" "$OUT/templates/ar/gallery"
+cp "$ROOT/web/templates/gallery.json" "$OUT/templates/gallery.json"
 cp "$ROOT/web/xr-editor.html" "$OUT/editors/web-apps/apps/api/documents/xr-editor.html"
 mkdir -p "$OUT/x2t"
 cp "$ROOT/web/x2t-worker.js" "$ROOT/vendor/x2t-wasm/x2t.js" "$ROOT/vendor/x2t-wasm/x2t.wasm" "$OUT/x2t/"
@@ -40,4 +45,5 @@ test -f "$OUT/editors/sdkjs/word/sdk-all-min.js"
 test -f "$OUT/editors/web-apps/apps/pdfeditor/main/index.html"         # PDF editor (packages from 20.0.10 on)
 test -f "$OUT/editors/sdkjs/pdf/src/engine/drawingfile.wasm"
 test -f "$OUT/templates/en/new.docx" && test -f "$OUT/templates/ar/new.docx"
+test -f "$OUT/templates/gallery.json" && test -f "$OUT/templates/ar/gallery/letter.docx" && test -f "$OUT/templates/en/gallery/invoice.xlsx"
 du -sh "$OUT" "$OUT"/* | sort -h | tail -8

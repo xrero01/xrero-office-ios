@@ -1,0 +1,118 @@
+{
+ "version": 1,
+ "categories": [
+  {
+   "id": "business",
+   "name": {
+    "en": "Business",
+    "ar": "الأعمال"
+   }
+  },
+  {
+   "id": "finance",
+   "name": {
+    "en": "Finance",
+    "ar": "المالية"
+   }
+  },
+  {
+   "id": "personal",
+   "name": {
+    "en": "Personal",
+    "ar": "شخصي"
+   }
+  }
+ ],
+ "templates": [
+  {
+   "id": "letter",
+   "category": "business",
+   "kind": "word",
+   "thumbnail": "letter",
+   "name": {
+    "en": "Official letter",
+    "ar": "خطاب رسمي"
+   },
+   "file": {
+    "en": "en/gallery/letter.docx",
+    "ar": "ar/gallery/letter.docx"
+   },
+   "marker": {
+    "en": "Yours sincerely",
+    "ar": "وتفضلوا بقبول فائق الاحترام"
+   }
+  },
+  {
+   "id": "invoice",
+   "category": "finance",
+   "kind": "cell",
+   "thumbnail": "invoice",
+   "name": {
+    "en": "Tax invoice",
+    "ar": "فاتورة ضريبية"
+   },
+   "file": {
+    "en": "en/gallery/invoice.xlsx",
+    "ar": "ar/gallery/invoice.xlsx"
+   },
+   "marker": {
+    "en": "TAX INVOICE",
+    "ar": "فاتورة ضريبية"
+   }
+  },
+  {
+   "id": "cv",
+   "category": "personal",
+   "kind": "word",
+   "thumbnail": "cv",
+   "name": {
+    "en": "CV",
+    "ar": "السيرة الذاتية"
+   },
+   "file": {
+    "en": "en/gallery/cv.docx",
+    "ar": "ar/gallery/cv.docx"
+   },
+   "marker": {
+    "en": "Work experience",
+    "ar": "الخبرة العملية"
+   }
+  },
+  {
+   "id": "minutes",
+   "category": "business",
+   "kind": "word",
+   "thumbnail": "minutes",
+   "name": {
+    "en": "Meeting minutes",
+    "ar": "محضر اجتماع"
+   },
+   "file": {
+    "en": "en/gallery/minutes.docx",
+    "ar": "ar/gallery/minutes.docx"
+   },
+   "marker": {
+    "en": "Action items",
+    "ar": "المهام المطلوبة"
+   }
+  },
+  {
+   "id": "budget",
+   "category": "finance",
+   "kind": "cell",
+   "thumbnail": "budget",
+   "name": {
+    "en": "Monthly budget",
+    "ar": "الميزانية الشهرية"
+   },
+   "file": {
+    "en": "en/gallery/budget.xlsx",
+    "ar": "ar/gallery/budget.xlsx"
+   },
+   "marker": {
+    "en": "Monthly budget",
+    "ar": "الميزانية الشهرية"
+   }
+  }
+ ]
+}

@@ -31,9 +31,15 @@ struct AutotestScreen: View {
     private let name: String
     private let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
 
-    init() {
+    /// open: a file already in Documents (a template copy just made, TemplateAutotestRoot); XR_OPEN_NAME does the
+    /// same from the environment (the template test's reopen after a relaunch).
+    init(open: String? = nil) {
         let env = ProcessInfo.processInfo.environment
-        if let b64 = env["XR_DOC_B64"], let data = Data(base64Encoded: b64), let n = env["XR_DOC_NAME"] {
+        let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        if let n = open ?? env["XR_OPEN_NAME"], let data = try? Data(contentsOf: folder.appendingPathComponent(n)), !data.isEmpty {
+            _document = State(initialValue: OfficeDocument(data: data, kind: OfficeKind(url: URL(fileURLWithPath: n)) ?? .word))
+            name = n
+        } else if let b64 = env["XR_DOC_B64"], let data = Data(base64Encoded: b64), let n = env["XR_DOC_NAME"] {
             var d = OfficeDocument(kind: OfficeKind(rawValue: env["XR_KIND"] ?? "") ?? .word)
             d.data = data
             d.kind = OfficeKind(url: URL(fileURLWithPath: n)) ?? .word
@@ -112,6 +118,12 @@ struct AutotestScreen: View {
                 controller.coordinator?.web?.evaluateJavaScript(js) { r, _ in state = (r as? String) ?? "caret:none" }
             }
             if url.host == "about" { showAbout = true }      // About & Licences over the open editor
+            if url.host == "doctext" {          // template test (S8): the document's text after a reopen (Word only)
+                controller.call("var a=(this.Asc&&this.Asc.editor)||this.editor;var d=a&&a.WordControl&&a.WordControl.m_oLogicDocument;"
+                                + "return d&&d.GetText?String(d.GetText()).replace(/[\\s]+/g,' ').slice(0,500):'none';") { r, e in
+                    state = "doctext:" + ((r as? String) ?? (e ?? "none"))
+                }
+            }
             if url.host == "note",              // touch gate: the test's results into the editor log (check_saved.py)
                let t = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "t" })?.value {
                 for line in t.split(separator: "\n") { handle("log", String(line)) }
