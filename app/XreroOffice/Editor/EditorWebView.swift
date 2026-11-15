@@ -451,4 +451,44 @@ final class EditorController: ObservableObject {
     func save(onlyIfModified: Bool = false, then done: (() -> Void)? = nil) {
         if let c = coordinator { c.requestSave(onlyIfModified: onlyIfModified, then: done) } else { done?() }
     }
+    /// The user's own Save (the top bar's ⋯ > Save): the engine's asc_Save, the same as its Save button and Ctrl+S.
+    /// Unlike save() above (the shell's save entry point, which writes the file but leaves the engine's undo-history
+    /// save mark where it was), this one moves that mark, so the engine reports the document unchanged afterwards and
+    /// the bar can truthfully say Saved. Falls back to save() when the engine has no asc_Save.
+    func userSave() {
+        call("var a=window.__xrApi;if(a&&a.asc_Save){a.asc_Save();return 'ok';}return 'no asc_Save';") { [weak self] r, e in
+            let res = (r as? String) ?? e ?? "?"
+            self?.coordinator?.parent.onCommand("log", "user save request: " + res)
+            if res != "ok" { self?.save() }
+        }
+    }
+
+    // MARK: the ⋯ document menu (plan M7b; xr-host.js __xrFind / __xrAllTools / __xrExport / __xrDocInfo). Each one
+    // runs on its tap only and logs its answer (the CI checks read the log).
+
+    /// ⋯ > Find: the editor's own Find & Replace panel.
+    func find() { menuCall("find", "return window.__xrFind ? __xrFind() : 'no find';") }
+
+    /// ⋯ > All tools: the editor's File backstage (its File tab is hidden on touch).
+    func allTools() { menuCall("all tools", "return window.__xrAllTools ? __xrAllTools() : 'no all tools';") }
+
+    /// ⋯ > Export ▸ <ext>: a copy as it is on screen, back as an "export" message (share sheet). `done` gets the
+    /// editor's first answer ("ok" = the conversion runs).
+    func export(_ ext: String, done: ((String) -> Void)? = nil) {
+        let safe = ext.filter { $0.isLetter || $0.isNumber }
+        menuCall("export " + safe, "return window.__xrExport ? __xrExport('\(safe)') : 'no export';", done)
+    }
+
+    /// ⋯ > Document info: the counts arrive as a "docinfo" message.
+    func docInfo(done: ((String) -> Void)? = nil) {
+        menuCall("doc info", "return window.__xrDocInfo ? __xrDocInfo() : 'no doc info';", done)
+    }
+
+    private func menuCall(_ what: String, _ js: String, _ done: ((String) -> Void)? = nil) {
+        call(js) { [weak self] r, e in
+            let res = (r as? String) ?? e ?? "?"
+            self?.coordinator?.parent.onCommand("log", "menu \(what): " + res)
+            done?(res)
+        }
+    }
 }

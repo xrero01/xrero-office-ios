@@ -204,7 +204,10 @@ final class EditorUITests: XCTestCase {
         checkIPadLayout(app, name + "-rotated")       // asserts the panel is closed (rm<=100) in portrait
     }
 
-    /// Save the way a user does: the editor's own Save button; then Cmd+S; then the test hook.
+    /// Save the way a user does: the editor's own Save button (gone since M4a hid the title row), else the user's Save
+    /// the native bar's ⋯ > Save runs (controller.userSave = asc_Save, through a test URL: these tests keep the bar off
+    /// for their exact layout); the shell's save hook only as the last resort. Never Cmd+S: the simulator has no
+    /// hardware keyboard, so it types a literal "s" into the document.
     private func save(_ app: XCUIApplication) -> String {
         let labels = app.webViews.buttons.allElementsBoundByIndex.prefix(25).map { $0.label }
         print("XR web buttons:", labels)
@@ -214,9 +217,9 @@ final class EditorUITests: XCTestCase {
             let s = waitState(app, prefix: "saved", timeout: 30)
             if s.hasPrefix("saved") { print("XR save path: Save button"); return s }
         }
-        app.typeKey("s", modifierFlags: .command)
-        let s2 = waitState(app, prefix: "saved", timeout: 20)
-        if s2.hasPrefix("saved") { print("XR save path: Cmd+S"); return s2 }
+        XCUIDevice.shared.system.open(URL(string: "xrero-autotest://usersave")!)
+        let s2 = waitState(app, prefix: "saved", timeout: 30)
+        if s2.hasPrefix("saved") { print("XR save path: user save"); return s2 }
         XCUIDevice.shared.system.open(URL(string: "xrero-autotest://save")!)   // routed to the running app, no tapping
         let s3 = waitState(app, prefix: "saved", timeout: 30)
         if s3.hasPrefix("saved") { print("XR save path: test URL") }
@@ -252,6 +255,339 @@ final class EditorUITests: XCTestCase {
         checkChrome(app, "word", has: "English")
     }
 
+    /// The native top bar (plan M4a), iPhone and iPad, English in light then Arabic in dark: Back ("Documents"), the
+    /// file name, Undo, ⋯ (and Redo in the bar on iPad, in ⋯ on iPhone); the editors' own title row is gone (no web
+    /// Save / Undo buttons); the second line says nothing for an unchanged document, "Edited" after typing, and
+    /// "Saved" only once a save really completed; Undo / Redo reach the engine through the bridge (the state
+    /// channel's canRedo follows); Arabic mirrors the bar (Back on the right). Runs the editor under the bar
+    /// (XR_BAR=1) in its own document, so the typing tests keep their exact layout.
+    func testTopBar() {
+        continueAfterFailure = true                        // the Arabic / dark half still reports when English fails
+        let pad = UIDevice.current.userInterfaceIdiom == .pad
+        for (lang, dark) in [("en", false), ("ar", true)] {
+            let ar = lang == "ar"
+            let doc = "xr-bar-\(lang).docx"
+            let app = launch(["XR_KIND": "word", "XR_BAR": "1", "XR_LANG": lang, "XR_NEW_NAME": doc])
+            let ready = waitState(app, prefix: "ready", timeout: 120)
+            XCTAssertEqual(ready, "ready", "editor did not become ready (\(lang))")
+            if dark { XCUIDevice.shared.system.open(URL(string: "xrero-autotest://appearance?dark=1")!); sleep(3) }
+            let name = lang + (dark ? "-dark" : "-light")
+            let probe = app.staticTexts["xr-editor-state"]
+            let status = app.staticTexts["xr-bar-status"]
+            let savedWord = ar ? "محفوظ" : "Saved", editedWord = ar ? "معدَّل" : "Edited"
+            // one snapshot per read: the line can go away between an `exists` and a `label` (that would fail the test)
+            func statusNow() -> String { (try? status.firstMatch.snapshot())?.label ?? "(none)" }
+            func waitStatus(_ want: String, _ timeout: TimeInterval) -> String {
+                let end = Date().addingTimeInterval(timeout)
+                while Date() < end {
+                    if statusNow() == want { return want }
+                    Thread.sleep(forTimeInterval: 0.3)
+                }
+                return statusNow()
+            }
+            func waitProbe(_ part: String, _ timeout: TimeInterval) -> Bool {
+                let end = Date().addingTimeInterval(timeout)
+                while Date() < end {
+                    if ((try? probe.firstMatch.snapshot())?.label ?? "").contains(part) { return true }
+                    Thread.sleep(forTimeInterval: 0.3)
+                }
+                return false
+            }
+            let back = app.buttons["xr-bar-back"], undo = app.buttons["xr-bar-undo"], more = app.buttons["xr-bar-more"]
+            let title = app.staticTexts["xr-bar-title"]
+
+            // the bar as opened: one Back, the name, Undo (nothing to undo yet), ⋯; Redo in the bar on iPad only
+            XCTAssertTrue(back.waitForExistence(timeout: 10), "no Back in the top bar (\(name))")
+            XCTAssertEqual(back.label, ar ? "المستندات" : "Documents", "Back label (\(name))")
+            // iPad: "Documents" is written next to the chevron (a wider button than the chevron alone)
+            if pad { XCTAssertGreaterThan(back.frame.width, 70, "iPad Back shows no 'Documents' text (\(name)): \(back.frame)") }
+            XCTAssertTrue(title.exists && title.label == "xr-bar-\(lang)", "title (\(name)): \(title.exists ? title.label : "missing")")
+            XCTAssertTrue(undo.exists, "no Undo in the top bar (\(name))")
+            XCTAssertFalse(undo.isEnabled, "Undo enabled with nothing to undo (\(name))")
+            XCTAssertTrue(more.exists, "no ⋯ menu in the top bar (\(name))")
+            XCTAssertEqual(app.buttons["xr-bar-redo"].exists, pad, "Redo in the bar: iPad only (\(name))")
+            XCTAssertNotEqual(statusNow(), savedWord, "'Saved' before any save (\(name))")
+            // 44 pt targets: at least 44 pt wide; on iOS 26 the bar draws its buttons as 36 pt glass capsules and
+            // extends their touch area over the whole bar height itself, so the reported height may be 36
+            for (id, e) in [("back", back), ("undo", undo), ("more", more)] {
+                XCTAssertGreaterThanOrEqual(e.frame.width, 43.5, "\(id) is narrower than 44 pt (\(name)): \(e.frame)")
+                XCTAssertGreaterThanOrEqual(e.frame.height, 35.5, "\(id) is too short (\(name)): \(e.frame)")
+            }
+            // the editors' title row is gone: no web Save / Undo buttons (the native bar replaces them)
+            let webTitle = app.webViews.buttons.matching(NSPredicate(format:
+                "label BEGINSWITH[c] 'Save' OR label BEGINSWITH 'حفظ' OR label BEGINSWITH[c] 'Undo' OR label BEGINSWITH 'تراجع'"))
+            XCTAssertEqual(webTitle.count, 0, "the editor's own title row is still shown (\(name)): \(webTitle.allElementsBoundByIndex.map { $0.label })")
+            // mirrored as one piece: Back leads (left in English, right in Arabic), Undo / ⋯ trail
+            if ar { XCTAssertGreaterThan(back.frame.midX, undo.frame.midX, "Arabic bar not mirrored: Back \(back.frame) Undo \(undo.frame)") }
+            else { XCTAssertLessThan(back.frame.midX, undo.frame.midX, "English bar order: Back \(back.frame) Undo \(undo.frame)") }
+            print("XR bar \(name): back=\(back.frame) undo=\(undo.frame) more=\(more.frame) title=\(title.frame) status=\(statusNow())")
+            shot(app, "50-bar-\(name)-opened")
+
+            // typing -> "Edited", Undo enabled
+            tapFirstLine(app, fallback: CGVector(dx: 0.35, dy: pad ? 0.19 : 0.3))
+            sleep(2)
+            typeSlowly(app, ar ? "\u{0634}\u{0631}\u{064A}\u{0637} \u{0623}\u{0639}\u{0644}\u{0649}" : "Top bar test")   // شريط أعلى
+            XCTAssertEqual(waitStatus(editedWord, 10), editedWord, "no 'Edited' after typing (\(name))")
+            XCTAssertTrue(waitProbe("undo:1", 10), "no undo after typing (\(name)): \(probe.label)")
+            XCTAssertTrue(undo.isEnabled, "Undo still disabled after typing (\(name))")
+            shot(app, "51-bar-\(name)-edited")
+
+            // Undo through the bridge: something to redo now; Redo (bar on iPad, ⋯ on iPhone) takes it back
+            undo.tap()
+            XCTAssertTrue(waitProbe("redo:1", 10), "Undo did not reach the engine (\(name)): \(probe.label)")
+            print("XR bar \(name) after undo: \(probe.label)")
+            if pad {
+                app.buttons["xr-bar-redo"].tap()
+            } else {
+                more.tap()
+                let redo = app.buttons["xr-bar-redo"]
+                XCTAssertTrue(redo.waitForExistence(timeout: 5), "no Redo in ⋯ (\(name))")
+                shot(app, "52-bar-\(name)-menu")
+                redo.tap()
+            }
+            XCTAssertTrue(waitProbe("redo:0", 10), "Redo did not reach the engine (\(name)): \(probe.label)")
+            print("XR bar \(name) after redo: \(probe.label)")
+            XCTAssertNotEqual(statusNow(), savedWord, "'Saved' without a save (\(name))")
+
+            // Save from ⋯ -> the file is written -> "Saved"
+            more.tap()
+            let save = app.buttons["xr-bar-save"]
+            XCTAssertTrue(save.waitForExistence(timeout: 5), "no Save in ⋯ (\(name))")
+            if pad { shot(app, "52-bar-\(name)-menu") }
+            save.tap()
+            let saved = waitState(app, prefix: "saved", timeout: 40)
+            XCTAssertTrue(saved.hasPrefix("saved"), "Save in ⋯ did not save (\(name)): \(saved)")
+            let line = waitStatus(savedWord, 10)
+            print("XR bar \(name) saved: \(saved) status=\(line)")
+            XCTAssertEqual(line, savedWord, "no 'Saved' after the save (\(name))")
+            shot(app, "53-bar-\(name)-saved")
+            if !dark {                                     // the same bar in dark (Arabic runs in dark throughout)
+                XCUIDevice.shared.system.open(URL(string: "xrero-autotest://appearance?dark=1")!)
+                sleep(3)
+                shot(app, "54-bar-\(lang)-dark")
+            }
+            app.terminate()
+        }
+    }
+
+    /// The ⋯ document menu (plan M7b), one check per entry, under the native bar (XR_BAR=1), English in light then
+    /// Arabic in dark: the web File tab is hidden on touch; ⋯ lists Find, Save (+ Redo on iPhone), Share, Export,
+    /// Document info, Language, Account, About, All tools - and no PDF / Print. Find opens the editor's Find panel;
+    /// Document info opens a native sheet with the editor's counts; Export ▸ .docx / .odt / .rtf each write a copy
+    /// (check_saved.py opens them: the text inserted here must be inside); About and Account open their sheets;
+    /// Language ▸ offers both languages; All tools opens the File backstage. Last, the PDF spike (log only, see
+    /// check_saved.py): can this converter write a PDF at all?
+    func testDocumentMenu() {
+        continueAfterFailure = true                        // the Arabic half still reports when English fails
+        let pad = UIDevice.current.userInterfaceIdiom == .pad
+        for (lang, dark) in [("en", false), ("ar", true)] {
+            let ar = lang == "ar"
+            let base = "xr-menu-\(lang)"
+            let app = launch(["XR_KIND": "word", "XR_BAR": "1", "XR_LANG": lang, "XR_NEW_NAME": base + ".docx"])
+            XCTAssertEqual(waitState(app, prefix: "ready", timeout: 120), "ready", "editor did not become ready (\(lang))")
+            if dark { XCUIDevice.shared.system.open(URL(string: "xrero-autotest://appearance?dark=1")!); sleep(3) }
+            let name = lang + (dark ? "-dark" : "-light")
+            sleep(2)
+            // three words to count and to find in the exported copies (inserted without the keyboard)
+            autotest("addtext", "Menu check \u{0645}\u{0631}\u{062D}\u{0628}\u{0627}")      // Menu check مرحبا
+            let more = app.buttons["xr-bar-more"]
+            XCTAssertTrue(more.waitForExistence(timeout: 10), "no ⋯ in the top bar (\(name))")
+            func probe(close: Bool = false) -> String {
+                autotest(close ? "menuprobe?close=1" : "menuprobe")
+                return waitState(app, prefix: "menu:", timeout: 10)
+            }
+            func openMenu() { more.tap(); usleep(800_000) }
+            /// waits until `e` can take a tap (a menu still sliding in, a sheet still sliding out)
+            func hittable(_ e: XCUIElement, _ timeout: TimeInterval) -> Bool {
+                let end = Date().addingTimeInterval(timeout)
+                while Date() < end {
+                    if e.exists && e.isHittable { return true }
+                    usleep(300_000)
+                }
+                return false
+            }
+            /// `e` stays at the same place for 0.4 s (the menu has finished unfolding)
+            func settled(_ e: XCUIElement) -> Bool {
+                var last = CGRect.null
+                for _ in 0..<12 {
+                    guard e.exists else { return false }
+                    let f = e.frame
+                    if f == last { return true }
+                    last = f
+                    usleep(400_000)
+                }
+                return e.exists
+            }
+            /// `e` is no longer on screen within `timeout` (the menu closed)
+            func gone(_ e: XCUIElement, _ timeout: TimeInterval) -> Bool {
+                let end = Date().addingTimeInterval(timeout)
+                while Date() < end {
+                    if !(e.exists && e.isHittable) { return true }
+                    usleep(250_000)
+                }
+                return false
+            }
+            /// ⋯, then the entry (inside a submenu when `sub` is given); false when it is not there. A tap on ⋯ can
+            /// land while a sheet is still closing: then the menu is not open - close whatever is open (a tap on the
+            /// status bar touches nothing in the editor) and try again.
+            func pick(_ id: String, sub: String? = nil) -> Bool {
+                for attempt in 0..<3 {
+                    if attempt > 0 {
+                        print("XR menu \(name): \(id) not reachable - opening ⋯ again")
+                        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.01)).tap()
+                        sleep(1)
+                    }
+                    guard hittable(more, 5) else { continue }
+                    openMenu()
+                    if let sub {
+                        let s = app.buttons[sub].firstMatch
+                        guard hittable(s, 4) else { continue }
+                        s.tap(); sleep(2)             // the submenu redraws its rows while it unfolds: wait it out
+                    }
+                    let e = app.buttons[id].firstMatch
+                    guard hittable(e, 4), settled(e) else { continue }
+                    e.tap()
+                    // a tap that ran closes the menu. If the menu is plainly still open after 4 s (the entry AND the
+                    // menu's Save still there - never while a sheet is coming up) tap once more and note it in the
+                    // editor log. (The menu that stayed open with every tap ignored in CI was an app bug - the screen
+                    // redrew its toolbar while the menu was open - fixed in EditorScreen / DocumentMenuModel; a menu
+                    // that is dead again fails here, a second tap does not revive it.)
+                    if !gone(e, 4) {
+                        let save = app.buttons["xr-bar-save"].firstMatch
+                        if id != "xr-bar-save" && !(save.exists && save.isHittable) { return true }
+                        print("XR menu \(name): \(id) ignored the tap (menu still open) - tapping again")
+                        guard settled(e) else { continue }
+                        e.tap()
+                        let ran = gone(e, 4)
+                        autotest("note", "test: menu \(id) ignored the first tap, second tap \(ran ? "ran" : "ignored too")")
+                        if !ran { continue }
+                    }
+                    return true
+                }
+                return false
+            }
+
+            // the web File tab is gone on touch (its entries are in ⋯)
+            let p0 = probe()
+            print("XR menu \(name) opened: \(p0)")
+            XCTAssertTrue(p0.contains("filetab=0"), "the web File tab is still shown on touch (\(name)): \(p0)")
+            // UIKit itself is mirrored in Arabic: the menus it draws for the ⋯ Menu follow its trait, not SwiftUI's
+            autotest("uikitdir")
+            XCTAssertEqual(waitState(app, prefix: "dir:", timeout: 5), ar ? "dir:rtl+force" : "dir:ltr", "UIKit layout direction (\(name))")
+
+            // ⋯ as the user sees it: every entry, no PDF / Print (a first tap can come while the bar is still settling:
+            // open it again until its first entry is there)
+            for attempt in 0..<3 {
+                if attempt > 0 { app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.01)).tap(); sleep(1) }
+                _ = hittable(more, 5)
+                openMenu()
+                if hittable(app.buttons["xr-menu-find"].firstMatch, 4) { break }
+                print("XR menu \(name): ⋯ did not open - again")
+            }
+            var ids = ["xr-menu-find", "xr-bar-save", "xr-nav-share", "xr-menu-export", "xr-menu-info", "xr-nav-lang",
+                       "xr-nav-account", "xr-menu-about", "xr-menu-alltools"]
+            if !pad { ids.insert("xr-bar-redo", at: 1) }
+            for id in ids {
+                XCTAssertTrue(app.buttons[id].firstMatch.waitForExistence(timeout: 3), "⋯ has no \(id) (\(name))")
+            }
+            // (the menu's own entries: the editor page's buttons are not counted)
+            let pdfOrPrint = NSPredicate(format: "label CONTAINS[c] 'Print' OR label CONTAINS 'طباعة' OR label CONTAINS 'PDF'")
+            XCTAssertEqual(app.buttons.matching(pdfOrPrint).count - app.webViews.buttons.matching(pdfOrPrint).count, 0,
+                           "PDF / Print offered before the spike passed (\(name))")
+            // the rows read from the right in Arabic: a row's text sits right of its symbol (when the menu exposes them)
+            let infoRow = app.buttons["xr-menu-info"].firstMatch
+            let rowText = infoRow.staticTexts.firstMatch, rowIcon = infoRow.images.firstMatch
+            if rowText.exists && rowIcon.exists {
+                print("XR menu \(name) row: text \(rowText.frame) icon \(rowIcon.frame)")
+                XCTAssertEqual(rowText.frame.midX > rowIcon.frame.midX, !ar, "⋯ rows are not mirrored (\(name)): text \(rowText.frame) icon \(rowIcon.frame)")
+            } else {
+                print("XR menu \(name) row: no text / symbol exposed (frame \(infoRow.frame)) - the dir check stands")
+            }
+            shot(app, "60-menu-\(name)")
+            let exportRow = app.buttons["xr-menu-export"].firstMatch
+            _ = settled(exportRow)                       // the menu has finished unfolding
+            exportRow.tap()
+            sleep(2)
+            for ext in ["docx", "odt", "rtf"] {
+                XCTAssertTrue(app.buttons["xr-export-" + ext].firstMatch.waitForExistence(timeout: 3), "Export ▸ has no .\(ext) (\(name))")
+            }
+            XCTAssertFalse(app.buttons["xr-export-pdf"].exists, "Export ▸ offers PDF (\(name))")
+            shot(app, "61-menu-\(name)-export")
+            app.buttons["xr-export-docx"].firstMatch.tap()
+            let firstExport = waitState(app, prefix: "exported:", timeout: 60)
+            XCTAssertEqual(firstExport, "exported:exp-\(base).docx", "Export ▸ .docx (\(name))")
+
+            // Find: the editor's own Find & Replace panel
+            XCTAssertTrue(pick("xr-menu-find"), "no Find in ⋯ (\(name))")
+            sleep(2)
+            let p1 = probe()
+            print("XR menu \(name) find: \(p1)")
+            XCTAssertTrue(p1.contains("search=1"), "⋯ > Find did not open the Find panel (\(name)): \(p1)")
+            shot(app, "62-menu-\(name)-find")
+            _ = probe(close: true)
+
+            // Document info: a native sheet, the editor's counts (3 words, 1 page)
+            XCTAssertTrue(pick("xr-menu-info"), "no Document info in ⋯ (\(name))")
+            let info = waitState(app, prefix: "docinfo:", timeout: 20)
+            print("XR menu \(name) docinfo: \(info)")
+            XCTAssertTrue(info.contains("\"words\":3") && info.contains("\"pages\":1"), "Document info counts (\(name)): \(info)")
+            let words = app.descendants(matching: .any)["xr-docinfo-words"].firstMatch
+            XCTAssertTrue(words.waitForExistence(timeout: 10), "the Document info sheet shows no word count (\(name))")
+            XCTAssertTrue(app.descendants(matching: .any)["xr-docinfo-size"].firstMatch.exists, "no size in Document info (\(name))")
+            XCTAssertTrue(app.staticTexts[ar ? "معلومات المستند" : "Document Info"].firstMatch.exists, "Document info title (\(name))")
+            sleep(1)
+            shot(app, "63-menu-\(name)-info")
+            app.buttons["xr-docinfo-done"].firstMatch.tap()
+            sleep(2)
+
+            if !ar {
+                // Export ▸ .odt and .rtf: copies as on screen (check_saved.py reads them)
+                for ext in ["odt", "rtf"] {
+                    XCTAssertTrue(pick("xr-export-" + ext, sub: "xr-menu-export"), "no Export ▸ .\(ext) (\(name))")
+                    let s = waitState(app, prefix: "exported:\(base).\(ext)", timeout: 60)
+                    XCTAssertEqual(s, "exported:\(base).\(ext)", "Export ▸ .\(ext) (\(name))")
+                }
+                // About & Licences
+                XCTAssertTrue(pick("xr-menu-about"), "no About in ⋯")
+                XCTAssertTrue(app.staticTexts["xr-about-version"].waitForExistence(timeout: 10), "⋯ > About did not open")
+                app.buttons["xr-about-done"].firstMatch.tap()
+                sleep(2)
+                // Account (signed out here: the sign-in sheet; nothing is typed or sent)
+                XCTAssertTrue(pick("xr-nav-account"), "no Account in ⋯")
+                XCTAssertTrue(app.textFields["xr-acct-email"].firstMatch.waitForExistence(timeout: 10), "⋯ > Account did not open")
+                shot(app, "64-menu-account")
+                let done = app.buttons.matching(NSPredicate(format: "label == 'Done' OR label == 'تم'")).firstMatch
+                if done.exists { done.tap() } else { app.swipeDown(velocity: .fast) }
+                sleep(2)
+                // Share
+                XCTAssertTrue(pick("xr-nav-share"), "no Share in ⋯")
+                XCTAssertEqual(waitState(app, prefix: "share", timeout: 5), "share", "⋯ > Share did not reach the screen")
+            }
+            // Language ▸ English / العربية (the switch itself reopens the page: ReviewVideoTests covers it)
+            XCTAssertTrue(pick(ar ? "xr-nav-lang-en" : "xr-nav-lang-ar", sub: "xr-nav-lang"), "no Language ▸ entries (\(name))")
+            XCTAssertEqual(waitState(app, prefix: "lang:", timeout: 5), "lang:" + (ar ? "en" : "ar"), "Language ▸ (\(name))")
+
+            // All tools: the editor's File backstage (with its own way back). pick() makes sure the tap ran (the
+            // menu closed); the log line "menu all tools" in the editor log shows the entry itself ran.
+            sleep(2)
+            XCTAssertTrue(pick("xr-menu-alltools"), "no All tools in ⋯ (\(name))")
+            sleep(2)
+            let p2 = probe()
+            print("XR menu \(name) all tools: \(p2)")
+            XCTAssertTrue(p2.contains("file=1"), "⋯ > All tools did not open the File backstage (\(name)): \(p2)")
+            shot(app, "65-menu-\(name)-alltools")
+            _ = probe(close: true)
+
+            if !ar {
+                // the PDF spike: logged, never offered (check_saved.py reports what the converter did)
+                autotest("pdfspike")
+                let spike = waitState(app, prefix: "export", timeout: 90)
+                print("XR menu pdf spike: \(spike)")
+            }
+            app.terminate()
+        }
+    }
+
     /// Runs a Home-tab ribbon command by its exact name ("Copy", not "Copy style") and waits until the app reports
     /// it done (the Autotest state turns "clip<n> ..."). Phones fold the ribbon, and a tap on a button of a folded
     /// panel lands on the page (it moves the caret and drops the selection) - so the Home panel is opened through
@@ -278,7 +614,10 @@ final class EditorUITests: XCTestCase {
     }
 
     private func autotest(_ host: String, _ text: String? = nil) {
-        var c = URLComponents(); c.scheme = "xrero-autotest"; c.host = host
+        // "host?k=v": a hook with its own parameters
+        let parts = host.split(separator: "?", maxSplits: 1).map(String.init)
+        var c = URLComponents(); c.scheme = "xrero-autotest"; c.host = parts[0]
+        if parts.count == 2 { c.query = parts[1] }
         if let text { c.queryItems = [URLQueryItem(name: "t", value: text)] }
         XCUIDevice.shared.system.open(c.url!)                 // routed to the running app, no tapping
         sleep(2)
@@ -938,7 +1277,19 @@ final class EditorUITests: XCTestCase {
             let tag = kind + (lang == "en" ? "" : "-" + lang)
             shot(app, "20-" + tag + "-ready")
             XCTAssertEqual(ready, "ready", "\(tag) editor did not become ready")
-            if lang == "en" { checkContract(app, tag) }
+            if lang == "en" {
+                checkContract(app, tag)
+                // ⋯ > Export ▸ formats of this kind (M7b; the same call as the menu entry) and the Document info counts
+                for ext in kind == "cell" ? ["xlsx"] : ["pptx", "odp"] {
+                    autotest("export?f=" + ext)
+                    let want = "exported:" + (ext == (kind == "cell" ? "xlsx" : "pptx") ? "exp-" : "") + "xr-test." + ext
+                    XCTAssertEqual(waitState(app, prefix: want, timeout: 60), want, "Export ▸ .\(ext) (\(tag))")
+                }
+                autotest("docinfo")
+                let info = waitState(app, prefix: "docinfo:", timeout: 20)
+                print("XR menu \(tag) docinfo: \(info)")
+                XCTAssertTrue(info.contains(kind == "cell" ? "\"sheets\":1" : "\"slides\":1"), "Document info counts (\(tag)): \(info)")
+            }
             checkIPadLayout(app, tag)
             checkChrome(app, tag)
             app.terminate()

@@ -10,6 +10,11 @@ struct AutotestScreen: View {
     @State private var document: OfficeDocument
     @State private var state = "loading"
     @State private var showAbout = false
+    @State private var showAccount = false
+    // @State, not @StateObject: the screen must NOT redraw when the model changes. A redraw rebuilds the top bar's
+    // toolbar, and a ⋯ menu open at that moment stays on screen but dead - every tap ignored (CI: the Document info
+    // sheet's 15 s count stop fired while the menu was open). Only the capsule and the sheet observe the model.
+    @State private var menu = DocumentMenuModel()
     @State private var recovery = "none"                    // sticky: "recovered:edited" / "recovered:" / "too-large"
     @State private var recovered: RecoveryNotice?
     @State private var tooLarge = false
@@ -18,6 +23,11 @@ struct AutotestScreen: View {
     @State private var clipCount = 0
     @State private var saveAsFormats: [String] = []
     @StateObject private var controller = EditorController()
+    @StateObject private var barStatus = EditorBarStatus()
+    /// XR_BAR=1: the editor under the app's native top bar (plan M4a), the way EditorScreen shows it - for the bar's
+    /// own test. Without it the editor fills the screen as before, so the typing tests keep their exact geometry.
+    private let bar = ProcessInfo.processInfo.environment["XR_BAR"] == "1"
+    private let lang = ProcessInfo.processInfo.environment["XR_LANG"] ?? AppLanguage.current
     private let name: String
     private let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
 
@@ -38,6 +48,31 @@ struct AutotestScreen: View {
     }
 
     var body: some View {
+        if bar {
+            NavigationStack {
+                // the real ⋯ document menu (plan M7b); the actions that would leave the test's editor (language
+                // switch, share sheet) report in the state label instead
+                screen.editorTopBar(title: (name as NSString).deletingPathExtension, state: controller.state,
+                                    status: barStatus, controller: controller, ar: lang == "ar",
+                                    back: { state = "back" }, save: { controller.userSave() },
+                                    find: { controller.find() }, menuKey: "\(lang)|\(document.kind.rawValue)") {
+                    DocumentMenuItems(kind: document.kind, lang: lang, signedIn: false, model: menu, controller: controller,
+                                      language: { state = "lang:" + $0 }, share: { state = "share" },
+                                      account: { showAccount = true }, about: { showAbout = true })
+                }
+                .documentMenuChrome(model: menu, kind: document.kind, name: name, size: document.data.count,
+                                    fileURL: docs.appendingPathComponent(name), ar: lang == "ar")
+            }
+            .environment(\.layoutDirection, lang == "ar" ? .rightToLeft : .leftToRight)
+            .background(UIKitLayoutDirection(rtl: lang == "ar"))
+        } else {
+            // UIKit mirrored as in the real app (EditorHost's appLanguageEnvironment): the typing tests type under
+            // the same trait a user in Arabic gets
+            screen.background(UIKitLayoutDirection(rtl: lang == "ar"))
+        }
+    }
+
+    private var screen: some View {
         ZStack(alignment: .topLeading) {
             EditorWebView(document: $document, title: name, lang: ProcessInfo.processInfo.environment["XR_LANG"] ?? AppLanguage.current,
                           onCommand: handle, controller: controller)
@@ -65,6 +100,7 @@ struct AutotestScreen: View {
         .onOpenURL { url in
             guard url.scheme == "xrero-autotest" else { return }
             if url.host == "save" { controller.save() }
+            if url.host == "usersave" { controller.userSave() }   // the user's Save (the bar's ⋯ > Save, asc_Save)
             if url.host == "caret" {            // typing tests: where the new page's first line is (the editor's own text
                                                 // cursor, which sits there after open) - a fixed tap point drifts when
                                                 // the ribbon height changes and then lands in the page margin
@@ -108,7 +144,8 @@ struct AutotestScreen: View {
                 let js = """
                 (function(){var f=document.querySelector('iframe');var w=f&&f.contentWindow;if(!w)return 'no frame';
                  var d=w.document,p=d.getElementById('file-menu-panel'),t=d.querySelector('a[data-tab="file"]');
-                 if(t&&(!p||p.style.display==='none'))t.click();
+                 var tab=!!(t&&t.offsetParent);w.XreroHost.log('file tab shown: '+(tab?1:0));
+                 if(!p||p.style.display==='none'){if(tab)t.click();else w.XreroHost.log('all tools: '+(w.__xrAllTools?w.__xrAllTools():'missing'));}
                  setTimeout(function(){var ids=[].slice.call(d.querySelectorAll('#file-menu-panel .panel-menu > li.fm-btn'))
                    .filter(function(li){return w.getComputedStyle(li).display!=='none';}).map(function(li){return li.id;});
                    var tiles=[].slice.call(d.querySelectorAll('#panel-saveas .format-item'))
@@ -153,6 +190,41 @@ struct AutotestScreen: View {
                     handle("log", "addtext: \((r as? String) ?? e ?? "?")")
                 }
             }
+            if url.host == "uikitdir" {         // ⋯ menu test (M7b review): UIKit's own direction, which the menus it
+                                                // draws for SwiftUI follow (UIKitLayoutDirection)
+                let d = controller.coordinator?.web?.effectiveUserInterfaceLayoutDirection
+                state = (d == nil ? "dir:none" : (d == .rightToLeft ? "dir:rtl" : "dir:ltr")) +
+                        (UIKitLayoutDirection.forced ? "+force" : "")
+            }
+            if url.host == "menuprobe" {        // ⋯ menu test (M7b): is the editor's Find panel / File backstage open,
+                                                // is the File tab hidden; "close" also shuts both again
+                let close = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "close" }?.value == "1"
+                state = "probing"                   // the test waits for a fresh "menu:" answer
+                controller.call("""
+                var app=window.DE||window.PE||window.SSE||window.PDFE,lm=app&&app.getController('LeftMenu');if(!lm)return 'menu:fail no left menu';
+                var fm=lm.leftMenu.menuFile,f=fm&&fm.isVisible()?1:0,s=window.__xrSearchShown&&__xrSearchShown()?1:0,vp=app.getController('Viewport');
+                var t=document.querySelector('a[data-tab="file"]'),tab=t&&t.offsetParent?1:0;
+                if(\(close)){try{if(f)fm.hide();if(s&&lm.isSearchPanelVisible())lm.onShowHideSearch(false);if(s&&vp.isSearchBarVisible())vp.searchBar.hide();}catch(e){}}
+                return 'menu:search='+s+' file='+f+' filetab='+tab;
+                """) { r, e in
+                    let res = (r as? String) ?? "menu:fail " + (e ?? "?")
+                    handle("log", res)
+                    state = res
+                }
+            }
+            if url.host == "export" {           // Export ▸ without the menu (spreadsheet / presentation formats)
+                let ext = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "f" }?.value ?? ""
+                menu.export(ext, controller)
+            }
+            if url.host == "docinfo" {          // Document info counts without the sheet (spreadsheet / presentation)
+                state = "counting"
+                controller.docInfo()
+            }
+            if url.host == "pdfspike" {         // the PDF spike (M7b): can this x2t build write a PDF? (log only)
+                controller.call("return window.__xrExport ? __xrExport('pdf', true) : 'no export';") { r, e in
+                    handle("log", "pdf spike request: \((r as? String) ?? e ?? "?")")
+                }
+            }
             if url.host == "bridge" { checkBridge() }
             if url.host == "contract" { checkContract() }
             if url.host == "openhome" {         // clipboard test: phones fold the ribbon - drop the Home panel so the
@@ -187,6 +259,8 @@ struct AutotestScreen: View {
                                                 // change on the web view -> the live switch, no reload)
                 let dark = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "dark" }?.value == "1"
                 controller.coordinator?.web?.overrideUserInterfaceStyle = dark ? .dark : .light
+                // the top bar's test: the whole window (the native bar too), as when iOS itself switches
+                if bar { controller.coordinator?.web?.window?.overrideUserInterfaceStyle = dark ? .dark : .light }
                 handle("log", "autotest: appearance " + (dark ? "dark" : "light"))
             }
             if url.host == "chrome" {           // M6 gate: neutral editor chrome - theme follows the appearance, line
@@ -269,6 +343,7 @@ struct AutotestScreen: View {
             }
         }
         .sheet(isPresented: $showAbout) { AboutSheet() }
+        .sheet(isPresented: $showAccount) { AccountView() }
     }
 
     /// Bridge check (20.3 F0): a native call reaches the engine and the engine's answer comes back through the state
@@ -343,6 +418,8 @@ struct AutotestScreen: View {
     }
 
     private func handle(_ cmd: String, _ param: String) {
+        barStatus.note(cmd, param)
+        menu.note(cmd, param)
         switch cmd {
         case "ready": state = "ready"; tooLarge = false
         case "modified": modified = param
@@ -356,12 +433,16 @@ struct AutotestScreen: View {
         case "saved":
             try? document.data.write(to: docs.appendingPathComponent(name), options: .atomic)
             state = "saved:" + param
+        case "export-failed": state = "export-failed:" + param
+        case "docinfo": state = "docinfo:" + param
         case "saveas": saveAsFormats = param.split(separator: ",").map(String.init)
         case "export":                       // Save As copy -> Documents/<name> for the workflow to check
-            let src = URL(fileURLWithPath: param), dst = docs.appendingPathComponent(src.lastPathComponent)
+            // (an export in the document's own format gets an "exp-" name: the test document's file is not replaced)
+            let src = URL(fileURLWithPath: param)
+            let dst = docs.appendingPathComponent((src.lastPathComponent == name ? "exp-" : "") + src.lastPathComponent)
             try? FileManager.default.removeItem(at: dst)
             try? FileManager.default.copyItem(at: src, to: dst)
-            state = "exported:" + src.lastPathComponent
+            state = "exported:" + dst.lastPathComponent
         case "log":
             let line = (param + "\n").data(using: .utf8)!
             let url = docs.appendingPathComponent("xr-log-" + name + ".txt")      // one log per test document

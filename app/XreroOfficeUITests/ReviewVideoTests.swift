@@ -4,7 +4,7 @@ import XCTest
 /// configuration: the system document browser + editor, no test overlay) the way a user does: Home screen -> tap the icon
 /// -> home screen (the optional account card: Sign in opens the account, Not now hides it) > New document -> type English +
 /// Arabic with Bold -> Save -> close -> Home's Recent (search, context menu, swipe) -> open a spreadsheet and a presentation
-/// from Files -> switch the interface to Arabic in the editor's globe menu (Home follows) -> Settings > Xrero Office >
+/// from Files -> switch the interface to Arabic in the editor's ⋯ > Language menu (Home follows) -> Settings > Xrero Office >
 /// Licences -> relaunch (no account card, still Arabic). Steps are best-effort (the recording
 /// matters more than any single step); every step leaves a screenshot and the element tree when something is missing.
 final class ReviewVideoTests: XCTestCase {
@@ -51,20 +51,51 @@ final class ReviewVideoTests: XCTestCase {
         find(app.webViews.buttons, format, timeout: timeout)
     }
 
-    /// The editor is ready when its Save button is in the web view.
+    /// The top bar's second line (nil when it shows none). Read through one snapshot: the line can go away between an
+    /// `exists` and a `label` (Opening... -> nothing), which would fail the whole test.
+    private func barStatus() -> String? {
+        (try? app.staticTexts.matching(identifier: "xr-bar-status").firstMatch.snapshot())?.label
+    }
+
+    /// The editor is ready when the native top bar's title is up and its second line no longer says Opening… (plan
+    /// M4a: the editors' own title row with its Save button is gone).
     @discardableResult
     private func waitEditor(_ name: String) -> Bool {
-        let ok = webButton("label BEGINSWITH[c] 'Save' OR label BEGINSWITH 'حفظ'", timeout: 120) != nil
+        let title = app.staticTexts["xr-bar-title"]
+        let end = Date().addingTimeInterval(120)
+        var ok = false
+        while Date() < end {
+            let s = barStatus() ?? ""
+            if title.exists && !s.hasPrefix("Opening") && !s.hasPrefix("جارٍ الفتح") { ok = true; break }
+            pause(1)
+        }
         pause(3)
         shot("editor-" + name)
         if !ok { dump("editor-" + name) }
         return ok
     }
 
-    private func saveDocument() {
-        if let b = webButton("label BEGINSWITH[c] 'Save' OR label BEGINSWITH 'حفظ'"), b.isHittable { b.tap() }
-        else { app.typeKey("s", modifierFlags: .command) }
-        pause(4)
+    /// The ⋯ menu of the top bar, then one of its items.
+    @discardableResult
+    private func barMenu(_ id: String) -> Bool {
+        guard let more = find(app.buttons, "identifier == 'xr-bar-more'", timeout: 5) else { dump("bar-more"); return false }
+        more.tap(); pause(1)
+        guard let item = find(app.buttons, "identifier == '\(id)'", timeout: 5) else { dump("bar-" + id); return false }
+        item.tap()
+        return true
+    }
+
+    /// Save from the top bar's ⋯ menu (⌘S when it is missing); true when the bar then says Saved - only a completed
+    /// save may make it say so.
+    @discardableResult
+    private func saveDocument() -> Bool {
+        if !barMenu("xr-bar-save") { app.typeKey("s", modifierFlags: .command) }
+        let end = Date().addingTimeInterval(30)
+        while Date() < end {
+            if let s = barStatus(), s == "Saved" || s == "محفوظ" { pause(1); return true }
+            pause(0.5)
+        }
+        return false
     }
 
     /// Back to the document browser with the editor's navigation (system back button of the document scene).
@@ -157,9 +188,9 @@ final class ReviewVideoTests: XCTestCase {
         XCTAssertTrue(app.buttons.matching(identifier: "xr-home-more").firstMatch.exists, "no More menu on Home")
         if let tile = find(app.buttons, "identifier == 'xr-home-word'", timeout: 20) { tile.tap() } else { dump("home") }
         // the editor, or a system alert (e.g. "Unable to Import Document"), whichever comes first
-        let saveQ = app.webViews.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] 'Save' OR label BEGINSWITH 'حفظ'")).firstMatch
+        let barQ = app.staticTexts["xr-bar-title"]
         let end = Date().addingTimeInterval(90)
-        while Date() < end && !saveQ.exists && !app.alerts.firstMatch.exists { pause(1) }
+        while Date() < end && !barQ.exists && !app.alerts.firstMatch.exists { pause(1) }
         if dismissAlert("after-create") {
             print("XR create: alert -> opening the created document from Files instead")
             _ = openFromFiles("Untitled.docx")
@@ -171,6 +202,13 @@ final class ReviewVideoTests: XCTestCase {
         print("XR editor nav buttons:", navButtons)
         XCTAssertEqual(app.navigationBars.buttons.matching(NSPredicate(format: "label == 'Documents' OR label == 'Back'")).count, 1,
                        "exactly one back button in the editor: \(navButtons)")
+        // one native bar (plan M4a): Undo and ⋯ in it, the editors' own title row (web Save / Undo) gone, and a
+        // document just opened is not called Saved
+        XCTAssertTrue(app.buttons["xr-bar-undo"].exists, "no Undo in the editor's top bar: \(navButtons)")
+        XCTAssertTrue(app.buttons["xr-bar-more"].exists, "no ⋯ menu in the editor's top bar: \(navButtons)")
+        XCTAssertEqual(app.webViews.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] 'Save' OR label BEGINSWITH[c] 'Undo'")).count, 0,
+                       "the editor's own title row is still shown")
+        XCTAssertNotEqual(barStatus(), "Saved", "a document just opened says Saved")
 
         // 3. Type English (one word in Bold) and Arabic, then Save
         app.webViews.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35)).tap()
@@ -186,12 +224,13 @@ final class ReviewVideoTests: XCTestCase {
         typeSlowly("\u{0645}\u{0631}\u{062D}\u{0628}\u{0627}\u{064B} \u{0628}\u{0643}\u{0645} \u{0641}\u{064A} \u{0625}\u{0643}\u{0633}\u{064A}\u{0631}\u{0648} \u{0623}\u{0648}\u{0641}\u{064A}\u{0633}")   // مرحباً بكم في إكسيرو أوفيس
         pause(2)
         shot("02-typed")
-        saveDocument()
+        XCTAssertEqual(barStatus(), "Edited", "the top bar does not say Edited after typing")
+        XCTAssertTrue(saveDocument(), "the top bar does not say Saved after Save (\(barStatus() ?? "no line"))")
         shot("03-saved")
 
-        // 3b. The top bar's account button -> the account screen; a wrong password shows the server's answer
-        if let signIn = find(app.buttons, "identifier == 'xr-nav-account'", timeout: 5) {
-            signIn.tap(); pause(2)
+        // 3b. The top bar's ⋯ > Sign in -> the account screen; a wrong password shows the server's answer
+        if barMenu("xr-nav-account") {
+            pause(2)
             let mail = app.textFields.matching(identifier: "xr-acct-email").firstMatch
             if mail.waitForExistence(timeout: 10) {
                 mail.tap(); typeSlowly("review-check@example.com")
@@ -239,8 +278,8 @@ final class ReviewVideoTests: XCTestCase {
             shot("06-deck")
             // 6. Interface language EN -> AR in the editor's globe menu: a confirmation (the page reopens), then the
             // bar is Arabic at once and the page reopens in Arabic; Home follows (one language source, plan M9b)
-            if let globe = find(app.buttons, "identifier == 'xr-nav-lang'", timeout: 5) {
-                globe.tap(); pause(1)
+            if barMenu("xr-nav-lang") {
+                pause(1)
                 if let ar = find(app.buttons, "label == 'العربية'", timeout: 5) { ar.tap(); pause(1) } else { dump("lang-menu") }
                 shot("06a-lang-confirm")
                 if let ok = find(app.buttons, "identifier == 'xr-lang-confirm' OR label == 'حفظ والتبديل'", timeout: 5) {

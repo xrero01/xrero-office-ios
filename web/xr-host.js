@@ -143,6 +143,15 @@
   (function hideDesktopOnly() {
     // language / share / account are in the app's own top bar on iOS: the editors' header cluster is not needed
     var css = '#xr-b-ctx,#xr-designs-launch,#xr-design-ov,#xr-hdr-btns,#xr-acct-menu{display:none!important}' +
+              // the editors' title row (Save / Undo / Redo / quick-access "..." and the file name): the app's native top
+              // bar holds Back, the name with its Edited / Saved line, Undo / Redo and Save (plan M4a), so the row goes
+              // on every device - about 44 pt more page. A hidden layout item takes no height (VBoxLayout skips it) and
+              // phoneHeights sets its stored height to 0 for the File menu's offset.
+              '#app-title{display:none!important}' +
+              // the File tab on touch: its "get this file somewhere" entries are in the app's ⋯ menu (Share, Export,
+              // Document info - plan M7b), and the rest of the backstage stays one tap away as ⋯ > All tools
+              // (__xrAllTools). A trackpad / mouse keeps the tab (any-pointer:fine).
+              '@media not all and (any-pointer:fine){.toolbar .tabs .ribtab:has(>a[data-tab="file"]){display:none!important}}' +
               // File menu: recent files live on the app's home screen; "Suggest a Feature" opens a desktop form
               '#fm-btn-recent,#fm-btn-suggest{display:none!important}' +
               // File menu entries that would do nothing here (each checked in web-apps FileMenu + Desktop.js):
@@ -157,13 +166,8 @@
     // phones: the status bar keeps what a finger needs (page/slide count, Present, zoom); the text-language picker,
     // spell-check toggle and fit-to-page/width icons go (pinch and the zoom buttons cover fitting)
     if (Math.min(screen.width, screen.height) < 600) {
-      // header: 44 pt title row (save / undo / redo / more), 46 pt tabs with 16 pt labels
-      css += '#app-title,#box-document-title{height:44px!important}' +
-        '#box-document-title .btn{min-width:46px!important;height:40px!important;margin:2px 2px!important;border-radius:10px!important}' +
-        '#box-document-title .btn .icon{transform:scale(1.3)}' +
-        // the file name is already in the app's top bar
-        '#box-document-title #id-box-doc-name,#box-document-title #title-doc-name{display:none!important}' +
-        '.toolbar .tabs>ul>li>a,.toolbar .tabs .ribtab>a{font-size:15px!important;line-height:46px!important;height:46px!important;' +
+      // header: 46 pt tabs with 16 pt labels (the title row is hidden above: the app's top bar replaces it)
+      css += '.toolbar .tabs>ul>li>a,.toolbar .tabs .ribtab>a{font-size:15px!important;line-height:46px!important;height:46px!important;' +
           'padding:0 12px!important}' +
         '.toolbar .box-tabs,.toolbar .tabs{height:46px!important}' +
         '.toolbar .tabs a{outline:none!important}' +
@@ -181,7 +185,10 @@
         '.toolbar .box-panels .group.field-styles{height:54px!important;position:relative!important;min-width:160px}' +
         '.toolbar .box-panels .group.field-styles>.combo-dataview{position:relative!important;top:0!important;left:0!important}' +
         '.toolbar.folded .box-controls{box-shadow:0 8px 20px rgba(0,0,0,.18)}' +
-        '.toolbar .tabs .scroll{line-height:46px!important;height:46px!important;background:transparent!important}';
+        '.toolbar .tabs .scroll{line-height:46px!important;height:46px!important;background:transparent!important}' +
+        // ⋯ > Find on a phone opens the editor's search bar: its "open the Find panel" buttons lead to the left panel,
+        // which phones do not have (Slides keep it)
+        (/presentationeditor/.test(location.pathname) ? '' : '#search-bar-open-panel,#search-bar-open-panel-redact{display:none!important}');
       // phones: an iOS-style bottom bar - 50 pt tall, 44 pt round buttons, the page / slide count as a pill.
       // It keeps what a finger needs (count, Present, previous / next page, zoom - +, sheet tabs); the text-language
       // picker, spell check, word count, track-changes toggle, select / hand tools and fit icons go (their features
@@ -222,10 +229,7 @@
       // iPad: the full ribbon fits; rows and the status bar get touch-sized (40 pt rows, 50 pt status bar, 44 pt
       // buttons) in the same iOS style
       var SSE = /spreadsheeteditor/.test(location.pathname);
-      css += '#app-title,#box-document-title{height:40px!important}' +
-        '#box-document-title .btn{min-width:42px!important;height:36px!important;margin:2px!important;border-radius:9px!important}' +
-        '#box-document-title .btn .icon{transform:scale(1.2)}' +
-        '.toolbar .tabs>ul>li>a,.toolbar .tabs .ribtab>a{font-size:14px!important;line-height:40px!important;height:40px!important;' +
+      css += '.toolbar .tabs>ul>li>a,.toolbar .tabs .ribtab>a{font-size:14px!important;line-height:40px!important;height:40px!important;' +
           'padding:0 14px!important}' +
         '.toolbar .box-tabs,.toolbar .tabs{height:40px!important}' +
         '.toolbar .tabs a{outline:none!important}' +
@@ -628,6 +632,27 @@
     } catch (e) { return 'error: ' + (e && e.message || e); }
   };
 
+  // ---- Undo / Redo from the app's top bar (plan M4a; EditorController.call on a tap, never per keystroke).
+  // A word still being composed (QuickType or a marked-text keyboard: the engine holds it as a "composite input") is
+  // committed first, the way the engine's own touch manager does before it acts (apiCompositeEnd) - an undo in the
+  // middle of a composition would leave the composite input pointing at text the undo just removed. Spreadsheets
+  // name the call asc_Undo / asc_Redo. Returns 'ok', 'nothing to undo' / 'nothing to redo' or the reason it could not.
+  window.__xrUndo = function (redo) {
+    var api = window.__xrApi;
+    if (!api) return 'no editor';
+    try {
+      var c = window.AscCommon && AscCommon.g_inputContext;
+      // always end it: the engine's own apiCompositeEnd returns at once when no composition is open, so no
+      // instance flag (not in the engine contract, could be renamed) decides whether the half-typed word commits
+      if (c && c.apiCompositeEnd) c.apiCompositeEnd();
+    } catch (e) { log('undo: composition', e && e.message || e); }
+    var can = redo ? (api.asc_getCanRedo || api.getCanRedo) : (api.asc_getCanUndo || api.getCanUndo);
+    try { if (can && !can.call(api)) return redo ? 'nothing to redo' : 'nothing to undo'; } catch (e) {}
+    var fn = redo ? (api.Redo || api.asc_Redo) : (api.Undo || api.asc_Undo);
+    if (!fn) return 'no undo';
+    try { fn.call(api); return 'ok'; } catch (e) { return 'error: ' + (e && e.message || e); }
+  };
+
   // ---- Save As / Download As: the copy itself (formats: SAVE_AS at the top)
   var pendingCopy = null;                     // {bin, done} while the app asks which format
   // The app answers 'saveas' with the chosen extension ('' = cancelled). The engine waits (its save action is open)
@@ -648,6 +673,127 @@
       });
     }).catch(function (e) { log('save as failed', e && e.message || e); p.done(2); });
     return 'ok';
+  };
+
+  // The engine's document as Editor.bin bytes (save, Save As, the ⋯ menu's Export). In a web page the engine hands it
+  // over base64-encoded and usually already carrying its "DOCY;v10;0;" header; the header is added when it is not.
+  function engineBin(ed) {
+    var file = ed.asc_nativeGetFile3(), d = file.data, bin;
+    if (typeof d === 'string') {
+      var raw = atob(d); bin = new Uint8Array(raw.length);
+      for (var i = 0; i < raw.length; i++) bin[i] = raw.charCodeAt(i);
+    } else bin = d;
+    if (!/^(DOCY|XLSY|PPTY|VSDY);/.test(String.fromCharCode.apply(null, bin.subarray(0, 5)))) {
+      var h = new TextEncoder().encode(file.header), b2 = new Uint8Array(h.length + bin.length);
+      b2.set(h, 0); b2.set(bin, h.length); bin = b2;
+    }
+    return bin;
+  }
+
+  // ---- the app's ⋯ document menu (plan M7b; EditorController.call on a tap, never on the keystroke path)
+  // The editor's own app object and its LeftMenu controller (Find and the File backstage live there in every editor).
+  function leftMenu() {
+    var app = window.DE || window.PE || window.SSE || window.PDFE, lm = null;
+    try { lm = app && app.getController && app.getController('LeftMenu'); } catch (e) {}
+    return lm && lm.leftMenu ? lm : null;
+  }
+
+  // Export ▸ <format>: a copy of the document AS IT IS ON SCREEN (unsaved changes included) in a format the on-device
+  // converter writes correctly (SAVE_AS above), handed to the app as an 'export' message -> share sheet. Unlike Save
+  // As it opens no engine save action: the document's own file and its Edited / Saved state stay as they are.
+  // 'exporting' tells the app to show its capsule; 'export-failed' ends it when the conversion fails.
+  // spike = true: the PDF spike (plan M7b) - asks x2t for a PDF (Asc.c_oAscFileType.PDF) to learn whether this
+  // WebAssembly build can write one. Only the CI hook passes it; the app's menu never offers PDF.
+  window.__xrExport = function (want, spike) {
+    var ed = editor();
+    if (!ed || !opened) return 'nothing open';
+    if (opened.ext === 'pdf') return 'no export for pdf';
+    var f = spike && want === 'pdf' ? ['pdf', 0x201] : saveAsFormats().filter(function (x) { return x[0] === want; })[0];
+    if (!f) return 'format not offered: ' + want;
+    if (!H.exportFile) return 'no export';
+    var bin;
+    try { bin = engineBin(ed); } catch (e) { log('export: serialize failed', e && e.message || e); return 'serialize failed'; }
+    var name = opened.name.replace(/\.[^.\/]+$/, '') + (spike ? '-spike.' : '.') + f[0], t0 = Date.now();
+    var list = Object.keys(media).map(function (n) { return { name: n, data: media[n].slice(0) }; });
+    H.command && H.command('exporting', f[0]);
+    x2t('Editor.bin', bin.buffer, 'out.' + f[0], list, { formatTo: f[1], fonts: spike ? fontUrls() : null }).then(function (r) {
+      if (r.data.byteLength < 8) throw new Error('empty ' + f[0]);
+      return H.exportFile(name, r.data).then(function () {
+        log((spike ? 'pdf spike: x2t wrote ' : 'exported copy ') + name + ' ' + r.data.byteLength + ' bytes in ' + (Date.now() - t0) + ' ms');
+      });
+    }).catch(function (e) {
+      var why = String(e && e.message || e);
+      log((spike ? 'pdf spike: x2t cannot write a pdf here: ' : 'export failed: ') + why);
+      H.command && H.command('export-failed', why);
+    });
+    return 'ok';
+  };
+
+  // Find: the editor's own Find & Replace panel (phase 1 of the plan; a native find bar can replace it later). The
+  // 'replace' shortcut opens the panel itself in every editor - 'search' would open the small search bar, which is
+  // anchored to the title row the app hides. The File backstage is closed first (Find does nothing over it).
+  // Phones have no left panel (xr-editor.html: layout.leftMenu off, except Slides): there the 'search' shortcut opens
+  // the editor's search bar, a small window placed under the ribbon at the window's edge (no title-row anchor needed).
+  function searchShown(lm) {
+    var app = window.DE || window.PE || window.SSE || window.PDFE, vp = null;
+    try { vp = app.getController('Viewport'); } catch (e) {}
+    return !!((lm.isSearchPanelVisible && lm.isSearchPanelVisible()) || (vp && vp.isSearchBarVisible && vp.isSearchBarVisible()));
+  }
+  window.__xrFind = function () {
+    var lm = leftMenu();
+    if (!lm || !lm.onShortcut) return 'no left menu';
+    try {
+      if (lm.leftMenu.menuFile && lm.leftMenu.menuFile.isVisible()) lm.leftMenu.menuFile.hide();
+      var panel = document.getElementById('left-menu');
+      lm.onShortcut(panel && panel.offsetWidth > 0 ? 'replace' : 'search');
+      return searchShown(lm) ? 'ok' : 'not shown';
+    } catch (e) { return 'error: ' + (e && e.message || e); }
+  };
+  window.__xrSearchShown = function () { var lm = leftMenu(); return !!lm && searchShown(lm); };
+
+  // All tools: the editor's File backstage (protection, properties, page setup, templates ...), which the hidden File
+  // tab no longer opens on touch. The backstage's own "Close Menu" entry leads back to the document.
+  window.__xrAllTools = function () {
+    var lm = leftMenu();
+    if (!lm || !lm.leftMenu.showMenu) return 'no left menu';
+    try {
+      if (window.Common && Common.UI && Common.UI.Menu && Common.UI.Menu.Manager) Common.UI.Menu.Manager.hideAll();
+      lm.leftMenu.showMenu('file');
+      return lm.leftMenu.menuFile && lm.leftMenu.menuFile.isVisible() ? 'ok' : 'not shown';
+    } catch (e) { return 'error: ' + (e && e.message || e); }
+  };
+
+  // Document info: the counts for the app's native sheet, posted as one 'docinfo' message (JSON). Word counts in the
+  // background (startGetDocInfo -> asc_onDocInfo ... asc_onGetDocInfoEnd, the same run the File > Info panel uses);
+  // slides and sheets are counted at once. The callbacks are registered once and fire during every such run, also
+  // the web backstage's own Info panel: only a run the app asked for (docInfoPending) is posted.
+  var docInfoHooked = false, docInfoLast = null, docInfoPending = false;
+  window.__xrDocInfo = function () {
+    var api = window.__xrApi, post = function (o) { H.command && H.command('docinfo', JSON.stringify(o)); };
+    if (!api) return 'no editor';
+    try {
+      if (/presentationeditor/.test(location.pathname)) { post({ slides: api.getCountPages() }); return 'ok'; }
+      if (/spreadsheeteditor/.test(location.pathname)) { post({ sheets: api.asc_getWorksheetsCount() }); return 'ok'; }
+      if (/pdfeditor/.test(location.pathname)) { post({ pages: api.getCountPages ? api.getCountPages() : -1 }); return 'ok'; }
+      if (!api.startGetDocInfo) { post({}); return 'no doc info'; }
+      if (!docInfoHooked) {
+        docInfoHooked = true;
+        api.asc_registerCallback('asc_onDocInfo', function (o) {
+          if (!o) return;
+          docInfoLast = { pages: o.get_PageCount(), words: o.get_WordsCount(), paragraphs: o.get_ParagraphCount(),
+                          chars: o.get_SymbolsCount(), charsSpaces: o.get_SymbolsWSCount() };
+        });
+        api.asc_registerCallback('asc_onGetDocInfoEnd', function () {
+          if (!docInfoPending) return;
+          docInfoPending = false;
+          post(docInfoLast || {});
+        });
+      }
+      docInfoLast = null;
+      docInfoPending = true;
+      api.startGetDocInfo();
+      return 'ok';
+    } catch (e) { docInfoPending = false; post({}); return 'error: ' + (e && e.message || e); }
   };
 
   var A = {
@@ -757,18 +903,7 @@
       log('save start', opened.name);
       var t0 = Date.now(), bin;
       if (opened.ext === 'pdf') return savePdf(ed, done, t0);
-      try {
-        // the engine's Editor.bin; in a web page it comes base64-encoded and already carries its "DOCY;v10;0;" header
-        var file = ed.asc_nativeGetFile3(), d = file.data;
-        if (typeof d === 'string') {
-          var raw = atob(d); bin = new Uint8Array(raw.length);
-          for (var i = 0; i < raw.length; i++) bin[i] = raw.charCodeAt(i);
-        } else bin = d;
-        if (!/^(DOCY|XLSY|PPTY|VSDY);/.test(String.fromCharCode.apply(null, bin.subarray(0, 5)))) {
-          var h = new TextEncoder().encode(file.header), b2 = new Uint8Array(h.length + bin.length);
-          b2.set(h, 0); b2.set(bin, h.length); bin = b2;
-        }
-      } catch (e) { log('save: serialize failed', e); return done(2); }
+      try { bin = engineBin(ed); } catch (e) { log('save: serialize failed', e); return done(2); }
       if (/saveas=true/.test(param || '')) {
         // A format chosen in the File menu's "Download As" tiles (fileType != 0) is used directly when it really
         // works; without one (the desktop's Save As / Ctrl+Shift+S, which ask a native dialog) the app lists them.
@@ -866,12 +1001,15 @@
   var PHONE = Math.min(screen.width, screen.height) < 600;
   function phoneHeights() {
     var S = window.Common && Common.Utils && Common.Utils.InternalSettings;
-    if (!(PHONE || TABLET) || !S || S.get('xr-phone')) return;
+    if (!S || S.get('xr-phone')) return;
     S.set('xr-phone', true);
-    var tabs = PHONE ? 46 : 40, title = PHONE ? 44 : 40;
+    // every device: no title row (hidden in hideDesktopOnly - the app's top bar replaces it), so the File menu panel,
+    // placed at "tabs + title height", starts right under the tabs
+    S.set('document-title-height', 0);
+    if (!(PHONE || TABLET)) return;
+    var tabs = PHONE ? 46 : 40;
     S.set('toolbar-height-tabs', tabs);
     S.set('toolbar-height-tabs-top-title', tabs);
-    S.set('document-title-height', title);
     S.set('toolbar-height-compact', tabs);
     S.set('toolbar-height-normal', tabs + (S.get('toolbar-height-controls') || 84));
   }

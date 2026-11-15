@@ -7,10 +7,16 @@ struct EditorScreen: View {
     /// Back to the documents (after the editor has saved). Without it the screen dismisses itself.
     var onClose: (() -> Void)? = nil
     @StateObject private var controller = EditorController()
+    @StateObject private var barStatus = EditorBarStatus()      // the top bar's Opening / Saving / Edited / Saved line
     @State private var lang = AppLanguage.current
     @State private var share: ShareFile?
     @State private var saveAsFormats: [String] = []
     @State private var showAccount = false
+    @State private var showAbout = false
+    // @State, not @StateObject: the screen must NOT redraw when the model changes. A redraw rebuilds the top bar's
+    // toolbar, and a ⋯ menu open at that moment stays on screen but dead - every tap ignored (CI: the Document info
+    // sheet's 15 s count stop fired while the menu was open). Only the capsule and the sheet observe the model.
+    @State private var menu = DocumentMenuModel()           // the ⋯ menu's Exporting capsule + Document info sheet
     @State private var recovered: RecoveryNotice?           // the editor was reopened after its web process ended
     @State private var tooLarge = false                     // ... twice within a minute: Share / Back instead
     @State private var toast: String?
@@ -27,39 +33,21 @@ struct EditorScreen: View {
         EditorWebView(document: $document, title: title, lang: lang, onCommand: handle, controller: controller)
             .ignoresSafeArea(.container, edges: [.bottom])
             .editorRecovery(notice: $recovered, tooLarge: tooLarge, ar: lang == "ar", share: shareDocument, back: leave)
-            .navigationTitle((title as NSString).deletingPathExtension)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button(action: close) { Image(systemName: "chevron.backward") }
-                        .accessibilityLabel(L.documents)
-                }
-                // language, share and account live in the system bar (full-size touch targets); the editors' own
-                // header buttons for them are hidden on iOS so the ribbon tabs get the whole width
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    Menu {
-                        Button { if lang != "en" { pendingLang = "en" } } label: {
-                            Label("English", systemImage: lang == "en" ? "checkmark" : "")
-                        }
-                        .accessibilityIdentifier("xr-nav-lang-en")
-                        Button { if lang != "ar" { pendingLang = "ar" } } label: {
-                            Label("العربية", systemImage: lang == "ar" ? "checkmark" : "")
-                        }
-                        .accessibilityIdentifier("xr-nav-lang-ar")
-                    } label: { Image(systemName: "globe") }
-                        .accessibilityLabel(lang == "ar" ? "اللغة" : "Language")
-                        .accessibilityIdentifier("xr-nav-lang")
-                    Button { handle("xrero:share", "") } label: { Image(systemName: "square.and.arrow.up") }
-                        .accessibilityLabel(lang == "ar" ? "مشاركة" : "Share")
-                        .accessibilityIdentifier("xr-nav-share")
-                    Button { showAccount = true } label: {
-                        Image(systemName: account.isSignedIn ? "person.crop.circle.fill" : "person.crop.circle")
-                    }
-                        .accessibilityLabel(account.isSignedIn ? (lang == "ar" ? "الحساب" : "Account")
-                                                               : (lang == "ar" ? "تسجيل الدخول" : "Sign in"))
-                        .accessibilityIdentifier("xr-nav-account")
-                }
+            // one native bar (plan M4a): Back, name + Edited / Saved, Undo (+ Redo when wide), the ⋯ document menu
+            // (plan M7b: Find, Redo, Save | Share, Export, Document info | Language, Account, About, All tools)
+            .editorTopBar(title: (title as NSString).deletingPathExtension, state: controller.state, status: barStatus,
+                          controller: controller, ar: lang == "ar", back: close, save: { controller.userSave() },
+                          find: { controller.find() },
+                          menuKey: "\(lang)|\(account.isSignedIn)|\(document.kind.rawValue)") {
+                DocumentMenuItems(kind: document.kind, lang: lang, signedIn: account.isSignedIn, model: menu,
+                                  controller: controller,
+                                  language: { if $0 != lang { pendingLang = $0 } },
+                                  share: { handle("xrero:share", "") },
+                                  account: { showAccount = true },
+                                  about: { showAbout = true })
             }
+            .documentMenuChrome(model: menu, kind: document.kind, name: title, size: document.data.count,
+                                fileURL: fileURL, ar: lang == "ar")
             .overlay(alignment: .bottom) {
                 // short failure notice (paste): a capsule above the editor's bottom bar, gone after 2 s
                 if let toast {
@@ -94,6 +82,7 @@ struct EditorScreen: View {
             }
             .sheet(item: $share) { ShareSheet(items: [$0.url]) }
             .sheet(isPresented: $showAccount) { AccountView() }
+            .sheet(isPresented: $showAbout) { AboutSheet() }
             .onChange(of: account.info) { _, _ in controller.syncAccount(account.webValue) }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .background { controller.save() }     // never lose typing when the app is left
@@ -126,6 +115,8 @@ struct EditorScreen: View {
     }
 
     private func handle(_ cmd: String, _ param: String) {
+        barStatus.note(cmd, param)
+        menu.note(cmd, param)
         if cmd == "close" {
             close()
         } else if cmd == "recovered" {          // the last saved version is back on screen after the web process ended
@@ -139,6 +130,8 @@ struct EditorScreen: View {
             showAccount = true
         } else if cmd == "paste-failed" {
             showToast(L.cannotPaste)
+        } else if cmd == "export-failed" {
+            showToast(lang == "ar" ? "تعذّر التصدير" : "Couldn't export")
         } else if cmd == "xrero:signout" {
             account.signOut()
         } else if cmd == "saveas" {
@@ -157,7 +150,7 @@ struct EditorScreen: View {
             let new = String(cmd.dropFirst("xrero:lang:".count)) == "ar" ? "ar" : "en"
             guard new != lang else { return }
             AppLanguage.set(new)
-            controller.save { lang = new }                       // reopen the editor in the other language
+            controller.save { barStatus.reopening(); lang = new }  // reopen the editor in the other language
         }
     }
 }

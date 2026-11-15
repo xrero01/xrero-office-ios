@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import WebKit
 
 extension UTType {
     static let docx = UTType("org.openxmlformats.wordprocessingml.document") ?? UTType(importedAs: "org.openxmlformats.wordprocessingml.document")
@@ -139,6 +140,64 @@ struct AppLanguageEnvironment: ViewModifier {
         content
             .environment(\.layoutDirection, language.layoutDirection)
             .environment(\.locale, language.locale)
+            .background(UIKitLayoutDirection(rtl: language.isArabic))
+    }
+}
+
+/// UIKit's own layout direction for the window scene, from the app language. SwiftUI's \.layoutDirection mirrors only
+/// SwiftUI views: the menus UIKit draws for a SwiftUI Menu (the editor's ⋯ menu, its Export ▸ / Language ▸ submenus),
+/// alerts and system controls follow UIKit's trait instead, so without this an Arabic menu showed its rows
+/// left-to-right with right-pointing chevrons (plan M7b review). A scene-wide trait override is what an iPhone set to
+/// Arabic gives the app anyway; the in-app language is the source of truth (plan M9b), so English is set explicitly
+/// too. Views that pin .leftToRight (digits, glyph pictures) keep it: their SwiftUI environment wins.
+/// The trait alone flips the menus' chevrons but not their rows (CI round 6: symbol and text still laid out from the
+/// left - UIKit lays menu rows out by the views' semantic attribute), so in Arabic new UIKit views are also forced
+/// right-to-left through the appearance proxy; menus are built anew on every opening, so the next one reads it. The
+/// editor's web view and everything inside it are left as they were: its text input stays exactly as the typing
+/// gate tests it, and the page draws its own direction.
+struct UIKitLayoutDirection: UIViewRepresentable {
+    var rtl: Bool
+
+    func makeUIView(context: Context) -> Probe {
+        let v = Probe()
+        v.isUserInteractionEnabled = false
+        v.isAccessibilityElement = false
+        return v
+    }
+
+    func updateUIView(_ v: Probe, context: Context) {
+        v.rtl = rtl
+        v.apply()
+    }
+
+    final class Probe: UIView {
+        var rtl = false
+        private var applied: Bool?
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            applied = nil              // a new window / scene: set it there too
+            apply()
+        }
+
+        func apply() {
+            guard let scene = window?.windowScene, applied != rtl else { return }
+            applied = rtl
+            scene.traitOverrides.layoutDirection = rtl ? .rightToLeft : .leftToRight
+            UIKitLayoutDirection.forceViews(rtl)
+        }
+    }
+
+    /// Whether new UIKit views are forced right-to-left (read by the CI hook `uikitdir`).
+    @MainActor private(set) static var forced = false
+
+    @MainActor static func forceViews(_ rtl: Bool) {
+        guard forced != rtl else { return }
+        forced = rtl
+        UIView.appearance().semanticContentAttribute = rtl ? .forceRightToLeft : .unspecified
+        // the editor's web view and its inner views keep UIKit's default (see above)
+        WKWebView.appearance().semanticContentAttribute = .unspecified
+        UIView.appearance(whenContainedInInstancesOf: [WKWebView.self]).semanticContentAttribute = .unspecified
     }
 }
 

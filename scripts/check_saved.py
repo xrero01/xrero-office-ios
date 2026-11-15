@@ -129,6 +129,67 @@ def touch_gate(d, lang):
     return good and saved
 
 
+def doc_menu(d):
+    """The ⋯ document menu (plan M7b, EditorUITests.testDocumentMenu + testSpreadsheetAndPresentationOpen): every
+    Export ▸ copy is a real file of its format holding what was on screen; the File menu (opened through ⋯ > All tools,
+    its tab hidden on touch) keeps its Close Menu entry; the PDF spike is REPORTED only (PDF / Print are not offered)."""
+    good = True
+    want_ar = "مرحبا"
+    for f, kind in (("exp-xr-menu-en.docx", "docx"), ("xr-menu-en.odt", "odt"), ("xr-menu-en.rtf", "rtf"),
+                    ("exp-xr-menu-ar.docx", "docx")):
+        p = os.path.join(d, f)
+        if not os.path.exists(p):
+            print("%s: MISSING (⋯ > Export ▸ .%s)" % (f, kind)); good = False; continue
+        try:
+            if kind == "docx":
+                s = text(p); g = "Menu check" in s and want_ar in s
+            elif kind == "odt":
+                z = zipfile.ZipFile(p)
+                body = re.sub(r"<[^>]+>", "", z.read("content.xml").decode("utf-8"))
+                g = z.read("mimetype") == b"application/vnd.oasis.opendocument.text" and "Menu check" in body and want_ar in body
+            else:
+                raw = open(p, "rb").read()
+                # x2t writes every character as an RTF escape (\uN* with N the signed 16-bit code): decode them
+                esc = re.compile(re.escape(bytes([92])) + rb"u(-?[0-9]+)[*]?")      # a backslash, u, the number
+                txt = esc.sub(lambda m: chr(int(m.group(1)) % 65536).encode("utf-8"), raw).decode("utf-8", "replace")
+                g = raw.startswith(rb"{\rtf") and "Menu check" in txt and want_ar in txt
+        except Exception as e:
+            g = False; print("%s: cannot read: %s" % (f, e))
+        print("%s (⋯ > Export ▸ .%s): text on screen kept -> %s" % (f, kind, "OK" if g else "WRONG"))
+        good &= g
+    for f, part, mime in (("exp-xr-test.xlsx", "xl/workbook.xml", None), ("exp-xr-test.pptx", "ppt/presentation.xml", None),
+                          ("xr-test.odp", "content.xml", b"application/vnd.oasis.opendocument.presentation")):
+        p = os.path.join(d, f)
+        if not os.path.exists(p):
+            print("%s: MISSING (⋯ > Export)" % f); good = False; continue
+        try:
+            z = zipfile.ZipFile(p)
+            g = part in z.namelist() and (mime is None or z.read("mimetype") == mime)
+        except Exception as e:
+            g = False; print("%s: cannot read: %s" % (f, e))
+        print("%s (⋯ > Export): %s" % (f, "OK" if g else "WRONG"))
+        good &= g
+    lg = os.path.join(d, "xr-log-xr-menu-en.docx.txt")
+    log = open(lg, encoding="utf-8", errors="replace").read() if os.path.exists(lg) else ""
+    for what in ("find", "doc info", "all tools"):
+        r = re.findall(r"menu %s: ([^\n]*)" % what, log)
+        print("⋯ > %s: %s" % (what, r[-1] if r else "NOT LOGGED"))
+        good &= bool(r) and r[-1] == "ok"
+    # the PDF spike (informational): x2t's answer, and if it wrote a file, whether its Arabic text can be copied out
+    spike = re.findall(r"pdf spike[^\n]*", log)
+    print("PDF spike:", " | ".join(spike) if spike else "NOT RUN")
+    sp = os.path.join(d, "xr-menu-en-spike.pdf")
+    if os.path.exists(sp):
+        try:
+            from pypdf import PdfReader
+            t = "".join(pg.extract_text() or "" for pg in PdfReader(sp).pages)
+            print("PDF spike copy-text: %r -> Arabic copyable=%s (informational: PDF / Print stay hidden until this passes)"
+                  % (t[:80], want_ar in t))
+        except Exception as e:
+            print("PDF spike: the written PDF cannot be read:", e)
+    return good
+
+
 root = sys.argv[1]
 ok = True
 def text(p):
@@ -150,8 +211,11 @@ for dev in sorted(os.listdir(root)) if os.path.isdir(root) else []:
     t = os.path.join(d, "xr-test.docx")
     if os.path.exists(t):
         s = text(t)
-        en = "Typed on iPhone" in s and "English OK." in s      # iOS Smart Punctuation turns "-" into an en dash
-        ar = "كتابة عربية" in s
+        # the exact text (a stray character, e.g. a Cmd+S typed as "s", fails); iOS Smart Punctuation turns "-" into
+        # an en dash. The Arabic line is there only if the keyboard could type it.
+        n = s.replace("–", "-").strip()
+        en = n in ("Typed on iPhone - English OK.", "Typed on iPhone - English OK.كتابة عربية")
+        ar = n == "Typed on iPhone - English OK.كتابة عربية"
         print("xr-test.docx: English typed=%s  Arabic typed=%s  text=%r" % (en, ar, s[:200]))
         ok &= en
     else:
@@ -211,8 +275,12 @@ for dev in sorted(os.listdir(root)) if os.path.isdir(root) else []:
         shown = menu[-1].split()
         dead = [b for b in ("fm-btn-local-open", "fm-btn-print", "fm-btn-print-with-preview", "fm-btn-export-pdf",
                             "fm-btn-recent", "fm-btn-suggest") if b in shown]
-        good = not dead and ("fm-btn-download" in shown or "fm-btn-save-desktop" in shown) and "fm-btn-save" in shown
-        print("File menu entries:", " ".join(shown), "-> %s" % ("OK" if good else "WRONG (no-op entries: %s)" % dead))
+        # the File tab is hidden on touch (M7b: ⋯ > All tools opens the backstage), so Close Menu is the way back
+        tab = re.findall(r"file tab shown: (\d)", log)
+        good = not dead and ("fm-btn-download" in shown or "fm-btn-save-desktop" in shown) and "fm-btn-save" in shown \
+            and "fm-btn-return" in shown and tab[-1:] == ["0"]
+        print("File menu entries:", " ".join(shown), "| file tab shown:", tab[-1:] or "?",
+              "-> %s" % ("OK" if good else "WRONG (no-op entries: %s; Close Menu and a hidden File tab required)" % dead))
         ok &= good
     else:
         print("File menu entries: NOT LOGGED"); ok = False
@@ -254,6 +322,7 @@ for dev in sorted(os.listdir(root)) if os.path.isdir(root) else []:
             print("ar_letter.pdf: cannot read the saved PDF:", e); ok = False
     else:
         print("ar_letter.pdf: MISSING (PDF edit + save)"); ok = False
+    ok &= doc_menu(d)
 if not (os.path.isdir(root) and os.listdir(root)):
     print("no saved files from any simulator"); ok = False
 try:   # out/qa/touch-gate.json beside out/saved: the gate's results per device + language (published in the evidence)
