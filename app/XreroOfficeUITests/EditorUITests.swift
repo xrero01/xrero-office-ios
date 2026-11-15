@@ -694,6 +694,141 @@ final class EditorUITests: XCTestCase {
         }
     }
 
+    /// The title menu (plan M4b), on the REAL document path (XR_REAL=1: UIDocument + the app's own editor screen, as
+    /// opened from Home), English then Arabic interface: type and save, then tap the file name > Rename to a new name
+    /// (English, then an Arabic file name), edit and save again, Duplicate, back to the list, reopen from Recent (its
+    /// bookmark must point at the renamed file), edit and save a third time. The editor page is never reloaded by the
+    /// rename (the second edit lands without reopening). check_saved.py then reads the renamed file: all three words
+    /// inside, nothing left at the old name, and the copy holding the first two.
+    func testTitleMenuRenameSaveReopen() {
+        continueAfterFailure = true                        // the Arabic half still reports when English fails
+        let runs: [(lang: String, file: String, newName: String, words: [String])] = [
+            ("en", "xr-ren-en.docx", "Renamed note", ["Alpha", " Beta", " Gamma"]),
+            ("ar", "xr-ren-ar.docx", "\u{0645}\u{0644}\u{0627}\u{062D}\u{0638}\u{0629} \u{0627}\u{0644}\u{0627}\u{062C}\u{062A}\u{0645}\u{0627}\u{0639}",   // ملاحظة الاجتماع
+             ["Delta", " Omega", " Sigma"]),
+        ]
+        for run in runs {
+            let ar = run.lang == "ar"
+            let app = XCUIApplication()
+            app.launchArguments = ["-xr.lang", run.lang]
+            app.launchEnvironment = ["XR_REAL": "1", "XR_NEW_NAME": run.file]
+            app.launch()
+            let title = app.staticTexts["xr-bar-title"], status = app.staticTexts["xr-bar-status"]
+            func statusNow() -> String { (try? status.firstMatch.snapshot())?.label ?? "(none)" }
+            func titleNow() -> String { (try? title.firstMatch.snapshot())?.label ?? "(none)" }
+            /// the editor is up: its title shows and its second line no longer says Opening…
+            func waitEditor(_ what: String) -> Bool {
+                let end = Date().addingTimeInterval(120)
+                while Date() < end {
+                    let s = statusNow()
+                    if title.exists && !s.hasPrefix("Opening") && !s.hasPrefix("جارٍ الفتح") { sleep(3); return true }
+                    Thread.sleep(forTimeInterval: 0.5)
+                }
+                shot(app, "60-ren-\(run.lang)-\(what)-not-ready")
+                return false
+            }
+            func typeInPage(_ text: String) {
+                let web = app.webViews.firstMatch
+                // the page's empty middle, below the text (the editor puts the caret at the end of the last line, so a
+                // word is never typed into another) and above where the keyboard comes up; a right-to-left blank
+                // (Arabic interface) starts at the right edge
+                let point = web.coordinate(withNormalizedOffset: CGVector(dx: ar ? 0.65 : 0.35, dy: 0.45))
+                point.tap()
+                if !app.keyboards.firstMatch.waitForExistence(timeout: 4) { point.tap(); _ = app.keyboards.firstMatch.waitForExistence(timeout: 4) }
+                sleep(1)
+                typeSlowly(app, text)
+                sleep(1)
+            }
+            func saveNow(_ what: String) -> Bool {
+                app.buttons["xr-bar-more"].tap()
+                let save = app.buttons["xr-bar-save"]
+                guard save.waitForExistence(timeout: 5) else { XCTFail("no Save in ⋯ (\(run.lang) \(what))"); return false }
+                save.tap()
+                let want = ar ? "محفوظ" : "Saved"
+                let end = Date().addingTimeInterval(40)
+                while Date() < end { if statusNow() == want { return true }; Thread.sleep(forTimeInterval: 0.3) }
+                return false
+            }
+            func titleMenu(_ item: String) -> Bool {
+                let menu = app.buttons["xr-bar-title-menu"]
+                guard menu.waitForExistence(timeout: 5) else { XCTFail("no title menu (\(run.lang))"); return false }
+                menu.tap()
+                let e = app.buttons[item]
+                guard e.waitForExistence(timeout: 5) else { XCTFail("no \(item) in the title menu (\(run.lang))"); return false }
+                e.tap()
+                return true
+            }
+
+            XCTAssertTrue(waitEditor("opened"), "the real editor did not open (\(run.lang))")
+            let oldBase = (run.file as NSString).deletingPathExtension
+            XCTAssertEqual(titleNow(), oldBase, "title before the rename (\(run.lang))")
+            // 1. edit + save under the first name
+            typeInPage(run.words[0])
+            XCTAssertTrue(saveNow("first"), "first save did not say Saved (\(run.lang)): \(statusNow())")
+
+            // 2. the title menu: Rename, Duplicate, Move…
+            app.buttons["xr-bar-title-menu"].tap()
+            for id in ["xr-title-rename", "xr-title-duplicate", "xr-title-move"] {
+                XCTAssertTrue(app.buttons[id].waitForExistence(timeout: 5), "the title menu has no \(id) (\(run.lang))")
+            }
+            shot(app, "61-ren-\(run.lang)-title-menu")
+            app.buttons["xr-title-rename"].tap()
+            let field = app.textFields["xr-rename-field"]
+            XCTAssertTrue(field.waitForExistence(timeout: 5), "no name field in the Rename alert (\(run.lang))")
+            // the alert focuses its field with the cursor after the name: delete it, then type the new one
+            if !app.keyboards.firstMatch.waitForExistence(timeout: 3) { field.tap() }
+            for _ in 0..<3 {
+                let v = (field.value as? String) ?? ""
+                if v.isEmpty || v == field.placeholderValue || v == "Name" || v == "الاسم" { break }
+                field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: v.count + 2))
+            }
+            field.typeText(run.newName)
+            print("XR title menu \(run.lang): rename field = \((field.value as? String) ?? "?")")
+            shot(app, "62-ren-\(run.lang)-rename-alert")
+            let ok = app.alerts.buttons.matching(NSPredicate(format: "identifier == 'xr-rename-ok' OR label == %@",
+                                                             ar ? "إعادة التسمية" : "Rename")).firstMatch
+            XCTAssertTrue(ok.exists, "no Rename button in the alert (\(run.lang))")
+            ok.tap()
+            var renamed = false
+            for _ in 0..<20 { if titleNow() == run.newName { renamed = true; break }; Thread.sleep(forTimeInterval: 0.5) }
+            print("XR title menu \(run.lang): title after rename = \(titleNow())")
+            XCTAssertTrue(renamed, "the title did not become the new name (\(run.lang)): \(titleNow())")
+            shot(app, "63-ren-\(run.lang)-renamed")
+
+            // 3. edit + save after the rename: the same editor page (no reopen), the file under its new name
+            typeInPage(run.words[1])
+            XCTAssertTrue(saveNow("after rename"), "save after the rename did not say Saved (\(run.lang)): \(statusNow())")
+
+            // 4. Duplicate: a copy beside it, said in a short notice
+            if titleMenu("xr-title-duplicate") {
+                let toast = app.staticTexts["xr-toast"]
+                XCTAssertTrue(toast.waitForExistence(timeout: 15), "no notice after Duplicate (\(run.lang))")
+                print("XR title menu \(run.lang): duplicate notice = \(toast.exists ? toast.label : "-")")
+                shot(app, "64-ren-\(run.lang)-duplicated")
+            }
+            sleep(2)
+
+            // 5. back to the list: Recent shows the new name; reopen it from there, edit + save once more
+            app.buttons["xr-bar-back"].tap()
+            let reopen = app.buttons["xr-real-reopen"]
+            XCTAssertTrue(reopen.waitForExistence(timeout: 30), "the editor did not close (\(run.lang))")
+            sleep(2)
+            let recent = app.staticTexts["xr-real-recent"]
+            print("XR title menu \(run.lang): recent = \(recent.label)")
+            XCTAssertEqual(recent.label, run.newName + ".docx", "Recent does not show the renamed file (\(run.lang))")
+            reopen.tap()
+            XCTAssertTrue(waitEditor("reopened"), "the renamed file did not reopen (\(run.lang))")
+            XCTAssertEqual(titleNow(), run.newName, "title after reopening (\(run.lang))")
+            shot(app, "65-ren-\(run.lang)-reopened")
+            typeInPage(run.words[2])
+            XCTAssertTrue(saveNow("reopened"), "save after reopening did not say Saved (\(run.lang)): \(statusNow())")
+            app.buttons["xr-bar-back"].tap()
+            XCTAssertTrue(reopen.waitForExistence(timeout: 30), "the editor did not close after reopening (\(run.lang))")
+            sleep(2)
+            app.terminate()
+        }
+    }
+
     /// Opens the Arabic sample passed by the workflow, adds a word, saves it.
     func testOpenArabicSampleAndSave() throws {
         guard let b64 = ProcessInfo.processInfo.environment["XR_SAMPLE_B64"],

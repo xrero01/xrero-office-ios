@@ -675,6 +675,24 @@
     return 'ok';
   };
 
+  // ---- the title menu's Rename / Move (plan M4b; EditorController.call after the app moved the file)
+  // The app moves the file itself (a coordinated move of the open document, which then writes every later save to its
+  // new place), so the page is NOT reloaded: undo, selection and the keyboard stay. Only the page's own idea of the
+  // file is updated here - its name, used for the save log and for the names of Save As / Export copies, so a copy
+  // made after the rename is named after the new name. The extension must stay the same: it chose the save format
+  // when the document opened ('other format' = refused, nothing changed).
+  window.__xrRename = function (name) {
+    name = String(name || '');
+    if (!opened) return 'nothing open';
+    if (!name || /[\/\\]/.test(name)) return 'bad name';
+    if (ext(name) !== opened.ext) return 'other format';
+    opened.name = name;
+    if (H) H.title = name;
+    hub.set('title', name);
+    log('renamed to', name);
+    return 'ok';
+  };
+
   // The engine's document as Editor.bin bytes (save, Save As, the ⋯ menu's Export). In a web page the engine hands it
   // over base64-encoded and usually already carrying its "DOCY;v10;0;" header; the header is added when it is not.
   function engineBin(ed) {

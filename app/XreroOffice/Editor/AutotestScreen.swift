@@ -48,7 +48,9 @@ struct AutotestScreen: View {
     }
 
     var body: some View {
-        if bar {
+        if ProcessInfo.processInfo.environment["XR_REAL"] == "1" {
+            RealDocumentHarness()
+        } else if bar {
             NavigationStack {
                 // the real ⋯ document menu (plan M7b); the actions that would leave the test's editor (language
                 // switch, share sheet) report in the state label instead
@@ -546,6 +548,46 @@ private struct ProbeLabel: View {
     /// The web view (its private content view, found by walking the public subview tree) is the first responder.
     private static func holdsFirstResponder(_ v: UIView) -> Bool {
         v.isFirstResponder || v.subviews.contains { holdsFirstResponder($0) }
+    }
+}
+
+/// XR_REAL=1 (plan M4b): the REAL document path instead of the test editor - the app's DocumentOpener opens
+/// Documents/<XR_NEW_NAME> as a UIDocument and presents the real EditorHost / EditorScreen over this screen (top bar,
+/// title menu, ⋯ menu, save on close), exactly as from Home. Back closes it again; "reopen" opens the first Recent
+/// entry by its bookmark, as Home's Recent row does. The test renames through the title menu, edits, saves and
+/// reopens; check_saved.py then finds the content in the renamed file and no file left at the old name.
+struct RealDocumentHarness: View {
+    @StateObject private var opener = DocumentOpener()
+    @ObservedObject private var recents = RecentFiles.shared
+    @State private var state = "starting"
+    private let name = ProcessInfo.processInfo.environment["XR_NEW_NAME"] ?? "xr-real.docx"
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Text(state).accessibilityIdentifier("xr-state")
+            Text(recents.items.first?.name ?? "none").accessibilityIdentifier("xr-real-recent")
+            Button("reopen") { reopen() }.accessibilityIdentifier("xr-real-reopen")
+        }
+        .background(PresenterAnchor(opener: opener))
+        .onAppear(perform: start)
+    }
+
+    private func start() {
+        guard state == "starting" else { return }
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let url = docs.appendingPathComponent(name)
+        let kind = OfficeKind(url: url) ?? .word
+        if !FileManager.default.fileExists(atPath: url.path) {
+            try? OfficeDocument.blank(kind).write(to: url, options: .atomic)
+        }
+        state = "opened " + name
+        opener.open(url)
+    }
+
+    private func reopen() {
+        guard let item = recents.items.first, let url = recents.resolve(item) else { state = "no recent"; return }
+        state = "reopened " + url.lastPathComponent
+        opener.open(url)
     }
 }
 #endif

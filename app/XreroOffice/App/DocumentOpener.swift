@@ -180,11 +180,27 @@ final class RecentFiles: ObservableObject {
 
     init() { load() }
 
-    func add(_ url: URL) {
+    /// `behindFirst`: a copy made from the open document (title menu > Duplicate) goes right after it - the open file
+    /// stays the most recent one.
+    func add(_ url: URL, behindFirst: Bool = false) {
         guard let bm = try? url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil) else { return }
         var list = items.filter { $0.id != url.path }
-        list.insert(Item(id: url.path, name: url.lastPathComponent, date: Date(), bookmark: bm, place: Self.place(of: url)), at: 0)
+        let item = Item(id: url.path, name: url.lastPathComponent, date: Date(), bookmark: bm, place: Self.place(of: url))
+        list.insert(item, at: behindFirst ? min(1, list.count) : 0)
         items = Array(list.prefix(limit))
+        save()
+    }
+
+    /// The open file was renamed or moved (title menu, plan M4b): its row now points at the new place with a fresh
+    /// bookmark, keeping its position and date, so Home shows the new name and reopens the file where it is now.
+    func replace(_ old: URL, with new: URL) {
+        guard let bm = try? new.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil) else { return }
+        guard let i = items.firstIndex(where: { $0.id == old.path }) else { add(new); return }
+        var list = items
+        list[i] = Item(id: new.path, name: new.lastPathComponent, date: list[i].date, bookmark: bm, place: Self.place(of: new))
+        // one row per file: an older row for the new path (a file once known by this name) goes
+        list = list.enumerated().filter { $0.offset == i || $0.element.id != new.path }.map(\.element)
+        items = list
         save()
     }
 
