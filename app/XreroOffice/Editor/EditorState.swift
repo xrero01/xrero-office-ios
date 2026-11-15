@@ -60,6 +60,11 @@ final class EditorState: ObservableObject {
     @Published private(set) var slide = 0
     @Published private(set) var presenting = false
     @Published private(set) var showSlide = 0
+    /// Reading view (plan S2, Word / PDF): the page count, the page on screen (0-based) and whether a finger is moving
+    /// the page - read by the editor only while reading, for the floating page capsule.
+    @Published private(set) var pages = 0
+    @Published private(set) var page = 0
+    @Published private(set) var moving = false
     /// How many state messages have arrived since the editor page loaded (tests, diagnostics).
     @Published private(set) var updates = 0
 
@@ -95,6 +100,9 @@ final class EditorState: ObservableObject {
             case "slide": put(\.slide, (v as? NSNumber)?.intValue)
             case "presenting": put(\.presenting, v as? Bool)
             case "showSlide": put(\.showSlide, (v as? NSNumber)?.intValue)
+            case "pages": put(\.pages, (v as? NSNumber)?.intValue)
+            case "page": put(\.page, (v as? NSNumber)?.intValue)
+            case "moving": put(\.moving, v as? Bool)
             default: break
             }
         }
@@ -110,6 +118,7 @@ final class EditorState: ObservableObject {
         put(\.lineSpacing, -1); put(\.textColor, ""); put(\.cell, ""); put(\.math, SelectionMath.none)
         put(\.cellEdit, false); put(\.updates, 0)
         put(\.slides, 0); put(\.slide, 0); put(\.presenting, false); put(\.showSlide, 0)
+        put(\.pages, 0); put(\.page, 0); put(\.moving, false)
     }
 
     /// One line for logs and the CI probe, e.g. "undo:1 redo:0 mod:1 saved:0 sel:text b:0 i:0 u:0 al:left dir:rtl list:none

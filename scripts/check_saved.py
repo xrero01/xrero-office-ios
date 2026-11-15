@@ -382,6 +382,31 @@ def title_menu(d):
     return good
 
 
+def reading_view(d):
+    """The reading view (plan S2, EditorUITests.testReadingViewEditDoneThenType, the real UIDocument path): the store
+    letter opened as an existing file in reading state, Edit / Done switched 10 times, then Edit and an English and an
+    Arabic line typed - both lines must be in the saved xr-read-<lang>.docx (the editor's input field stayed healthy
+    through the switches) with the letter itself kept. English and Arabic interface."""
+    good = True
+    for lang in ("en", "ar"):
+        f = os.path.join(d, "xr-read-%s.docx" % lang)
+        if not os.path.exists(f):
+            print("xr-read-%s.docx: MISSING (reading view: Edit / Done x10, then type + save)" % lang); good = False; continue
+        try:
+            s = text(f)
+        except Exception as e:
+            print("xr-read-%s.docx: cannot read: %s" % (lang, e)); good = False; continue
+        flat = re.sub(r"[‎‏]", "", s)
+        en = "Reading view OK." in flat
+        ar = "وضع القراءة" in flat
+        kept = "السادة أولياء الأمور الكرام" in flat
+        g = en and ar and kept
+        print("xr-read-%s.docx (reading view, Edit / Done x10 then typing): English typed=%s  Arabic typed=%s  letter kept=%s -> %s"
+              % (lang, en, ar, kept, "OK" if g else "WRONG"))
+        good &= g
+    return good
+
+
 def gallery(d):
     """The template gallery (plan S8, TemplateGalleryUITests): every template, EN + AR, was made from the gallery,
     opened and saved by the engine (an x2t round trip) under its name in that language; each saved copy still holds its
@@ -571,6 +596,7 @@ for dev in sorted(os.listdir(root)) if os.path.isdir(root) else []:
         print("ar_letter.pdf: MISSING (PDF edit + save)"); ok = False
     ok &= doc_menu(d)
     ok &= title_menu(d)
+    ok &= reading_view(d)
     ok &= gallery(d)
 if not (os.path.isdir(root) and os.listdir(root)):
     print("no saved files from any simulator"); ok = False

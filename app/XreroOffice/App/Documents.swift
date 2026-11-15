@@ -158,11 +158,14 @@ final class OpenDocumentModel: ObservableObject {
 /// menus and alerts mirror with Home.
 struct EditorHost: View {
     @ObservedObject var model: OpenDocumentModel
+    /// Reading or editing when it opens (plan S2): chosen by DocumentOpener.
+    var reading: ReadingModel = .off
     var onClose: () -> Void
 
     var body: some View {
         NavigationStack {
-            EditorScreen(document: $model.document, fileURL: model.fileURL, files: model, onClose: onClose)
+            EditorScreen(document: $model.document, fileURL: model.fileURL, files: model, onClose: onClose,
+                         reading: reading)
         }
         .appLanguageEnvironment()
     }

@@ -807,8 +807,9 @@
       } catch (e) {}
       open = true;
       // the line around the finger: the menu shows above it, so it never covers the selected word
+      // ro: the reading view (plan S2) - the app offers Copy and Select All only (the engine refuses edits anyway)
       H.command && H.command('editmenu', JSON.stringify({ x: Math.round(ox + x - 30), y: Math.round(oy + y - 14), w: 60, h: 28,
-        type: hub.get('selection') || 'none', sel: sel }));
+        type: hub.get('selection') || 'none', sel: sel, ro: read.on }));
     }
     return { take: take };
   })();
@@ -1307,6 +1308,168 @@
     return JSON.stringify(o);
   };
 
+  // ---------------------------------------------------------------- reading view (plan S2)
+  // Word documents and PDFs the app opens from Recent / Browse / Open-in / Share start in reading state, and the app's
+  // Edit / Done (EditorTopBar, ReadingView.swift) switches it with __xrReadMode(false / true). Reading state is:
+  //  - the engine's own view restriction (asc_setRestriction with View added - the path the editor's Protect >
+  //    read-only takes, DocProtection.js): every edit, undo included, is refused by the engine itself. No reload, so
+  //    the undo history, the selection and the zoom stay. The restriction the document had before (a protected file,
+  //    the PDF editor's annotate mode) is put back on Edit, never replaced by "none";
+  //  - the keyboard input field read-only (the engine's own isDisableKeyboard flag, which its view mode uses), so a
+  //    tap on the page never brings the keyboard up; select, Copy, Find, pinch and scrolling keep working - no pointer
+  //    event on the canvas is blocked;
+  //  - html.xr-read hiding the edit chrome: the tab row with its ribbon and the status bar (the app shows a floating
+  //    page capsule instead), the layout re-measured so the page gets their height. Edit fades them back in (200 ms;
+  //    at once with Reduce Motion).
+  // A page loaded in reading state (XreroHost.read '1': a reload after a language switch or a crash keeps the mode)
+  // hides the chrome at content-ready, before its first paint; the restriction follows one task later, after the
+  // editor's own DocProtection has applied the document's protection (a promise right after content-ready).
+  // Never on the keystroke path: the only per-event cost is the reading check in the touch listeners (O(1)).
+  var READS = /documenteditor|pdfeditor/.test(location.pathname), PDFED = /pdfeditor/.test(location.pathname);
+  var read = { on: false, want: H.read === '1', ready: false, prev: null, poll: 0, last: 0 };
+  (function readingCss() {
+    if (!READS) return;
+    var css = 'html.xr-read #toolbar,html.xr-read #statusbar{display:none!important}' +
+      '@keyframes xr-edit-in{from{opacity:0}to{opacity:1}}' +
+      'html.xr-edit-in #toolbar,html.xr-edit-in #statusbar{animation:xr-edit-in .2s ease-out}' +
+      '@media (prefers-reduced-motion:reduce){html.xr-edit-in #toolbar,html.xr-edit-in #statusbar{animation:none}}';
+    var add = function () {
+      if (document.getElementById('xr-read-css')) return;
+      var s = document.createElement('style'); s.id = 'xr-read-css'; s.textContent = css;
+      (document.head || document.documentElement).appendChild(s);
+    };
+    if (document.documentElement) add();
+    document.addEventListener('DOMContentLoaded', add);
+  })();
+  function toolbarView() {
+    var app = window.DE || window.PDFE, ctl = null;
+    try { ctl = app && app.getController && app.getController('Toolbar'); } catch (e) {}
+    return (ctl && ctl.toolbar) || null;
+  }
+  // the page count and the page on screen (0-based) for the app's capsule: Word's first visible page, the PDF viewer's
+  // current one. Read only while reading (on entering, while a finger moves, after a page jump).
+  function readPage() {
+    var api = window.__xrApi;
+    if (!api || !READS) return;
+    var n = 0, p = 0;
+    try { n = api.getCountPages() | 0; } catch (e) {}
+    try { p = (PDFED ? api.getCurrentPage() : api.GetCurrentVisiblePage()) | 0; } catch (e) {}
+    hub.set('pages', n);
+    hub.set('page', Math.max(0, Math.min(p, n - 1)));
+  }
+  // while reading, a finger on the page (or a trackpad scroll) shows the capsule: 'moving' true, the page read every
+  // 200 ms until 1.2 s after the last touch (the engine's own momentum scroll runs on after the finger lifts)
+  function readTouch() {
+    if (!read.on) return;
+    read.last = Date.now();
+    if (read.poll) return;
+    hub.set('moving', true);
+    read.poll = setInterval(function () {
+      readPage();
+      if (Date.now() - read.last > 1200) { clearInterval(read.poll); read.poll = 0; hub.set('moving', false); }
+    }, 200);
+  }
+  if (READS) ['touchstart', 'touchmove', 'wheel'].forEach(function (t) {
+    window.addEventListener(t, readTouch, { capture: true, passive: true });
+  });
+  // the keyboard input field: read-only while reading (setReadOnlyWrapper honours isDisableKeyboard), back to the
+  // engine's own value on Edit (asc_setRestriction's checkViewMode has normally reset it already)
+  function readKeyboard(on) {
+    var ic = window.AscCommon && AscCommon.g_inputContext, api = window.__xrApi;
+    if (!ic || !ic.setReadOnlyWrapper || !('isDisableKeyboard' in ic)) return '-';
+    var want = !!on || !!(api && api.isViewMode);
+    if (ic.isDisableKeyboard !== want) { ic.isDisableKeyboard = want; ic.setReadOnlyWrapper(false); }
+    return ic.HtmlArea && ic.HtmlArea.readOnly ? 'ro' : 'rw';
+  }
+  function readRestriction() {
+    var api = window.__xrApi, R = window.Asc && Asc.c_oAscRestrictionType;
+    if (!api || !R || !api.asc_setRestriction) return;
+    var cur = typeof api.restrictions === 'number' ? api.restrictions : R.None;
+    if (read.on) {
+      if (read.prev === null) read.prev = cur;               // what the document had: put back on Edit
+      if (!(cur & R.View)) api.asc_setRestriction(cur | R.View);
+    } else if (read.prev !== null) {
+      var p = read.prev;
+      read.prev = null;
+      if (cur !== p) api.asc_setRestriction(p);
+    }
+    readKeyboard(read.on);
+  }
+  // the chrome's height goes to the page (and comes back): the editors' own window-resize path re-lays the viewport
+  // out (hidden layout items take no room) and resizes the canvas. iPad: once the ribbon is shown again it is measured
+  // again (while hidden it measured nothing): fitRibbon gives it its real height (its start-up loop may be over by
+  // then) and the toolbar re-checks which groups fit, so one that no longer does goes to its "more" menu.
+  function readLayout() {
+    try { window.dispatchEvent(new Event('resize')); } catch (e) { log('reading view: layout', e && e.message || e); }
+    if (TABLET && !read.on) {
+      try { fitRibbon(); } catch (e) {}
+      try { var tb = toolbarView(); if (tb && tb.processPanelVisible) tb.processPanelVisible(null, true); } catch (e) {}
+    }
+  }
+  function readChrome(on) {
+    if (on === read.on) return;
+    endComposition('reading view');
+    try { if (window.Common && Common.UI && Common.UI.Menu && Common.UI.Menu.Manager) Common.UI.Menu.Manager.hideAll(); } catch (e) {}
+    if (on) {
+      var api = window.__xrApi;
+      if (PDFED && api) { pdfStop(api); pdfTool = 'none'; }    // no pen / marker left on under the hidden PDF bar
+      // a ribbon panel dropped over the page (phones: the folded tab row) goes up with it
+      try { var tb = toolbarView(); if (tb && tb.isFolded && tb.isExpanded && tb.isExpanded() && tb.collapse) tb.collapse(); } catch (e) {}
+    }
+    read.on = on;
+    var html = document.documentElement;
+    html.classList.toggle('xr-read', on);
+    html.classList.toggle('xr-edit-in', !on);
+    if (!on) setTimeout(function () { html.classList.remove('xr-edit-in'); }, 260);
+    if (!on && read.poll) { clearInterval(read.poll); read.poll = 0; hub.set('moving', false); }
+    readLayout();
+    if (on) readPage();
+  }
+  // the state the app's CI probe reads (ReadingView.swift, Autotest build): the editor's own facts, not the app's
+  window.__xrReadState = function () {
+    var api = window.__xrApi, ic = window.AscCommon && AscCommon.g_inputContext;
+    var shown = function (id) { var e = document.getElementById(id); return e && e.offsetParent !== null && e.offsetHeight > 0 ? 1 : 0; };
+    var view = 0;
+    try { view = api && api.isRestrictionView && api.isRestrictionView() ? 1 : 0; } catch (e) {}
+    return 'read=' + (read.on ? 1 : 0) + ' view=' + view + ' input=' + (ic && ic.HtmlArea ? (ic.HtmlArea.readOnly ? 'ro' : 'rw') : '-') +
+      ' toolbar=' + shown('toolbar') + ' status=' + shown('statusbar') + ' page=' + ((hub.get('page') | 0) + 1) + '/' + (hub.get('pages') | 0);
+  };
+  // Edit / Done: 'ok <state>', or 'later' while the document is still opening (applied at content-ready then)
+  window.__xrReadMode = function (on) {
+    on = !!on;
+    read.want = on;
+    if (!READS) return 'no reading view here';
+    if (!read.ready || !window.__xrApi) return 'later';
+    try {
+      readChrome(on);
+      readRestriction();
+      return 'ok ' + window.__xrReadState();
+    } catch (e) { return 'error: ' + (e && e.message || e); }
+  };
+  // the capsule's Go to Page (0-based): the editor's own page jump (Word: GoToPage, the PDF viewer: navigateToPage)
+  window.__xrReadGoTo = function (i) {
+    var api = window.__xrApi;
+    if (!api || !READS || !api.goToPage) return 'no editor';
+    var n = 0;
+    try { n = api.getCountPages() | 0; } catch (e) {}
+    i = Math.max(0, Math.min(i | 0, n - 1));
+    try { api.goToPage(i); } catch (e) { return 'error: ' + (e && e.message || e); }
+    readPage();
+    setTimeout(readPage, 400);                     // after the scroll has landed
+    return 'ok ' + (i + 1) + '/' + n;
+  };
+  // content-ready: a page loaded in reading state hides its chrome now (before the first paint) and restricts the
+  // engine one task later
+  function readOpen() {
+    read.ready = true;
+    if (!READS || !read.want) return;
+    try { readChrome(true); readKeyboard(true); } catch (e) { log('reading view: open', e && e.message || e); }
+    setTimeout(function () {
+      try { if (read.want) readRestriction(); log('reading view at open: ' + window.__xrReadState()); }
+      catch (e) { log('reading view: open', e && e.message || e); }
+    }, 0);
+  }
+
   var A = {
     // ---- identity / capabilities
     IsLocalFile: function () { return true; },
@@ -1353,6 +1516,7 @@
               }, 250);
             }
           }
+          readOpen();                     // reading view (plan S2): a page loaded in reading state hides its chrome now
           H.command && H.command('ready', '');
         });
       } catch (e) { log('ready hook', e); }

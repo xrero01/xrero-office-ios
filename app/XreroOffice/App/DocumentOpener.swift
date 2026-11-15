@@ -9,9 +9,14 @@ import UniformTypeIdentifiers
 /// create-and-import path fails on the app's very first launch (the system imports the new file, then cannot resolve
 /// the item it just imported: "Unable to Import Document", DocumentManager error 1).
 final class DocumentOpener: NSObject, ObservableObject, UIDocumentBrowserViewControllerDelegate {
+    /// How a file opens (plan S2): `.edit` for a document the app has just made (a blank or a template), `.existing`
+    /// for any other file - a Word document or PDF then opens in reading state unless the setting is off or the file
+    /// was last left in editing (ReadingModel.forOpening).
+    enum OpenAs { case edit, existing }
+
     /// Any controller in the home screen's window; documents are presented from the window's root.
     weak var anchor: UIViewController?
-    private var pending: URL?                 // asked to open while the window or another document was not ready
+    private var pending: (url: URL, how: OpenAs)?  // asked to open while the window or another document was not ready
     private var editorOpen = false
     /// The window's root, kept while it is reachable: under a full-screen editor the home screen's views leave the
     /// window (anchor.view.window becomes nil), so the root must not be looked up through them when closing.
@@ -27,19 +32,19 @@ final class DocumentOpener: NSObject, ObservableObject, UIDocumentBrowserViewCon
 
     func attach(_ vc: UIViewController) {
         anchor = vc
-        if let url = pending { pending = nil; DispatchQueue.main.async { self.open(url) } }
+        if let p = pending { pending = nil; DispatchQueue.main.async { self.open(p.url, as: p.how) } }
     }
 
     // MARK: entry points from the home screen
 
     func create(_ kind: OfficeKind) {
-        do { open(try NewDocuments.create(kind)) }
+        do { open(try NewDocuments.create(kind), as: .edit) }
         catch { alert(L.cannotCreate, error.localizedDescription) }
     }
 
     /// A new file from a gallery template (plan S8), opened in the editor at once.
     func create(from template: TemplateManifest.Template, lang: String) {
-        do { open(try NewDocuments.create(from: template, lang: lang)) }
+        do { open(try NewDocuments.create(from: template, lang: lang), as: .edit) }
         catch { alert(L.cannotCreate, error.localizedDescription) }
     }
 
@@ -82,13 +87,13 @@ final class DocumentOpener: NSObject, ObservableObject, UIDocumentBrowserViewCon
     // MARK: opening
 
     private func openPending() {
-        if let next = pending { pending = nil; open(next) }
+        if let next = pending { pending = nil; open(next.url, as: next.how) }
     }
 
-    func open(_ url: URL) {
+    func open(_ url: URL, as how: OpenAs = .existing) {
         NSLog("XR open %@ editorOpen=%ld", url.lastPathComponent, editorOpen ? 1 : 0)
-        guard let root, !editorOpen else { pending = url; return }
-        guard OfficeKind(url: url) != nil else { alert(L.cannotOpen, url.lastPathComponent); return }
+        guard let root, !editorOpen else { pending = (url, how); return }
+        guard let kind = OfficeKind(url: url) else { alert(L.cannotOpen, url.lastPathComponent); return }
         editorOpen = true
         let scoped = url.startAccessingSecurityScopedResource()       // documents outside the app's own folder
         let file = OfficeFile(fileURL: url)
@@ -101,8 +106,9 @@ final class DocumentOpener: NSObject, ObservableObject, UIDocumentBrowserViewCon
                 return
             }
             RecentFiles.shared.add(url)
+            let reading = ReadingModel.forOpening(url, kind: kind, isNew: how == .edit)
             let host = UIHostingController(rootView: AnyView(EmptyView()))
-            host.rootView = AnyView(EditorHost(model: model) { [weak self] in
+            host.rootView = AnyView(EditorHost(model: model, reading: reading) { [weak self] in
                 file.close { _ in
                     if scoped { url.stopAccessingSecurityScopedResource() }
                     guard let self else { return }

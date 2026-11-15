@@ -600,6 +600,9 @@ private struct ProbeLabel: View {
 /// title menu, ⋯ menu, save on close), exactly as from Home. Back closes it again; "reopen" opens the first Recent
 /// entry by its bookmark, as Home's Recent row does. The test renames through the title menu, edits, saves and
 /// reopens; check_saved.py then finds the content in the renamed file and no file left at the old name.
+/// A blank this harness creates is a NEW document (opened for editing, as Home's create tiles do); with XR_DOC_B64
+/// the file is written from those bytes and opened as an EXISTING one (plan S2: read-first, as from Recent / Browse),
+/// as is a file that is already there.
 struct RealDocumentHarness: View {
     @StateObject private var opener = DocumentOpener()
     @ObservedObject private var recents = RecentFiles.shared
@@ -621,11 +624,17 @@ struct RealDocumentHarness: View {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let url = docs.appendingPathComponent(name)
         let kind = OfficeKind(url: url) ?? .word
+        var how = DocumentOpener.OpenAs.existing
         if !FileManager.default.fileExists(atPath: url.path) {
-            try? OfficeDocument.blank(kind).write(to: url, options: .atomic)
+            if let b64 = ProcessInfo.processInfo.environment["XR_DOC_B64"], let d = Data(base64Encoded: b64) {
+                try? d.write(to: url, options: .atomic)
+            } else {
+                try? OfficeDocument.blank(kind).write(to: url, options: .atomic)
+                how = .edit
+            }
         }
         state = "opened " + name
-        opener.open(url)
+        opener.open(url, as: how)
     }
 
     private func reopen() {

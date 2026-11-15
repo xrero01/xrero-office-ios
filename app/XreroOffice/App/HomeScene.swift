@@ -15,6 +15,8 @@ struct HomeScene: View {
     /// The optional account has been offered and answered: "Not now" on the Home card, signing in, or (20.1) the
     /// first-launch sheet. The key is the 20.1 one, so an update does not offer the account a second time.
     @AppStorage("xr.welcomeShown") private var accountOffered = false
+    /// Read-first opening (plan S2): files from Recent / Browse / Open-in open in reading view; off = for editing.
+    @AppStorage(ReadingModel.settingKey) private var readingView = true
     @State private var showAccount = false
     @State private var showAbout = false
     @State private var showTemplates = false
@@ -122,6 +124,11 @@ struct HomeScene: View {
                 Label(ar ? "اللغة" : "Language", systemImage: "globe")
             }
             .accessibilityIdentifier("xr-home-lang")
+            // plan S2: the reading-view setting (a checkmark row; new documents and templates always open for editing)
+            Toggle(isOn: $readingView) {
+                Label(ar ? "فتح الملفات في وضع القراءة" : "Open Files in Reading View", systemImage: "book")
+            }
+            .accessibilityIdentifier("xr-home-reading")
             Divider()
             Button { showAbout = true } label: {
                 Label(ar ? "حول التطبيق والتراخيص" : "About & Licences", systemImage: "info.circle")

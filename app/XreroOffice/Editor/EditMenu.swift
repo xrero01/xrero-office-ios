@@ -26,6 +26,7 @@ enum EditMenu {
         var rect: CGRect
         var type: String          // EditorState selection kinds: text, table, image, ...
         var selected: Bool        // something is selected (else just a caret)
+        var readOnly: Bool        // the reading view (plan S2): nothing can be edited
 
         init?(_ json: String) {
             guard let d = json.data(using: .utf8),
@@ -35,6 +36,7 @@ enum EditMenu {
             rect = CGRect(x: x, y: y, width: max(w, 2), height: max(h, 2))
             type = o["type"] as? String ?? "none"
             selected = (o["sel"] as? Bool) ?? false
+            readOnly = (o["ro"] as? Bool) ?? false
         }
     }
 }
@@ -88,13 +90,14 @@ final class EditMenuAnchor: UIView, UIEditMenuInteractionDelegate {
                 self?.perform?(id)
             }
         }
+        // reading view (plan S2): only what does not edit - Copy and Select All
         if r.selected {
-            items.append(item(L.cut, "scissors", "cut"))
+            if !r.readOnly { items.append(item(L.cut, "scissors", "cut")) }
             items.append(item(L.copy, "doc.on.doc", "copy"))
         }
-        items.append(item(L.paste, "doc.on.clipboard", "paste"))
+        if !r.readOnly { items.append(item(L.paste, "doc.on.clipboard", "paste")) }
         items.append(item(L.selectAll, "selection.pin.in.out", "selectall"))
-        if r.selected && r.type == "text" {
+        if r.selected && r.type == "text" && !r.readOnly {
             items.append(item(L.bold, "bold", "bold"))
             items.append(item(L.italic, "italic", "italic"))
         }

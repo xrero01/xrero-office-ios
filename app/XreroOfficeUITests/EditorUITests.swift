@@ -870,6 +870,244 @@ final class EditorUITests: XCTestCase {
         }
     }
 
+    /// Read-first opening (plan S2) on the REAL document path (XR_REAL=1: UIDocument + the app's own editor screen, the
+    /// way Recent / Browse / Open-in open a file), English then Arabic interface, the store letter written as an
+    /// EXISTING file (XR_DOC_B64):
+    /// 1. it opens in reading state: the bar shows Edit / تحرير and no Undo / Aa; the editor itself is view-restricted,
+    ///    its input field read-only and its tab row + status bar hidden (xr-read-probe, read from the editor every
+    ///    0.5 s); a tap on the page brings no keyboard but the page capsule, which opens Go to Page (English run);
+    /// 2. Edit / Done 10 times: every switch reaches the editor (restriction, input field, chrome) and the label follows;
+    /// 3. Edit once more, type an English and an Arabic line (the input field is healthy after the switches) and save;
+    ///    check_saved.py finds both lines in xr-read-<lang>.docx with the letter kept;
+    /// 4. (English) the mode is remembered per file: Back + reopen -> editing; Done, Back + reopen -> reading; with the
+    ///    setting off (-xr.readingView NO) the file opens for editing;
+    /// 5. (English) a PDF opens in reading state without the PDF tool bar; Edit brings the bar, Done hides it again.
+    /// New documents opening for editing is covered by testTitleMenuRenameSaveReopen (its blank is a new document).
+    func testReadingViewEditDoneThenType() throws {
+        guard let b64 = ProcessInfo.processInfo.environment["XR_SAMPLE_B64"] else { throw XCTSkip("no sample passed") }
+        continueAfterFailure = true                        // the Arabic half still reports when English fails
+        func launchReal(_ lang: String, _ file: String, _ bytes: String, setting: Bool = true) -> XCUIApplication {
+            let app = XCUIApplication()
+            app.launchArguments = ["-xr.lang", lang] + (setting ? [] : ["-xr.readingView", "NO"])
+            app.launchEnvironment = ["XR_REAL": "1", "XR_NEW_NAME": file, "XR_DOC_B64": bytes]
+            app.launch()
+            return app
+        }
+        for lang in ["en", "ar"] {
+            let ar = lang == "ar"
+            let file = "xr-read-\(lang).docx"
+            var app = launchReal(lang, file, b64)
+            let editWord = ar ? "تحرير" : "Edit", doneWord = ar ? "تم" : "Done"
+            func snap(_ id: String) -> String { (try? app.staticTexts[id].firstMatch.snapshot())?.label ?? "(none)" }
+            /// the editor is up: its title shows and its second line no longer says Opening…
+            func waitEditor(_ what: String) -> Bool {
+                let end = Date().addingTimeInterval(120)
+                while Date() < end {
+                    let s = snap("xr-bar-status")
+                    if app.staticTexts["xr-bar-title"].exists && !s.hasPrefix("Opening") && !s.hasPrefix("جارٍ الفتح") {
+                        sleep(2); return true
+                    }
+                    Thread.sleep(forTimeInterval: 0.5)
+                }
+                shot(app, "70-read-\(lang)-\(what)-not-ready")
+                return false
+            }
+            /// "read<n>:read=1 view=1 input=ro toolbar=0 status=0 page=1/1 app=1": n = switches the editor answered
+            func applied(_ s: String) -> Int {
+                guard s.hasPrefix("read"), let c = s.firstIndex(of: ":") else { return -1 }
+                return Int(s[s.index(s.startIndex, offsetBy: 4)..<c]) ?? -1
+            }
+            /// waits until the editor answered a switch after `after` and its own state shows every token
+            func waitRead(_ want: [String], after: Int = -1, _ timeout: TimeInterval = 12) -> String {
+                let end = Date().addingTimeInterval(timeout)
+                var s = snap("xr-read-probe")
+                while Date() < end {
+                    s = snap("xr-read-probe")
+                    if applied(s) > after && want.allSatisfy({ s.contains($0) }) { return s }
+                    Thread.sleep(forTimeInterval: 0.3)
+                }
+                return s
+            }
+            let reading = ["read=1", "view=1", "input=ro", "toolbar=0", "status=0", "app=1"]
+            let editing = ["read=0", "view=0", "input=rw", "toolbar=1", "status=1", "app=0"]
+            func editButton() -> XCUIElement { app.buttons["xr-bar-edit"] }
+            func toggle(_ toReading: Bool, _ i: Int) -> Bool {
+                let n0 = applied(snap("xr-read-probe"))
+                editButton().tap()
+                let s = waitRead(toReading ? reading : editing, after: n0)
+                let ok = (toReading ? reading : editing).allSatisfy { s.contains($0) } && applied(s) > n0
+                let label = editButton().exists ? editButton().label : "(none)"
+                print("XR read \(lang) switch \(i) -> \(toReading ? "reading" : "editing"): \(ok ? "PASS" : "FAIL") label=\(label) | \(s)")
+                XCTAssertTrue(ok, "switch \(i) did not reach the editor (\(lang)): \(s)")
+                XCTAssertEqual(label, toReading ? editWord : doneWord, "Edit / Done label after switch \(i) (\(lang))")
+                return ok
+            }
+            func saveNow() -> Bool {
+                app.buttons["xr-bar-more"].tap()
+                let save = app.buttons["xr-bar-save"]
+                guard save.waitForExistence(timeout: 5) else { XCTFail("no Save in ⋯ (\(lang))"); return false }
+                save.tap()
+                let want = ar ? "محفوظ" : "Saved"
+                let end = Date().addingTimeInterval(40)
+                while Date() < end { if snap("xr-bar-status") == want { return true }; Thread.sleep(forTimeInterval: 0.3) }
+                return false
+            }
+            func noKeyboard(_ timeout: TimeInterval) -> Bool {
+                let end = Date().addingTimeInterval(timeout)
+                while Date() < end { if !app.keyboards.firstMatch.exists { return true }; Thread.sleep(forTimeInterval: 0.3) }
+                return !app.keyboards.firstMatch.exists
+            }
+
+            guard waitEditor("opened") else {
+                XCTFail("the real editor did not open (\(lang))"); app.terminate(); continue
+            }
+            // 1. reading state as opened
+            let opened = waitRead(reading)
+            print("XR read \(lang) opened: \(opened) | bar edit=\(editButton().exists ? editButton().label : "(none)") " +
+                  "undo=\(app.buttons["xr-bar-undo"].exists) aa=\(app.buttons["xr-bar-format"].exists)")
+            shot(app, "70-read-\(lang)-opened")
+            XCTAssertTrue(reading.allSatisfy { opened.contains($0) }, "the letter did not open in reading state (\(lang)): \(opened)")
+            XCTAssertTrue(editButton().exists, "no Edit in the top bar (\(lang))")
+            XCTAssertEqual(editButton().exists ? editButton().label : "", editWord, "Edit label (\(lang))")
+            XCTAssertFalse(app.buttons["xr-bar-undo"].exists, "Undo shown while reading (\(lang))")
+            XCTAssertFalse(app.buttons["xr-bar-format"].exists, "Aa shown while reading (\(lang))")
+            XCTAssertGreaterThanOrEqual(editButton().frame.width, 43.5, "Edit is narrower than 44 pt (\(lang)): \(editButton().frame)")
+            // mirrored as one piece: Back leads, Edit / ⋯ trail
+            let back = app.buttons["xr-bar-back"]
+            if ar { XCTAssertGreaterThan(back.frame.midX, editButton().frame.midX, "Arabic bar not mirrored: Back \(back.frame) Edit \(editButton().frame)") }
+            else { XCTAssertLessThan(back.frame.midX, editButton().frame.midX, "bar order: Back \(back.frame) Edit \(editButton().frame)") }
+            // a tap on the page shows the page capsule (it fades 1.5 s after the last touch) and brings no keyboard (the
+            // input field is read-only)
+            let web = app.webViews.firstMatch
+            web.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)).tap()
+            let capsule = app.buttons["xr-read-page"]
+            let capsuleShown = capsule.waitForExistence(timeout: 2)
+            let capsuleLabel = capsuleShown ? capsule.label : "(none)"
+            shot(app, "71-read-\(lang)-tapped")
+            let keyboardUp = app.keyboards.firstMatch.waitForExistence(timeout: 3)
+            print("XR read \(lang) tap: keyboard=\(keyboardUp) capsule=\(capsuleLabel)")
+            XCTAssertFalse(keyboardUp, "a tap brought the keyboard up while reading (\(lang))")
+            XCTAssertTrue(capsuleShown, "no page capsule while reading (\(lang))")
+            if capsuleShown {
+                XCTAssertTrue(capsuleLabel.hasPrefix(ar ? "الصفحة 1 من" : "Page 1 of"), "page capsule label (\(lang)): \(capsuleLabel)")
+            }
+            if !ar && capsuleShown {
+                // Go to Page from the capsule (shown again by a touch first: it fades 1.5 s after the last one)
+                web.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+                if capsule.waitForExistence(timeout: 3) { capsule.tap() }
+                let alert = app.alerts.firstMatch
+                if alert.waitForExistence(timeout: 5) {
+                    let field = alert.textFields.firstMatch
+                    if !app.keyboards.firstMatch.waitForExistence(timeout: 3) { field.tap() }
+                    field.typeText("1")
+                    shot(app, "72-read-en-go-to-page")
+                    let go = alert.buttons.matching(NSPredicate(format: "identifier == 'xr-read-page-go' OR label == 'Go'")).firstMatch
+                    if go.exists { go.tap() } else { XCTFail("no Go in the Go to Page alert") }
+                    XCTAssertTrue(noKeyboard(5), "the keyboard stayed up after Go to Page while reading")
+                    let after = waitRead(["read=1", "page=1/"])
+                    print("XR read en go to page: \(after)")
+                    XCTAssertTrue(after.contains("input=ro") && after.contains("view=1"), "Go to Page left reading state: \(after)")
+                } else { XCTFail("the page capsule did not open Go to Page") }
+            }
+            // 2. Edit / Done 10 times (odd switches: editing, even: reading)
+            var switches = 0
+            for i in 1...10 { if toggle(i % 2 == 0, i) { switches += 1 } }
+            print("XR read \(lang) switches: \(switches)/10 \(switches == 10 ? "PASS" : "FAIL")")
+            // 3. Edit, then type English + Arabic and save: the input field is healthy after the switches
+            _ = toggle(false, 11)
+            XCTAssertTrue(app.buttons["xr-bar-undo"].exists, "no Undo after Edit (\(lang))")
+            XCTAssertTrue(app.buttons["xr-bar-format"].exists, "no Aa after Edit (\(lang))")
+            shot(app, "73-read-\(lang)-editing")
+            let point = web.coordinate(withNormalizedOffset: CGVector(dx: ar ? 0.65 : 0.35, dy: 0.45))
+            point.tap()
+            if !app.keyboards.firstMatch.waitForExistence(timeout: 5) { point.tap() }
+            let kb = app.keyboards.firstMatch.waitForExistence(timeout: 5)
+            print("XR read \(lang) editing: keyboard=\(kb)")
+            XCTAssertTrue(kb, "no keyboard after Edit + a tap on the page (\(lang))")
+            if kb {
+                sleep(1)
+                typeSlowly(app, "Reading view OK.")
+                app.typeText("\n")
+                typeSlowly(app, "\u{0648}\u{0636}\u{0639} \u{0627}\u{0644}\u{0642}\u{0631}\u{0627}\u{0621}\u{0629}")   // وضع القراءة
+                sleep(1)
+                shot(app, "74-read-\(lang)-typed")
+                let saved = saveNow()
+                print("XR read \(lang) saved: \(saved) status=\(snap("xr-bar-status"))")
+                XCTAssertTrue(saved, "save after the switches did not say Saved (\(lang))")
+                shot(app, "75-read-\(lang)-saved")
+            }
+            if ar {
+                // Back first: closing the document writes it (UIDocument), a terminate right after Saved might not
+                app.buttons["xr-bar-back"].tap()
+                XCTAssertTrue(app.buttons["xr-real-reopen"].waitForExistence(timeout: 30), "the editor did not close (ar)")
+                sleep(2)
+                app.terminate()
+                continue
+            }
+
+            // 4. remembered per file: left in editing -> reopens in editing; left in reading -> reopens in reading
+            func reopen(_ what: String) -> Bool {
+                app.buttons["xr-bar-back"].tap()
+                let again = app.buttons["xr-real-reopen"]
+                guard again.waitForExistence(timeout: 30) else { XCTFail("the editor did not close (\(what))"); return false }
+                sleep(2)
+                again.tap()
+                return waitEditor(what)
+            }
+            if reopen("reopened-editing") {
+                let s = waitRead(editing)
+                print("XR read en reopened after editing: \(s)")
+                shot(app, "76-read-en-reopened-editing")
+                XCTAssertTrue(editing.allSatisfy { s.contains($0) }, "a file left in editing did not reopen in editing: \(s)")
+                XCTAssertEqual(editButton().exists ? editButton().label : "", doneWord, "Done label after reopening in editing")
+                _ = toggle(true, 12)
+                if reopen("reopened-reading") {
+                    let r = waitRead(reading)
+                    print("XR read en reopened after reading: \(r)")
+                    shot(app, "77-read-en-reopened-reading")
+                    XCTAssertTrue(reading.allSatisfy { r.contains($0) }, "a file left in reading did not reopen in reading: \(r)")
+                }
+            }
+            app.terminate()
+            // the setting off: the same file opens for editing
+            app = launchReal(lang, file, b64, setting: false)
+            if waitEditor("setting-off") {
+                let s = waitRead(editing)
+                print("XR read en setting off: \(s)")
+                shot(app, "78-read-en-setting-off")
+                XCTAssertTrue(editing.allSatisfy { s.contains($0) }, "with the setting off the file still opened in reading: \(s)")
+            } else { XCTFail("the editor did not open with the setting off") }
+            app.terminate()
+
+            // 5. a PDF: reading state without the PDF tool bar; Edit brings it, Done hides it again
+            guard let pdf = ProcessInfo.processInfo.environment["XR_PDF_B64"] else { continue }
+            app = launchReal(lang, "xr-read.pdf", pdf)
+            guard waitEditor("pdf") else { XCTFail("the PDF did not open"); app.terminate(); continue }
+            let bar = app.descendants(matching: .any).matching(identifier: "xr-pdf-bar").firstMatch
+            let pr = waitRead(["read=1", "toolbar=0", "status=0", "app=1"])
+            print("XR read pdf opened: \(pr) | pdf bar=\(bar.exists)")
+            shot(app, "79-read-pdf-opened")
+            XCTAssertTrue(pr.contains("read=1") && pr.contains("toolbar=0") && pr.contains("status=0"), "the PDF did not open in reading state: \(pr)")
+            XCTAssertFalse(bar.exists, "the PDF tool bar is shown while reading")
+            let n0 = applied(snap("xr-read-probe"))
+            editButton().tap()
+            let pe = waitRead(["read=0", "app=0"], after: n0)
+            let barShown = bar.waitForExistence(timeout: 10)
+            print("XR read pdf editing: \(pe) | pdf bar=\(barShown)")
+            shot(app, "80-read-pdf-editing")
+            XCTAssertTrue(pe.contains("read=0"), "Edit did not reach the PDF editor: \(pe)")
+            XCTAssertTrue(barShown, "no PDF tool bar after Edit")
+            let n1 = applied(snap("xr-read-probe"))
+            editButton().tap()
+            let pd = waitRead(["read=1", "toolbar=0", "app=1"], after: n1)
+            for _ in 0..<10 where bar.exists { Thread.sleep(forTimeInterval: 0.5) }
+            print("XR read pdf done: \(pd) | pdf bar=\(bar.exists)")
+            XCTAssertTrue(pd.contains("read=1"), "Done did not bring the PDF back to reading: \(pd)")
+            XCTAssertFalse(bar.exists, "the PDF tool bar stayed after Done")
+            app.terminate()
+        }
+    }
+
     /// Opens the Arabic sample passed by the workflow, adds a word, saves it.
     func testOpenArabicSampleAndSave() throws {
         guard let b64 = ProcessInfo.processInfo.environment["XR_SAMPLE_B64"],
