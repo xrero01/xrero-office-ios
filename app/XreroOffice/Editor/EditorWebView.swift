@@ -26,6 +26,10 @@ struct EditorWebView: UIViewRepresentable {
         if document.kind == .word && KeyboardBar.enabled {
             web.keyboardBar = KeyboardBarHost(KeyboardBar(state: controller.state, controller: controller, ar: lang == "ar"))
         }
+        // spreadsheets: the formula keys (plan M5 "Excel" row + S3), behind the same flag
+        if document.kind == .cell && KeyboardBar.enabled {
+            web.keyboardBar = SheetKeyBarHost(sheetKeyBar(web))
+        }
         let barOn = web.keyboardBar != nil, log = onCommand
         DispatchQueue.main.async { log("log", "keyboard bar: " + (barOn ? "on" : "off")) }     // after this view update
         #if DEBUG
@@ -68,10 +72,18 @@ struct EditorWebView: UIViewRepresentable {
         controller.coordinator = c
         if c.loadedLang != lang {
             // the bar's labels and order follow the editor's language (the page reopens in it just below)
-            if let host = (web as? XRWebView)?.keyboardBar {
+            if let host = (web as? XRWebView)?.keyboardBar as? KeyboardBarHost {
                 host.bar = KeyboardBar(state: controller.state, controller: controller, ar: lang == "ar")
             }
+            if let x = web as? XRWebView, let host = x.keyboardBar as? SheetKeyBarHost { host.bar = sheetKeyBar(x) }
             c.load()
+        }
+    }
+
+    /// The spreadsheet's keyboard row; a key pressed with no cell open is typed through the web view's keyboard input.
+    private func sheetKeyBar(_ web: XRWebView) -> SheetKeyBar {
+        SheetKeyBar(state: controller.state, controller: controller, ar: lang == "ar") { [weak web] text in
+            web?.typeAsKeyboard(text)
         }
     }
 

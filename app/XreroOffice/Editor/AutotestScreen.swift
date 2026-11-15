@@ -83,6 +83,8 @@ struct AutotestScreen: View {
                 .editorRecovery(notice: $recovered, tooLarge: tooLarge, ar: (ProcessInfo.processInfo.environment["XR_LANG"] ?? AppLanguage.current) == "ar",
                                 hold: Double(ProcessInfo.processInfo.environment["XR_RECOVERY_HOLD"] ?? "") ?? 3,
                                 share: { state = "share" }, back: { state = "back" })
+                .sheetSum(kind: document.kind, state: controller.state, controller: controller,
+                          ar: (ProcessInfo.processInfo.environment["XR_LANG"] ?? AppLanguage.current) == "ar")
             VStack(alignment: .leading, spacing: 2) {
                 Text(state).font(.system(size: 6)).accessibilityIdentifier("xr-state")
                 Text(recovery).font(.system(size: 6)).accessibilityIdentifier("xr-recovery")
@@ -498,6 +500,16 @@ private struct ProbeLabel: View {
     /// hold first responder (the keyboard), and is a software keyboard shown.
     private static let probeJS = """
     (function(){var f=document.querySelector('iframe');var w=f&&f.contentWindow;var d=w&&w.document;var a=w&&w.Asc&&w.Asc.editor;
+     if(a&&d&&a.wb&&a.wbModel&&!a.WordControl){var r={sheet:1},o=f.getBoundingClientRect();
+      var q=function(e){if(!e||!e.offsetParent)return null;var b=e.getBoundingClientRect();return [Math.round(o.left+b.left+b.width/2),Math.round(o.top+b.top+b.height/2),Math.round(b.width),Math.round(b.height)];};
+      var nb=d.getElementById('ce-cell-name'),cc=d.getElementById('ce-cell-content');
+      r.nb=nb?nb.value:'';r.nbr=q(nb);r.nbfs=nb?w.getComputedStyle(nb).fontSize:'';r.fb=q(d.getElementById('cell-editing-box'));r.ce=q(cc);r.cefs=cc?w.getComputedStyle(cc).fontSize:'';
+      var ae=d.activeElement;r.focus=ae?(ae.id||ae.tagName):'';r.area=!!ae&&(ae.id==='ce-cell-content'||ae.id==='ce-cell-name');r.hasFocus=d.hasFocus();
+      try{r.edit=!!a.asc_getCellEditMode();}catch(e){}
+      var mb=d.getElementById('status-math-box');r.mathbox=!!mb&&!!mb.offsetParent&&w.getComputedStyle(mb).display!=='none';
+      try{var ws=a.wbModel.getActiveWs();r.cells={};['A1','A2','A3','A4','B1','C1','D1'].forEach(function(n){var g=ws.getCell3(+n.slice(1)-1,n.charCodeAt(0)-65);r.cells[n]=[String(g.getValueWithFormat()||''),String(g.getFormula()||'')];});}catch(e){r.cellsErr=String(e);}
+      r.menu=[].slice.call(d.querySelectorAll('.dropdown-menu')).filter(function(m){return w.getComputedStyle(m).display!=='none'&&m.getBoundingClientRect().height>4;}).length;
+      return JSON.stringify(r);}
      if(!a||!d||!a.WordControl)return JSON.stringify({err:'no editor'});
      var r={},o=f.getBoundingClientRect(),c=d.getElementById('id_target_cursor');
      if(c){var sd=c.style.display,sv=c.style.visibility;c.style.display='block';c.style.visibility='visible';var b=c.getBoundingClientRect();

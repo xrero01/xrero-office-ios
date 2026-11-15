@@ -140,6 +140,54 @@ def touch_gate(d, lang):
     return good and saved
 
 
+# the spreadsheet gate (plan S3, EditorUITests.sheetGate): every check each language must log
+SHEET_CHECKS = ("editor-ready", "a1-chip", "math-box-replaced", "chip-goes-to-cell", "formula-bar-tap-edits", "values-typed",
+                "chip-selects-range", "sum-capsule", "sum-sheet", "sum-insert-below", "fkeys-shown", "fkeys-formula",
+                "fkeys-commit", "fkeys-cancel", "fkeys-tab", "fkeys-hide-keyboard", "save")
+
+
+def sheet_gate(d, lang):
+    """the spreadsheet gate's lines + the saved xr-sheet-<lang>.xlsx (typed values, =SUM below the range from the Sum
+    sheet's Insert below, =MAX(A1:A3,A4) built with the formula keys, 5 kept by the Tab key); returns ok"""
+    good = True
+    lg = os.path.join(d, "xr-log-xr-sheet-%s.xlsx.txt" % lang)
+    log = open(lg, encoding="utf-8", errors="replace").read() if os.path.exists(lg) else ""
+    res = {}
+    for m in re.finditer(r"^sheet-gate %s ([\w-]+): (PASS|FAIL|KNOWN|INFO)\s*(.*)$" % lang, log, re.M):
+        res[m.group(1)] = (m.group(2), m.group(3))
+    QA.setdefault(os.path.basename(d), {}).setdefault("sheet-" + lang, {"checks": {k: list(v) for k, v in res.items()}})
+    print("Spreadsheet gate (%s):" % lang.upper())
+    for name in SHEET_CHECKS + tuple(k for k in res if k not in SHEET_CHECKS):
+        st, why = res.get(name, ("NOT LOGGED", ""))
+        print("  %-30s %-10s %s" % (name, st, why[:200]))
+        if (name in SHEET_CHECKS and st not in ("PASS", "KNOWN")) or st == "FAIL":
+            good = False
+    p = os.path.join(d, "xr-sheet-%s.xlsx" % lang)
+    if not os.path.exists(p):
+        print("  xr-sheet-%s.xlsx: MISSING" % lang)
+        return False
+    try:
+        xml = zipfile.ZipFile(p).read("xl/worksheets/sheet1.xml").decode("utf-8")
+    except Exception as e:
+        print("  xr-sheet-%s.xlsx: cannot read: %s" % (lang, e))
+        return False
+    def c(ref):
+        m = re.search(r'<c r="%s"[^>]*?(?:/>|>(.*?)</c>)' % ref, xml, re.S)
+        body = (m.group(1) or "") if m else ""
+        f = re.search(r"<f[^>]*>(.*?)</f>", body, re.S)
+        v = re.search(r"<v>(.*?)</v>", body, re.S)
+        return (f.group(1) if f else ""), (v.group(1) if v else "")
+    cells = {r: c(r) for r in ("A1", "A2", "A3", "A4", "B1", "C1")}
+    values = [cells[r][1] for r in ("A1", "A2", "A3")] == ["12", "30", "1246"]
+    total = cells["A4"][0].replace(" ", "").upper() == "SUM(A1:A3)" and cells["A4"][1] in ("1288", "")
+    keys = cells["B1"][0].replace(" ", "").upper() == "MAX(A1:A3,A4)"
+    tab = cells["C1"][1] == "5"
+    saved = values and total and keys and tab
+    print("  xr-sheet-%s.xlsx: values=%s  A4 =SUM(A1:A3)=%s  B1 =MAX(A1:A3,A4)=%s  C1 5 (Tab)=%s  cells=%r -> %s"
+          % (lang, values, total, keys, tab, cells, "OK" if saved else "WRONG"))
+    return good and saved
+
+
 def doc_menu(d):
     """The ⋯ document menu (plan M7b, EditorUITests.testDocumentMenu + testSpreadsheetAndPresentationOpen): every
     Export ▸ copy is a real file of its format holding what was on screen; the File menu (opened through ⋯ > All tools,
@@ -280,6 +328,8 @@ for dev in sorted(os.listdir(root)) if os.path.isdir(root) else []:
         print("xr-clip.docx: MISSING (clipboard copy/paste + save)"); ok = False
     for lang in ("en", "ar"):                     # touch / typing gate (plan M14 + F1)
         ok &= touch_gate(d, lang)
+    for lang in ("en", "ar"):                     # spreadsheet gate (plan S3)
+        ok &= sheet_gate(d, lang)
     for ext in ("docx", "xlsx", "pptx"):          # Arabic-first blanks (EditorUITests.testArabicBlanksStartRightToLeft)
         b = os.path.join(d, "xr-test-ar." + ext)
         if not os.path.exists(b):

@@ -1631,4 +1631,243 @@ final class EditorUITests: XCTestCase {
             app.terminate()
         }
     }
+
+
+    // MARK: - Spreadsheet gate (plan S3): A1 chip, Sum capsule + sheet, formula keys
+
+    /// Spreadsheet touch gate (plan S3), in Arabic and in English (app in that language): the name box is a tappable
+    /// "A1" chip (36 pt on phones, the formula bar 44 pt with 17 px text) and an address typed into it goes there; the
+    /// status bar's math box gives way to the native Sum capsule, which shows the selection's total and opens a sheet
+    /// with Sum / Average / Min / Max / Count, whose "Insert below" writes =SUM(...) under the range; the keyboard's
+    /// formula keys (= ( : , ) ✓ ✕ ⇥ and "hide keyboard") build a formula and commit, cancel and move on while the
+    /// keyboard stays up. Values are typed with the real keyboard into the formula bar. Every result goes to the
+    /// editor log as "sheet-gate <lang> <check>: PASS|FAIL|KNOWN" for check_saved.py, which also opens the saved
+    /// xr-sheet-<lang>.xlsx. Named "ZZZ" to run after the Word touch gate.
+    func testZZZSheetGateChipSumFormulaKeys() {
+        for lang in ["ar", "en"] { sheetGate(lang) }
+    }
+
+    private func sheetGate(_ lang: String) {
+        let ar = lang == "ar"
+        let phone = UIDevice.current.userInterfaceIdiom != .pad
+        let app = XCUIApplication()
+        app.launchArguments = ["-xr.lang", lang, "-xr.keyboardBar", "YES"]     // the key row is behind the M5 flag
+        try? FileManager.default.removeItem(atPath: probeFile)
+        pauseProbe(false)
+        app.launchEnvironment = ["XR_KIND": "cell", "XR_LANG": lang, "XR_NEW_NAME": "xr-sheet-\(lang).xlsx",
+                                 "XR_PROBE": "1", "XR_PROBE_FILE": probeFile]
+        app.launch()
+        let keep = continueAfterFailure
+        continueAfterFailure = true
+        var notes: [String] = []
+        func gate(_ name: String, _ ok: Bool, _ detail: String, known: String? = nil) {
+            let status = ok ? "PASS" : (known == nil ? "FAIL" : "KNOWN")
+            let line = "sheet-gate \(lang) \(name): \(status) \(detail)" + (ok || known == nil ? "" : " [known app gap: \(known!)]")
+            print("XR " + line)
+            notes.append(line.replacingOccurrences(of: "\n", with: " "))
+            if known == nil { XCTAssertTrue(ok, line) }
+        }
+        func info(_ name: String, _ detail: String) {
+            let line = "sheet-gate \(lang) \(name): INFO \(detail)"
+            print("XR " + line)
+            notes.append(line)
+        }
+        defer {
+            autotest("note", notes.joined(separator: "\n"))
+            app.terminate()
+            continueAfterFailure = keep
+        }
+        let ready = waitState(app, prefix: "ready", timeout: 120)
+        gate("editor-ready", ready == "ready", ready)
+        guard ready == "ready" else { return }
+        let web = app.webViews.firstMatch
+        XCTAssertTrue(web.waitForExistence(timeout: 10))
+        sleep(2)
+        let origin = web.frame.origin
+        func tap(_ x: Double, _ y: Double) {
+            app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: origin.x + x, dy: origin.y + y)).tap()
+        }
+        func rect(_ p: [String: Any], _ k: String) -> [Double] { (p[k] as? [NSNumber])?.map { $0.doubleValue } ?? [] }
+        func cell(_ p: [String: Any], _ n: String) -> (value: String, formula: String) {
+            let c = (p["cells"] as? [String: Any])?[n] as? [String] ?? []
+            return (c.first ?? "", c.count > 1 ? c[1] : "")
+        }
+        func cellsInfo(_ p: [String: Any]) -> String {
+            ["A1", "A2", "A3", "A4", "B1", "C1"].map { "\($0)=\(cell(p, $0).value)/\(cell(p, $0).formula)" }.joined(separator: " ")
+                + (str(p, "cellsErr").isEmpty ? "" : " err=\(str(p, "cellsErr"))")
+        }
+        func sinfo(_ p: [String: Any]) -> String {
+            "fr=\(flag(p, "fr")) focus=\(str(p, "focus")) edit=\(flag(p, "edit")) kb=\(flag(p, "kb")) chip='\(str(p, "nb"))'"
+        }
+        let stateLabel = app.staticTexts["xr-editor-state"]
+        func stateField(_ k: String) -> String {
+            let s = stateLabel.exists ? stateLabel.label : ""
+            return s.components(separatedBy: " ").first { $0.hasPrefix(k + ":") }.map { String($0.dropFirst(k.count + 1)) } ?? "?"
+        }
+
+        // 1) the A1 chip: the name box shows A1; on phones a 36 pt chip in a 44 pt formula bar, 17 px text
+        let p0 = probe(app)
+        let nb = rect(p0, "nbr"), fb = rect(p0, "fb")
+        let sized = !phone || (nb.count == 4 && nb[3] >= 34 && nb[3] <= 38 && fb.count == 4 && fb[3] >= 43 &&
+                               str(p0, "nbfs") == "17px" && str(p0, "cefs") == "17px")
+        gate("a1-chip", str(p0, "nb") == "A1" && nb.count == 4 && sized,
+             "chip='\(str(p0, "nb"))' rect=\(nb) bar=\(fb) font=\(str(p0, "nbfs"))/\(str(p0, "cefs")) phone=\(phone)")
+        gate("math-box-replaced", !flag(p0, "mathbox"), "web math box shown=\(flag(p0, "mathbox"))")
+        shot(app, "60-sheet-\(lang)-ready")
+
+        /// a tap on the chip, the address typed, Return: the editor goes there (its own name-box handler)
+        func goTo(_ ref: String) -> [String: Any] {
+            var p = probe(app)
+            for _ in 0..<2 {
+                let r = rect(p, "nbr")
+                guard r.count == 4 else { break }
+                tap(r[0], r[1])
+                usleep(700_000)
+                p = probe(app)
+                if str(p, "focus") == "ce-cell-name" { break }
+            }
+            typeSlowly(app, ref)
+            app.typeText("\n")
+            return probe(app)
+        }
+        /// a tap on the formula bar: the keyboard comes up with the active cell open for editing
+        func editBar() -> [String: Any] {
+            var p = probe(app)
+            for _ in 0..<3 where !(flag(p, "fr") && flag(p, "edit")) {
+                let r = rect(p, "ce")
+                guard r.count == 4 else { break }
+                tap(r[0] - r[2] * 0.25, r[1])
+                usleep(700_000)
+                p = probe(app)
+            }
+            return p
+        }
+        /// one formula key, tapped as a user taps it (scrolled to when the row overflows a narrow phone)
+        func key(_ id: String) -> Bool {
+            let b = app.buttons["xr-fk-" + id].firstMatch
+            guard b.waitForExistence(timeout: 5) else { return false }
+            if !b.isHittable {
+                let row = app.scrollViews.containing(.button, identifier: "xr-fk-equals").firstMatch
+                if row.exists { if ar { row.swipeRight() } else { row.swipeLeft() } }
+                usleep(400_000)
+            }
+            guard b.isHittable else { return false }
+            b.tap()
+            usleep(500_000)
+            return true
+        }
+
+        // 2) three values through the formula bar (the chip picks each cell)
+        let values = ["12", "30", "1246"]
+        var firstEdit: [String: Any] = [:]
+        for (i, v) in values.enumerated() {
+            _ = goTo("A\(i + 1)")
+            let p = editBar()
+            if i == 0 { firstEdit = p }
+            typeSlowly(app, v)
+            app.typeText("\n")
+        }
+        gate("chip-goes-to-cell", str(firstEdit, "nb") == "A1", "after typing A1 into the chip: \(sinfo(firstEdit))")
+        gate("formula-bar-tap-edits", flag(firstEdit, "fr") && flag(firstEdit, "edit"), sinfo(firstEdit))
+        let p1 = probe(app)
+        gate("values-typed", cell(p1, "A1").value == "12" && cell(p1, "A2").value == "30" && cell(p1, "A3").value == "1246",
+             cellsInfo(p1))
+
+        // 3) the range through the chip; the Sum capsule shows its total (1,288; Western digits in both languages)
+        let p2 = goTo("A1:A3")
+        let capsule = app.buttons["xr-sum"].firstMatch
+        let hideKey = app.buttons["xr-fk-hide"].firstMatch
+        if flag(p2, "fr") && hideKey.exists && hideKey.isHittable { hideKey.tap() }
+        let shown = capsule.waitForExistence(timeout: 10)
+        let capLabel = shown ? capsule.label : ""
+        gate("chip-selects-range", stateField("cnt") == "3", "count=\(stateField("cnt")) \(sinfo(p2))")
+        let sumWord = ar ? "\u{0627}\u{0644}\u{0645}\u{062C}\u{0645}\u{0648}\u{0639}" : "Sum"        // المجموع
+        gate("sum-capsule", shown && capLabel.contains("1,288") && capLabel.contains(sumWord), "shown=\(shown) label='\(capLabel)'")
+        shot(app, "61-sheet-\(lang)-sum-capsule")
+
+        // 4) the capsule opens the sheet: Sum, Average, Min, Max, Count; 5) its Insert below writes =SUM(A1:A3) in A4
+        if shown && capsule.isHittable {
+            capsule.tap()
+            let avg = app.staticTexts["xr-sum-value-average"].firstMatch
+            if avg.waitForExistence(timeout: 10) {
+                func v(_ id: String) -> String { let e = app.staticTexts["xr-sum-value-" + id].firstMatch; return e.exists ? e.label : "-" }
+                // the last row (Count) must be there without scrolling; if it is not, note it and scroll for the values
+                let countShown = app.staticTexts["xr-sum-value-count"].firstMatch.exists
+                if !countShown { app.swipeUp(); usleep(600_000) }
+                info("sum-sheet-count-without-scroll", "\(countShown)")
+                let got = ["sum": v("sum"), "average": v("average"), "min": v("min"), "max": v("max"), "count": v("count")]
+                let ok = got["sum"] == "1,288" && got["average"] == "429.33" && got["min"] == "12" && got["max"] == "1,246" && got["count"] == "3"
+                gate("sum-sheet", ok, "values \(got)")
+                shot(app, "62-sheet-\(lang)-sum-sheet")
+                let ins = app.buttons["xr-sum-insert-sum"].firstMatch
+                if ins.exists && ins.isHittable { ins.tap() }
+                for _ in 0..<10 where avg.exists { usleep(500_000) }
+            } else {
+                gate("sum-sheet", false, "the sheet did not open")
+            }
+        } else {
+            gate("sum-sheet", false, "capsule shown=\(shown) hittable=\(shown && capsule.isHittable)")
+        }
+        var p3 = probe(app)
+        for _ in 0..<4 where cell(p3, "A4").value != "1288" { usleep(700_000); p3 = probe(app) }
+        gate("sum-insert-below", cell(p3, "A4").value == "1288" && cell(p3, "A4").formula.uppercased().contains("SUM(A1:A3)"),
+             cellsInfo(p3))
+        shot(app, "63-sheet-\(lang)-inserted")
+
+        // 6) the formula keys build =MAX(A1:A3,A4) in B1 between typed letters, then ✓ commits
+        _ = goTo("B1")
+        let p4 = editBar()
+        let equals = app.buttons["xr-fk-equals"].firstMatch
+        let rowShown = equals.waitForExistence(timeout: 10) && equals.isHittable
+        gate("fkeys-shown", rowShown, "row over the keyboard: \(rowShown) \(sinfo(p4))")
+        var pressed: [String] = []
+        if rowShown {
+            if key("equals") { pressed.append("=") }
+            typeSlowly(app, "MAX")
+            if key("open") { pressed.append("(") }
+            typeSlowly(app, "A1")
+            if key("colon") { pressed.append(":") }
+            typeSlowly(app, "A3")
+            if key("sep") { pressed.append(",") }
+            typeSlowly(app, "A4")
+            if key("close") { pressed.append(")") }
+            shot(app, "64-sheet-\(lang)-formula-keys")
+            if key("commit") { pressed.append("commit") }
+        }
+        var p5 = probe(app)
+        for _ in 0..<3 where cell(p5, "B1").value != "1288" { usleep(700_000); p5 = probe(app) }
+        let f5 = cell(p5, "B1").formula.uppercased().replacingOccurrences(of: ";", with: ",")
+        gate("fkeys-formula", f5.contains("MAX(A1:A3,A4)") && cell(p5, "B1").value == "1288",
+             "pressed \(pressed.joined(separator: " ")) \(cellsInfo(p5))")
+        gate("fkeys-commit", pressed.last == "commit" && !flag(p5, "edit"), sinfo(p5))
+        info("keyboard-after-commit", sinfo(p5))
+
+        // 7) ✕ drops the typed value; 8) ⇥ keeps it and moves one cell on
+        _ = goTo("C1")
+        _ = editBar()
+        typeSlowly(app, "99")
+        let cancelled = key("cancel")
+        let p6 = probe(app)
+        gate("fkeys-cancel", cancelled && cell(p6, "C1").value.isEmpty && !flag(p6, "edit"), "\(sinfo(p6)) \(cellsInfo(p6))")
+        _ = editBar()
+        typeSlowly(app, "5")
+        let tabbed = key("tab")
+        var p7 = probe(app)
+        for _ in 0..<3 where str(p7, "nb") != "D1" { usleep(600_000); p7 = probe(app) }
+        gate("fkeys-tab", tabbed && cell(p7, "C1").value == "5" && str(p7, "nb") == "D1", "\(sinfo(p7)) \(cellsInfo(p7))")
+        shot(app, "65-sheet-\(lang)-tab")
+
+        // 9) "hide keyboard" puts it away (a tap on the chip brings the keyboard up first when it is down)
+        var p8 = probe(app)
+        if !flag(p8, "fr") { let r = rect(p8, "nbr"); if r.count == 4 { tap(r[0], r[1]); usleep(700_000) } }
+        let hideShown = hideKey.waitForExistence(timeout: 8) && hideKey.isHittable
+        if hideShown { hideKey.tap() }
+        p8 = probe(app)
+        for _ in 0..<3 where hideShown && flag(p8, "fr") { usleep(700_000); p8 = probe(app) }
+        gate("fkeys-hide-keyboard", hideShown && !flag(p8, "fr"), "shown=\(hideShown) \(sinfo(p8))")
+
+        // 10) Save: check_saved.py reads xr-sheet-<lang>.xlsx (values, =SUM below the range, =MAX(...) from the keys)
+        let saved = save(app)
+        gate("save", saved.hasPrefix("saved"), saved)
+    }
 }

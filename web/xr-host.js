@@ -294,6 +294,45 @@
     document.addEventListener('DOMContentLoaded', add);
   })();
 
+  // plan S3: spreadsheets on touch. The status bar's Average / Count / Sum box goes: the app's native Sum capsule
+  // shows the selection's total and opens a sheet with Sum, Average, Min, Max and Count (a trackpad / mouse keeps the
+  // box). Phones: the formula bar is 44 pt with 17 px text (17 px also keeps WebKit from zooming the page when the
+  // field takes focus) and the name box is a 36 pt "A1" chip; a tap on the chip selects its text, so the address
+  // typed next replaces it (Return goes there: the editor's own name-box handler). The bar's height is the editor's
+  // own --celleditor-height token, read when it lays out, so this is set before that (as the status bar height is).
+  // The named-ranges arrow beside the name box goes on phones (Formula tab > Named ranges keeps the feature).
+  (function sheetTouch() {
+    if (!/spreadsheeteditor/.test(location.pathname)) return;
+    var css = '@media not all and (any-pointer:fine){#statusbar #status-math-box{display:none!important}}';
+    if (Math.min(screen.width, screen.height) < 600) {
+      css += 'body{--celleditor-height:44px!important;--celleditor-line-height:24px!important}' +
+        '#cell-editing-box .ce-group-name{display:flex!important;align-items:center;height:44px!important}' +
+        '#cell-editing-box #ce-cell-name{width:76px!important;height:36px!important;margin:0 4px!important;padding:0 8px!important;' +
+          'border:0 none!important;border-radius:18px!important;box-shadow:none!important;background:rgba(127,127,127,.14)!important;' +
+          'font-size:17px!important;font-weight:600!important;line-height:36px!important;text-align:center!important;' +
+          'direction:ltr!important;box-sizing:border-box}' +
+        '#cell-editing-box #ce-cell-name-menu{display:none!important}' +
+        '#cell-editing-box #ce-func-label{height:44px!important;width:36px!important;margin:0!important;border-bottom:0 none!important}' +
+        '#cell-editing-box .ce-group-content{margin:0 0 0 120px!important}' +
+        '.rtl #cell-editing-box .ce-group-content{margin:0 120px 0 0!important}' +
+        '#cell-editing-box #ce-cell-content{font-size:17px!important;line-height:24px!important;padding-top:10px!important}' +
+        '#ce-btn-expand{height:44px!important}';
+    }
+    var add = function () {
+      if (document.getElementById('xr-sheet-css')) return;
+      var s = document.createElement('style'); s.id = 'xr-sheet-css'; s.textContent = css;
+      (document.head || document.documentElement).appendChild(s);
+    };
+    if (document.documentElement) add();
+    document.addEventListener('DOMContentLoaded', add);
+    // the chip: select its whole text once iOS has placed the caret for the tap (focus events only, never typing)
+    document.addEventListener('focusin', function (e) {
+      var t = e.target;
+      if (!t || t.id !== 'ce-cell-name') return;
+      setTimeout(function () { try { if (document.activeElement === t) t.setSelectionRange(0, t.value.length); } catch (x) {} }, 80);
+    }, true);
+  })();
+
   // 20.3 (M6): neutral, coherent editor chrome on every device. The engine's own modern themes (theme-white /
   // theme-night, picked by "same as system" above) do the layout; this only re-points their colour TOKENS, so every
   // panel, menu and the canvas (asc_setSkin reads the same tokens) stay consistent and a live light/dark switch just
@@ -527,6 +566,22 @@
         hub.set('italic', x.asc_getFontItalic() === true);
         hub.set('underline', x.asc_getFontUnderline() === true);
         hub.set('align', alignName(x.asc_getHorAlign()));
+      });
+      // plan S3: the A1 chip's address, the Sum capsule's figures and whether a cell is being edited (the formula
+      // keys). The engine sends these on selection changes, not per keystroke; each handler stays O(1).
+      hub.on(api, 'asc_onSelectionNameChanged', function (info) {
+        hub.set('cell', typeof info === 'string' ? info : (info && info.asc_getName ? String(info.asc_getName()) : ''));
+      });
+      hub.on(api, 'asc_onSelectionMathChanged', function (m) {
+        // one string, so the hub's compare stays one comparison: count|numbers|sum|average|min|max, the values as the
+        // engine formats them for its own status bar (the app re-formats plain numbers for the capsule)
+        hub.set('math', m ? [m.asc_getCount(), m.asc_getCountNumbers(), m.asc_getSum(), m.asc_getAverage(), m.asc_getMin(),
+          m.asc_getMax()].map(function (v) { return v == null ? '' : String(v).replace(/\|/g, ' '); }).join('|') : '');
+      });
+      hub.on(api, 'asc_onEditCell', function (s) {
+        var E = Asc.c_oAscCellEditorState;
+        if (s === E.editStart) hub.set('cellEdit', true);
+        else if (s === E.editEnd) hub.set('cellEdit', false);
       });
       return;
     }
@@ -770,6 +825,46 @@
     var fn = redo ? (api.Redo || api.asc_Redo) : (api.Undo || api.asc_Undo);
     if (!fn) return 'no undo';
     try { fn.call(api); return 'ok'; } catch (e) { return 'error: ' + (e && e.message || e); }
+  };
+
+  // ---- Spreadsheets on touch (plan S3): the formula keys over the keyboard and the Sum sheet's "Insert below".
+  // Called by the app on a tap only (KeyboardBar's spreadsheet row / SumSheet), never per keystroke.
+  // __xrCellKey(k): '=' '(' ')' ':' 'sep' (the locale's argument separator) go into the open cell editor at its cursor
+  // (the engine's own paste-text path, the formula-bar line kept in step as insertInCellEditor does); 'not editing'
+  // tells the app to type the key through the keyboard path instead, which starts an edit like a typed letter.
+  // 'commit' / 'cancel' close the editor keeping / dropping the text; 'tab' commits and moves one cell on; 'sum' is
+  // the toolbar's AutoSum.
+  window.__xrCellKey = function (k) {
+    var api = window.__xrApi, wb = api && api.wb;
+    if (!api || !wb || !api.asc_getCellEditMode) return 'no editor';
+    try {
+      var editing = api.asc_getCellEditMode();
+      if (k === 'commit' || k === 'cancel' || k === 'tab') {
+        if (editing) api.asc_closeCellEditor(k === 'cancel');
+        if (k === 'tab' && !api.asc_getCellEditMode()) wb._onChangeSelection(true, 1, 0, false, false);
+        return 'ok';
+      }
+      if (k === 'sum') return window.__xrCellFunc('SUM');
+      var ch = k === 'sep' ? (api.asc_getFunctionArgumentSeparator ? api.asc_getFunctionArgumentSeparator() : ',') || ',' : k;
+      if (!/^[=():,;]$/.test(ch)) return 'bad key';
+      if (!editing) return 'not editing:' + ch;
+      var ce = wb.cellEditor, keep = ce.skipTLUpdate;
+      ce.skipTLUpdate = false;              // the formula bar's text follows (CellEditor skips it right after a keypress)
+      try { ce.pasteText(ch); } finally { ce.skipTLUpdate = keep; }
+      return 'ok';
+    } catch (e) { return 'error: ' + (e && e.message || e); }
+  };
+  // __xrCellFunc(name): the toolbar's AutoSum path with another function (SUM, AVERAGE, MIN, MAX, COUNTA): with a
+  // range selected the engine writes the formula into the cell below it (or beside a row), as the ribbon's Σ does.
+  window.__xrCellFunc = function (name) {
+    var api = window.__xrApi;
+    if (!api || !api.asc_insertInCell) return 'no editor';
+    if (!/^(SUM|AVERAGE|MIN|MAX|COUNTA|COUNT)$/.test(name)) return 'bad function';
+    try {
+      api.asc_insertInCell(api.asc_getFormulaLocaleName(name) || name, Asc.c_oAscPopUpSelectorType.Func, true);
+      log('sheet: insert ' + name);
+      return 'ok';
+    } catch (e) { return 'error: ' + (e && e.message || e); }
   };
 
   // ---- Save As / Download As: the copy itself (formats: SAVE_AS at the top)
