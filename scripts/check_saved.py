@@ -78,7 +78,9 @@ TOUCH_CHECKS = ("editor-ready", "tap-places-caret-first-line", "typing", "line-d
                 "bold-button-applies", "format-tap-keeps-keyboard", "type-after-format",
                 "kbar-shown", "kbar-bold-on", "kbar-keeps-keyboard", "kbar-next-word-bold", "kbar-align-cycles",
                 "enter-x5", "select-all",
-                "sheet-opens-and-closes", "sheet-return-keyboard", "sheet-return-caret", "pinch-in-zooms-page",
+                "sheet-opens-and-closes", "sheet-return-keyboard", "sheet-return-caret",
+                "fmt-sheet-opens", "fmt-sheet-keyboard-down", "fmt-size-applies", "fmt-sheet-return-keyboard",
+                "fmt-sheet-return-caret", "pinch-in-zooms-page",
                 "pinch-zoom-kept", "pinch-out-zooms-back", "kbar-hide-keyboard", "save", "reopen-keeps-text")
 
 

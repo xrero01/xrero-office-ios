@@ -9,6 +9,8 @@ import SwiftUI
 /// still being composed). No keyboard shortcut is attached on purpose: the engine handles a hardware ⌘Z / ⇧⌘Z itself,
 /// and a second binding here would undo twice.
 ///
+/// Aa (Word) opens the format sheet (plan S1, FormatSheet.swift); the iPad popover hangs under it.
+///
 /// The ⋯ menu (plan M7b) starts with Find, Redo (compact width) and Save; the screen adds the rest of the document
 /// menu (`more` = DocumentMenuItems: Share, Export, Document info, Language, Account, About, All tools).
 struct EditorTopBar<More: View>: ViewModifier {
@@ -24,6 +26,8 @@ struct EditorTopBar<More: View>: ViewModifier {
     /// Everything the ⋯ menu's entries depend on besides `ar` and the width (language, account, file kind): the menu
     /// is rebuilt only when this changes (MoreMenu).
     var menuKey: String
+    /// Aa (the format sheet, plan S1) in the bar: Word only for now.
+    var format: Bool
     @ViewBuilder var more: () -> More
     @Environment(\.horizontalSizeClass) var sizeClass      // not private: that would hide the memberwise init
 
@@ -62,6 +66,11 @@ struct EditorTopBar<More: View>: ViewModifier {
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     UndoButton(state: state, redo: false, ar: ar) { undo(false) }
                     if wide { UndoButton(state: state, redo: true, ar: ar) { undo(true) } }
+                    if format {
+                        Button { controller.showFormat() } label: { FormatGlyph() }
+                            .accessibilityLabel(FormatText.format(ar))
+                            .accessibilityIdentifier("xr-bar-format")
+                    }
                     // equatable: the menu is rebuilt only when what it shows changes (language, width, account...),
                     // never because the screen redrew - a menu rebuilt while it is open stays on screen with every tap
                     // ignored (CI: the dead ⋯ menu after Document info / Language)
@@ -80,10 +89,10 @@ struct EditorTopBar<More: View>: ViewModifier {
 extension View {
     func editorTopBar<More: View>(title: String, state: EditorState, status: EditorBarStatus, controller: EditorController,
                                   ar: Bool, back: @escaping () -> Void, save: @escaping () -> Void,
-                                  find: (() -> Void)? = nil, menuKey: String = "",
+                                  find: (() -> Void)? = nil, menuKey: String = "", format: Bool = false,
                                   @ViewBuilder more: @escaping () -> More) -> some View {
         modifier(EditorTopBar(title: title, state: state, status: status, controller: controller, ar: ar,
-                              back: back, save: save, find: find, menuKey: menuKey, more: more))
+                              back: back, save: save, find: find, menuKey: menuKey, format: format, more: more))
     }
 }
 

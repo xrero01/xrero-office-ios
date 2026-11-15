@@ -361,6 +361,26 @@ final class EditorUITests: XCTestCase {
             print("XR bar \(name) saved: \(saved) status=\(line)")
             XCTAssertEqual(line, savedWord, "no 'Saved' after the save (\(name))")
             shot(app, "53-bar-\(name)-saved")
+
+            // Aa (plan S1) in the bar opens the format sheet (iPad: a popover under it); a style tap reaches the
+            // engine (the state's paragraph style follows) and Done closes it
+            let aa = app.buttons["xr-bar-format"]
+            XCTAssertTrue(aa.exists, "no Aa in the top bar (\(name))")
+            if aa.exists {
+                XCTAssertGreaterThanOrEqual(aa.frame.width, 43.5, "Aa is narrower than 44 pt (\(name)): \(aa.frame)")
+                aa.tap()
+                let heading = app.buttons["xr-fmt-style-heading1"]
+                XCTAssertTrue(heading.waitForExistence(timeout: 10), "Aa did not open the format sheet (\(name))")
+                shot(app, "53b-bar-\(name)-format-sheet")
+                if heading.exists {
+                    heading.tap()
+                    XCTAssertTrue(waitProbe("eading_1 ", 10), "format sheet style did not reach the engine (\(name)): \(probe.label)")
+                    app.buttons["xr-fmt-done"].tap()
+                    for _ in 0..<20 where heading.exists { Thread.sleep(forTimeInterval: 0.5) }
+                    XCTAssertFalse(heading.exists, "the format sheet did not close (\(name))")
+                }
+                print("XR bar \(name) format sheet: \(probe.label)")
+            }
             if !dark {                                     // the same bar in dark (Arabic runs in dark throughout)
                 XCUIDevice.shared.system.open(URL(string: "xrero-autotest://appearance?dark=1")!)
                 sleep(3)
@@ -1284,6 +1304,49 @@ final class EditorUITests: XCTestCase {
              "caret \(caret11) -> \(caret12)")
         shot(app, "56-touch-\(lang)-sheet-closed")
         if !focused(p12) { tapEnd(); _ = probe(app) }
+
+        // 8b) the Aa format sheet (plan S1) from the keyboard bar: it opens with the keyboard down, its size stepper
+        //     reaches the engine (state "sz:" up one step, then back down: the text keeps its geometry), and closing
+        //     it brings back the keyboard and the caret where they were (the M14 rule for every native sheet)
+        var f0 = probe(app)
+        for _ in 0..<2 where !(str(f0, "sel").isEmpty && focused(f0)) { tapEnd(); f0 = probe(app) }
+        let caretF0 = (num(f0, "cx") ?? -1, num(f0, "cy") ?? -1)
+        func fontSize() -> Double {
+            let s = stateLabel.exists ? stateLabel.label : ""
+            return s.components(separatedBy: " ").first { $0.hasPrefix("sz:") }.flatMap { Double($0.dropFirst(3)) } ?? -1
+        }
+        let kbFormat = app.buttons["xr-kb-format"]
+        let aaShown = kbFormat.waitForExistence(timeout: 10) && kbFormat.isHittable
+        if aaShown { kbFormat.tap() }
+        let sizeUp = app.buttons["xr-fmt-size-up"], sizeDown = app.buttons["xr-fmt-size-down"]
+        let fmtShown = aaShown && sizeUp.waitForExistence(timeout: 10)
+        let f1 = probe(app)
+        shot(app, "55b-touch-\(lang)-format-sheet")
+        gate("fmt-sheet-opens", fmtShown, "Aa in the keyboard bar: \(aaShown) \(focusInfo(f0))")
+        gate("fmt-sheet-keyboard-down", fmtShown && !flag(f1, "fr"), focusInfo(f1))
+        var sizes: [Double] = [fontSize()]
+        if fmtShown {
+            for b in [sizeUp, sizeDown] {
+                let before = sizes.last ?? -1
+                b.tap()
+                var now = fontSize()
+                for _ in 0..<8 where now == before { usleep(500_000); now = fontSize() }
+                sizes.append(now)
+            }
+        }
+        gate("fmt-size-applies", sizes.count == 3 && sizes[0] > 0 && sizes[1] > sizes[0] && sizes[2] == sizes[0],
+             "size \(sizes.map { String(format: "%g", $0) }.joined(separator: " -> "))")
+        if fmtShown { app.buttons["xr-fmt-done"].tap() }
+        for _ in 0..<20 where sizeUp.exists { usleep(500_000) }
+        var f2 = probe(app)
+        for _ in 0..<2 where fmtShown && !focused(f2) && focused(f0) { usleep(700_000); f2 = probe(app) }
+        let caretF2 = (num(f2, "cx") ?? -2, num(f2, "cy") ?? -2)
+        gate("fmt-sheet-return-keyboard", fmtShown && !sizeUp.exists && (!focused(f0) || focused(f2)),
+             "before: \(focusInfo(f0)) after: \(focusInfo(f2))")
+        gate("fmt-sheet-return-caret", fmtShown && abs(caretF2.0 - caretF0.0) <= 2 && abs(caretF2.1 - caretF0.1) <= 2,
+             "caret \(caretF0) -> \(caretF2)")
+        shot(app, "56b-touch-\(lang)-format-sheet-closed")
+        if !focused(f2) { tapEnd(); _ = probe(app) }
 
         // 9) pinch: the engine zooms (the page re-renders crisp: no WebKit bitmap scaling) and the zoom stays
         // pinch on the page itself: on a phone the Home panel opened for Bold folds down over the top of the page
