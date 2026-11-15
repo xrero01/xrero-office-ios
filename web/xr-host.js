@@ -764,8 +764,18 @@
   // iPad / Mac, Shift+F10) leaves it at -1, so pointer input keeps the desktop menu, as the plan asks.
   // Never on the keystroke path: the only per-key cost is the `open` check in the keydown listener (O(1)).
   // Off with the app setting xr.editMenu = NO (XreroHost.editMenu '0'): the desktop menu on touch, as before.
+  // A tap is never a long press, and only a word the finger is ON is selected: the touch manager times its 750 ms
+  // between its own touch-down and touch-up HANDLERS (new Date() in each), so when the page is busy in between - the
+  // keyboard coming back after the Rename alert, a redraw - a short tap reached it as a long press. Its right click put
+  // the caret at the end of the text, the word there was selected, and the next typed word replaced it (CI runs 136 /
+  // 138: "Delta" / "Alpha" gone from the saved file after a rename, the tap having landed on blank paper below them).
+  // So: (1) the finger's own times decide (the events' timeStamp is when the touch happened, however late the page
+  // handles it): a press shorter than iOS's own long press (500 ms) stays a tap - the right click has already put the
+  // caret where the finger was, as a tap does; no menu, nothing selected. (2) A long press on blank paper (beside or
+  // below the text) gives the caret and the menu (Paste, Select All), as in Pages: no word nobody touched is selected.
   var editMenu = (function () {
     var open = false, word = /documenteditor/.test(location.pathname);
+    var downAt = -1, upAt = -1;                 // the primary finger's down / up (event timeStamp, ms)
     function fromTouch() {
       var C = window.AscCommon, m = C && C.global_mouseEvent;
       return !!m && C.g_mouse_button_right !== undefined && m.ButtonOverride === C.g_mouse_button_right;
@@ -779,19 +789,56 @@
     if (word) {
       window.addEventListener('touchstart', hide, { capture: true, passive: true });
       window.addEventListener('keydown', hide, true);
+      // one event family, the one the touch manager itself listens to (pointer events on iOS 13+, else touch events),
+      // so both times come from the same clock; capture on the window: recorded before the engine's own handler runs
+      var opts = { capture: true, passive: true };
+      if (window.PointerEvent) {
+        window.addEventListener('pointerdown', function (e) {
+          if (e.pointerType === 'touch' && e.isPrimary) { downAt = e.timeStamp; upAt = -1; }
+        }, opts);
+        window.addEventListener('pointerup', function (e) {
+          if (e.pointerType === 'touch' && e.isPrimary && downAt >= 0) upAt = e.timeStamp;
+        }, opts);
+      } else {
+        window.addEventListener('touchstart', function (e) {
+          if (e.touches && e.touches.length === 1) { downAt = e.timeStamp; upAt = -1; }
+        }, opts);
+        window.addEventListener('touchend', function (e) {
+          if ((!e.touches || e.touches.length === 0) && downAt >= 0) upAt = e.timeStamp;
+        }, opts);
+      }
     }
     function take(data) {
       if (!word || H.editMenu === '0' || !fromTouch()) return false;
+      var held = downAt >= 0 && upAt >= downAt ? upAt - downAt : -1;
+      if (held >= 0 && held < 500) {
+        // a tap the busy page handled late: the desktop menu stays shut and nothing is selected (see above)
+        log('edit menu: a ' + Math.round(held) + ' ms tap reached the engine as a long press - kept as a tap');
+        return true;
+      }
       var x = data.get_X ? data.get_X() : 0, y = data.get_Y ? data.get_Y() : 0;
+      // the finger, in the engine's own mouse coordinates (its emulated right click has just set them)
+      var m = window.AscCommon.global_mouseEvent, mx = m.X, my = m.Y;
       // after the engine's own mouse up: the selection it made (caret at the finger, or a picture / table) is final
-      setTimeout(function () { show(x, y); }, 0);
+      setTimeout(function () { show(x, y, mx, my); }, 0);
       return true;
     }
-    function show(x, y) {
+    // the finger is on text (the engine's own hit test, as for a hyperlink under the mouse: inside a line's text, not
+    // the blank page beside or below it). Text in a shape keeps the word rule (the hit test there is the shape's own).
+    function onText(api, ld, mx, my) {
+      try {
+        var W = window.AscCommonWord;
+        if (W && W.docpostype_DrawingObjects !== undefined && ld.GetDocPosType() === W.docpostype_DrawingObjects) return true;
+        var p = api.WordControl.m_oDrawingDocument.ConvertCoordsFromCursor2(mx, my);
+        return !!p && p.Page >= 0 && !!ld.IsInText(p.X, p.Y, p.Page);
+      } catch (e) { log('edit menu: hit test', e && e.message || e); return true; }
+    }
+    function show(x, y, mx, my) {
       var api = window.__xrApi, ld = api && api.WordControl && api.WordControl.m_oLogicDocument, sel = false;
       try {
-        // a press on a selection keeps it (that is "tap on a selection"); otherwise the word under the finger
-        if (ld && !(ld.IsSelectionUse() && !ld.IsSelectionEmpty()) && ld.SelectCurrentWord()) {
+        // a press on a selection keeps it (that is "tap on a selection"); otherwise the word under the finger - only
+        // when the finger is on text (on blank paper: the caret the right click put at the nearest text, no selection)
+        if (ld && !(ld.IsSelectionUse() && !ld.IsSelectionEmpty()) && onText(api, ld, mx, my) && ld.SelectCurrentWord()) {
           ld.UpdateSelection(); ld.UpdateInterface();
         }
         sel = !!ld && ld.IsSelectionUse() && !ld.IsSelectionEmpty();
