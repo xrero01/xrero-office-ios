@@ -759,7 +759,11 @@ final class EditorUITests: XCTestCase {
                 return true
             }
 
-            XCTAssertTrue(waitEditor("opened"), "the real editor did not open (\(run.lang))")
+            guard waitEditor("opened") else {
+                XCTFail("the real editor did not open (\(run.lang))")
+                app.terminate()
+                continue
+            }
             let oldBase = (run.file as NSString).deletingPathExtension
             XCTAssertEqual(titleNow(), oldBase, "title before the rename (\(run.lang))")
             // 1. edit + save under the first name
@@ -830,7 +834,11 @@ final class EditorUITests: XCTestCase {
             print("XR title menu \(run.lang): recent = \(recent.label)")
             XCTAssertEqual(recent.label, run.newName + ".docx", "Recent does not show the renamed file (\(run.lang))")
             reopen.tap()
-            XCTAssertTrue(waitEditor("reopened"), "the renamed file did not reopen (\(run.lang))")
+            guard waitEditor("reopened") else {
+                XCTFail("the renamed file did not reopen (\(run.lang)): \((try? app.staticTexts["xr-state"].snapshot())?.label ?? "?")")
+                app.terminate()
+                continue                                   // the next language still runs
+            }
             XCTAssertEqual(titleNow(), run.newName, "title after reopening (\(run.lang))")
             shot(app, "65-ren-\(run.lang)-reopened")
             typeInPage(run.words[2])

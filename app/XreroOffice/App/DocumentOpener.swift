@@ -221,7 +221,16 @@ final class RecentFiles: ObservableObject {
     func resolve(_ item: Item) -> URL? {
         var stale = false
         guard let url = try? URL(resolvingBookmarkData: item.bookmark, options: [], relativeTo: nil, bookmarkDataIsStale: &stale)
-        else { return nil }
+        else {
+            // a bookmark made right after a rename can fail to resolve while the file is still there under its row's
+            // path (CI: the renamed file "gone" on reopen); the app's own folder needs no bookmark, so use that path
+            let here = URL(fileURLWithPath: item.id)
+            if Self.place(of: here) == "device", FileManager.default.fileExists(atPath: here.path) {
+                DispatchQueue.main.async { self.renew(item, at: here) }
+                return here
+            }
+            return nil
+        }
         if stale {
             // not during a view update: publishing from inside `body` is not allowed
             DispatchQueue.main.async { self.renew(item, at: url) }
