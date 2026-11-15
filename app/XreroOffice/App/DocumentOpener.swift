@@ -11,7 +11,8 @@ import UniformTypeIdentifiers
 final class DocumentOpener: NSObject, ObservableObject, UIDocumentBrowserViewControllerDelegate {
     /// Any controller in the home screen's window; documents are presented from the window's root.
     weak var anchor: UIViewController?
-    private var pending: URL?                 // asked to open while the window or another document was not ready
+    /// Asked to open while the window or another document was not ready; `copy`: an imported copy (plan S11).
+    private var pending: (url: URL, copy: Bool)?
     private var editorOpen = false
     /// The window's root, kept while it is reachable: under a full-screen editor the home screen's views leave the
     /// window (anchor.view.window becomes nil), so the root must not be looked up through them when closing.
@@ -27,7 +28,7 @@ final class DocumentOpener: NSObject, ObservableObject, UIDocumentBrowserViewCon
 
     func attach(_ vc: UIViewController) {
         anchor = vc
-        if let url = pending { pending = nil; DispatchQueue.main.async { self.open(url) } }
+        if let next = pending { pending = nil; DispatchQueue.main.async { self.open(next.url, importedCopy: next.copy) } }
     }
 
     // MARK: entry points from the home screen
@@ -60,8 +61,20 @@ final class DocumentOpener: NSObject, ObservableObject, UIDocumentBrowserViewCon
         top(of: root).present(browser, animated: true)
     }
 
-    /// A document handed to the app by the system (Files "Open in", Share).
-    func openExternal(_ url: URL) { open(url) }
+    /// A document handed to the app by the system (plan S11). From Files it arrives in place (the original is
+    /// edited). From Mail / WhatsApp / a share sheet it arrives as a copy in the app's Inbox: that copy is moved into
+    /// the app's own folder first, so the editor, its saves and Recent all point at a file the user can find, and the
+    /// editor says so on the first edit. If the copy cannot be moved, nothing opens (an editor writing into the
+    /// Inbox would lose the edits).
+    func openExternal(_ url: URL) {
+        guard IncomingFiles.isIncomingCopy(url) else { open(url); return }
+        do {
+            open(try IncomingFiles.importCopy(url), importedCopy: true)
+        } catch {
+            NSLog("XR open-in copy failed: %@", error.localizedDescription)
+            alert(L.cannotOpen, url.lastPathComponent)
+        }
+    }
 
     // MARK: browser delegate
 
@@ -82,12 +95,13 @@ final class DocumentOpener: NSObject, ObservableObject, UIDocumentBrowserViewCon
     // MARK: opening
 
     private func openPending() {
-        if let next = pending { pending = nil; open(next) }
+        if let next = pending { pending = nil; open(next.url, importedCopy: next.copy) }
     }
 
-    func open(_ url: URL) {
+    /// `importedCopy`: the file is a copy just moved here from the Inbox (openExternal).
+    func open(_ url: URL, importedCopy: Bool = false) {
         NSLog("XR open %@ editorOpen=%ld", url.lastPathComponent, editorOpen ? 1 : 0)
-        guard let root, !editorOpen else { pending = url; return }
+        guard let root, !editorOpen else { pending = (url, importedCopy); return }
         guard OfficeKind(url: url) != nil else { alert(L.cannotOpen, url.lastPathComponent); return }
         editorOpen = true
         let scoped = url.startAccessingSecurityScopedResource()       // documents outside the app's own folder
@@ -100,6 +114,8 @@ final class DocumentOpener: NSObject, ObservableObject, UIDocumentBrowserViewCon
                 self.alert(L.cannotOpen, url.lastPathComponent)
                 return
             }
+            model.origin = importedCopy ? .importedCopy : IncomingFiles.origin(of: url)
+            NSLog("XR open-in origin %@ %@", "\(model.origin)", url.lastPathComponent)
             RecentFiles.shared.add(url)
             let host = UIHostingController(rootView: AnyView(EmptyView()))
             host.rootView = AnyView(EditorHost(model: model) { [weak self] in
