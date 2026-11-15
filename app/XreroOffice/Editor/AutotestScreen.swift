@@ -48,14 +48,17 @@ struct AutotestScreen: View {
     }
 
     var body: some View {
-        if bar {
+        if ProcessInfo.processInfo.environment["XR_REAL"] == "1" {
+            RealDocumentHarness()
+        } else if bar {
             NavigationStack {
                 // the real ⋯ document menu (plan M7b); the actions that would leave the test's editor (language
                 // switch, share sheet) report in the state label instead
                 screen.editorTopBar(title: (name as NSString).deletingPathExtension, state: controller.state,
                                     status: barStatus, controller: controller, ar: lang == "ar",
                                     back: { state = "back" }, save: { controller.userSave() },
-                                    find: { controller.find() }, menuKey: "\(lang)|\(document.kind.rawValue)") {
+                                    find: { controller.find() }, menuKey: "\(lang)|\(document.kind.rawValue)",
+                                    format: document.kind == .word) {
                     DocumentMenuItems(kind: document.kind, lang: lang, signedIn: false, model: menu, controller: controller,
                                       language: { state = "lang:" + $0 }, share: { state = "share" },
                                       account: { showAccount = true }, about: { showAbout = true })
@@ -95,6 +98,8 @@ struct AutotestScreen: View {
             // store screenshots (XR_CLEAN=1): the labels stay readable by the test but leave no trace in the picture
             .opacity(ProcessInfo.processInfo.environment["XR_CLEAN"] == "1" ? 0.001 : 0.02)
         }
+        // the Aa format sheet as in the real editor screen (plan S1: the touch gate opens it from the keyboard bar)
+        .formatSheet(controller, ar: lang == "ar")
         // the same Save As list as the real editor screen (the UI test taps a format in it)
         .saveAsCopy(formats: $saveAsFormats, lang: ProcessInfo.processInfo.environment["XR_LANG"] ?? AppLanguage.current,
                     controller: controller)
@@ -494,7 +499,8 @@ private struct ProbeLabel: View {
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in keyboardUp = false }
     }
 
-    /// Touch gate probe (Word): the caret's place on screen (web view points), the selected text, the document text,
+    /// Touch gate probe (Word): the caret's place on screen (web view points) and in the document (dx / dy in mm on
+    /// page dpg: unchanged when only the view scrolled), the selected text, the document text,
     /// bold at the caret (Bold or, for Arabic script, BoldCS), the engine zoom, the visual viewport scale (1 = WebKit is not magnifying a bitmap), who has
     /// focus in the editor frame, whether the phone ribbon is folded, plus keypress-to-frame latency samples taken by
     /// listeners on the editor's input field (keydown/input -> second requestAnimationFrame, not the canvas paint itself;
@@ -510,7 +516,8 @@ private struct ProbeLabel: View {
      var ld=a.WordControl.m_oLogicDocument;
      if(ld){try{r.sel=(ld.IsSelectionUse()&&!ld.IsSelectionEmpty())?(ld.GetSelectedText(false)||''):'';}catch(e){r.sel='';r.selErr=String(e);}
       try{r.text=ld.Content.map(function(p){return p.GetText?p.GetText({ParaSeparator:''}):'';}).join('|');r.paras=ld.Content.length;}catch(e){r.text='';}
-      try{var tp=ld.GetCalculatedTextPr();r.bold=!!(tp.Bold||tp.BoldCS);}catch(e){}}
+      try{var tp=ld.GetCalculatedTextPr();r.bold=!!(tp.Bold||tp.BoldCS);}catch(e){}
+      try{var q=ld.GetCurPosXY();r.dx=Math.round(q.X*10)/10;r.dy=Math.round(q.Y*10)/10;r.dpg=q.PageNum;}catch(e){}}
      r.zoom=a.WordControl.m_nZoomValue;
      r.vv=window.visualViewport?Math.round(window.visualViewport.scale*100)/100:1;r.vvi=w.visualViewport?Math.round(w.visualViewport.scale*100)/100:1;
      var ic=w.AscCommon&&w.AscCommon.g_inputContext,A=ic&&ic.HtmlArea,ae=d.activeElement;
@@ -540,6 +547,9 @@ private struct ProbeLabel: View {
                 ?? ["err": e?.localizedDescription ?? "no result"]
             o["fr"] = Self.holdsFirstResponder(web)
             o["kb"] = keyboardUp
+            // the native edit menu (plan S5): presentations so far and the last action's answer
+            o["em"] = controller.editMenuShown
+            o["ema"] = controller.editMenuLast
             let line = "t=\(Int64(Date().timeIntervalSince1970 * 1000))|"
                 + ((try? JSONSerialization.data(withJSONObject: o)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}")
             // the simulator shares the Mac's file system: a file the test reads costs no accessibility query (each one
@@ -556,6 +566,46 @@ private struct ProbeLabel: View {
     /// The web view (its private content view, found by walking the public subview tree) is the first responder.
     private static func holdsFirstResponder(_ v: UIView) -> Bool {
         v.isFirstResponder || v.subviews.contains { holdsFirstResponder($0) }
+    }
+}
+
+/// XR_REAL=1 (plan M4b): the REAL document path instead of the test editor - the app's DocumentOpener opens
+/// Documents/<XR_NEW_NAME> as a UIDocument and presents the real EditorHost / EditorScreen over this screen (top bar,
+/// title menu, ⋯ menu, save on close), exactly as from Home. Back closes it again; "reopen" opens the first Recent
+/// entry by its bookmark, as Home's Recent row does. The test renames through the title menu, edits, saves and
+/// reopens; check_saved.py then finds the content in the renamed file and no file left at the old name.
+struct RealDocumentHarness: View {
+    @StateObject private var opener = DocumentOpener()
+    @ObservedObject private var recents = RecentFiles.shared
+    @State private var state = "starting"
+    private let name = ProcessInfo.processInfo.environment["XR_NEW_NAME"] ?? "xr-real.docx"
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Text(state).accessibilityIdentifier("xr-state")
+            Text(recents.items.first?.name ?? "none").accessibilityIdentifier("xr-real-recent")
+            Button("reopen") { reopen() }.accessibilityIdentifier("xr-real-reopen")
+        }
+        .background(PresenterAnchor(opener: opener))
+        .onAppear(perform: start)
+    }
+
+    private func start() {
+        guard state == "starting" else { return }
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let url = docs.appendingPathComponent(name)
+        let kind = OfficeKind(url: url) ?? .word
+        if !FileManager.default.fileExists(atPath: url.path) {
+            try? OfficeDocument.blank(kind).write(to: url, options: .atomic)
+        }
+        state = "opened " + name
+        opener.open(url)
+    }
+
+    private func reopen() {
+        guard let item = recents.items.first, let url = recents.resolve(item) else { state = "no recent"; return }
+        state = "reopened " + url.lastPathComponent
+        opener.open(url)
     }
 }
 #endif

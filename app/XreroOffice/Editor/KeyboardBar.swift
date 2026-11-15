@@ -55,7 +55,10 @@ struct KeyboardBar: View {
                     "a.put_ListTypeCustom('{\"Type\":\"\(state.list == .number ? "remove" : "number")\"}')"
                 }
                 alignButton
-                // "Aa" (the text-format sheet, plan S1) joins here once that sheet exists: no button without a binding
+                // Aa: everything else (font, size, style, colour, spacing, insert) in the format sheet (plan S1)
+                Button { controller.showFormat() } label: { FormatGlyph() }
+                    .accessibilityLabel(FormatText.format(ar))
+                    .accessibilityIdentifier("xr-kb-format")
                 Button { controller.hideKeyboard() } label: {
                     symbol("keyboard.chevron.compact.down", on: false)
                 }
@@ -179,10 +182,7 @@ struct KeyboardBar: View {
     /// One bridge call per tap, through EditorController.call (the editor frame, where __xrApi lives). The editor
     /// log gets one line per tap (CI reads it); never anything per keystroke.
     private func run(_ name: String, _ js: String) {
-        controller.call("var a=window.__xrApi;if(!a)return 'no editor api';" + js +
-                        ";if(window.XreroHost)XreroHost.log('keyboard bar: \(name)');return 'ok';") { r, e in
-            if (r as? String) != "ok" { NSLog("XR keyboard bar %@: %@", name, (r as? String) ?? e ?? "?") }
-        }
+        controller.format("keyboard bar", name, js)
     }
 }
 
@@ -220,6 +220,18 @@ final class KeyboardBarHost: UIView {
 final class XRWebView: WKWebView {
     var keyboardBar: KeyboardBarHost?
 
+    /// The native edit menu's anchor (plan S5, EditMenu.swift): a transparent, touch-transparent view over the whole
+    /// web view, added on first use so a document that never shows the menu has no extra view.
+    var editMenuAnchor: EditMenuAnchor {
+        if let a = anchor { return a }
+        let a = EditMenuAnchor(frame: bounds)
+        a.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        addSubview(a)
+        anchor = a
+        return a
+    }
+    private var anchor: EditMenuAnchor?
+
     override var inputAccessoryView: UIView? {
         guard let bar = keyboardBar else { return super.inputAccessoryView }
         // iPhone landscape (under 400 pt tall): the document needs every point; WebKit's slim bar keeps its Done
@@ -242,7 +254,8 @@ final class XRWebView: WKWebView {
         if let responder = XRWebView.firstResponder(in: self) { responder.reloadInputViews() }
     }
 
-    private static func firstResponder(in view: UIView) -> UIView? {
+    /// The first responder inside `view` (WebKit's content view while the editor holds the keyboard), or nil.
+    static func firstResponder(in view: UIView) -> UIView? {
         if view.isFirstResponder { return view }
         for sub in view.subviews { if let r = firstResponder(in: sub) { return r } }
         return nil

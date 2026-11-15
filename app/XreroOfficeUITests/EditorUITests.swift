@@ -361,6 +361,26 @@ final class EditorUITests: XCTestCase {
             print("XR bar \(name) saved: \(saved) status=\(line)")
             XCTAssertEqual(line, savedWord, "no 'Saved' after the save (\(name))")
             shot(app, "53-bar-\(name)-saved")
+
+            // Aa (plan S1) in the bar opens the format sheet (iPad: a popover under it); a style tap reaches the
+            // engine (the state's paragraph style follows) and Done closes it
+            let aa = app.buttons["xr-bar-format"]
+            XCTAssertTrue(aa.exists, "no Aa in the top bar (\(name))")
+            if aa.exists {
+                XCTAssertGreaterThanOrEqual(aa.frame.width, 43.5, "Aa is narrower than 44 pt (\(name)): \(aa.frame)")
+                aa.tap()
+                let heading = app.buttons["xr-fmt-style-heading1"]
+                XCTAssertTrue(heading.waitForExistence(timeout: 10), "Aa did not open the format sheet (\(name))")
+                shot(app, "53b-bar-\(name)-format-sheet")
+                if heading.exists {
+                    heading.tap()
+                    XCTAssertTrue(waitProbe("eading_1 ", 10), "format sheet style did not reach the engine (\(name)): \(probe.label)")
+                    app.buttons["xr-fmt-done"].tap()
+                    for _ in 0..<20 where heading.exists { Thread.sleep(forTimeInterval: 0.5) }
+                    XCTAssertFalse(heading.exists, "the format sheet did not close (\(name))")
+                }
+                print("XR bar \(name) format sheet: \(probe.label)")
+            }
             if !dark {                                     // the same bar in dark (Arabic runs in dark throughout)
                 XCUIDevice.shared.system.open(URL(string: "xrero-autotest://appearance?dark=1")!)
                 sleep(3)
@@ -690,6 +710,162 @@ final class EditorUITests: XCTestCase {
             let saved = save(app)
             shot(app, "42-ar-" + kind + "-saved")
             XCTAssertTrue(saved.hasPrefix("saved"), "Arabic blank \(kind) save failed: \(saved)")
+            app.terminate()
+        }
+    }
+
+    /// The title menu (plan M4b), on the REAL document path (XR_REAL=1: UIDocument + the app's own editor screen, as
+    /// opened from Home), English then Arabic interface: type and save, then tap the file name > Rename to a new name
+    /// (English, then an Arabic file name), edit and save again, Duplicate, back to the list, reopen from Recent (its
+    /// bookmark must point at the renamed file), edit and save a third time. The editor page is never reloaded by the
+    /// rename (the second edit lands without reopening). check_saved.py then reads the renamed file: all three words
+    /// inside, nothing left at the old name, and the copy holding the first two.
+    func testTitleMenuRenameSaveReopen() {
+        continueAfterFailure = true                        // the Arabic half still reports when English fails
+        let runs: [(lang: String, file: String, newName: String, words: [String])] = [
+            ("en", "xr-ren-en.docx", "Renamed note", ["Alpha", " Beta", " Gamma"]),
+            ("ar", "xr-ren-ar.docx", "\u{0645}\u{0644}\u{0627}\u{062D}\u{0638}\u{0629} \u{0627}\u{0644}\u{0627}\u{062C}\u{062A}\u{0645}\u{0627}\u{0639}",   // ملاحظة الاجتماع
+             ["Delta", " Omega", " Sigma"]),
+        ]
+        for run in runs {
+            let ar = run.lang == "ar"
+            let app = XCUIApplication()
+            app.launchArguments = ["-xr.lang", run.lang]
+            app.launchEnvironment = ["XR_REAL": "1", "XR_NEW_NAME": run.file]
+            app.launch()
+            let title = app.staticTexts["xr-bar-title"], status = app.staticTexts["xr-bar-status"]
+            func statusNow() -> String { (try? status.firstMatch.snapshot())?.label ?? "(none)" }
+            func titleNow() -> String { (try? title.firstMatch.snapshot())?.label ?? "(none)" }
+            /// the editor is up: its title shows and its second line no longer says Opening…
+            func waitEditor(_ what: String) -> Bool {
+                let end = Date().addingTimeInterval(120)
+                while Date() < end {
+                    let s = statusNow()
+                    if title.exists && !s.hasPrefix("Opening") && !s.hasPrefix("جارٍ الفتح") { sleep(3); return true }
+                    Thread.sleep(forTimeInterval: 0.5)
+                }
+                shot(app, "60-ren-\(run.lang)-\(what)-not-ready")
+                return false
+            }
+            func typeInPage(_ text: String) {
+                let web = app.webViews.firstMatch
+                // the page's empty middle, below the text (the editor puts the caret at the end of the last line, so a
+                // word is never typed into another) and above where the keyboard comes up; a right-to-left blank
+                // (Arabic interface) starts at the right edge
+                let point = web.coordinate(withNormalizedOffset: CGVector(dx: ar ? 0.65 : 0.35, dy: 0.45))
+                point.tap()
+                if !app.keyboards.firstMatch.waitForExistence(timeout: 4) { point.tap(); _ = app.keyboards.firstMatch.waitForExistence(timeout: 4) }
+                sleep(1)
+                typeSlowly(app, text)
+                sleep(1)
+            }
+            func saveNow(_ what: String) -> Bool {
+                app.buttons["xr-bar-more"].tap()
+                let save = app.buttons["xr-bar-save"]
+                guard save.waitForExistence(timeout: 5) else { XCTFail("no Save in ⋯ (\(run.lang) \(what))"); return false }
+                save.tap()
+                let want = ar ? "محفوظ" : "Saved"
+                let end = Date().addingTimeInterval(40)
+                while Date() < end { if statusNow() == want { return true }; Thread.sleep(forTimeInterval: 0.3) }
+                return false
+            }
+            func titleMenu(_ item: String) -> Bool {
+                let menu = app.buttons["xr-bar-title-menu"]
+                guard menu.waitForExistence(timeout: 5) else { XCTFail("no title menu (\(run.lang))"); return false }
+                menu.tap()
+                let e = app.buttons[item]
+                guard e.waitForExistence(timeout: 5) else { XCTFail("no \(item) in the title menu (\(run.lang))"); return false }
+                e.tap()
+                return true
+            }
+
+            guard waitEditor("opened") else {
+                XCTFail("the real editor did not open (\(run.lang))")
+                app.terminate()
+                continue
+            }
+            let oldBase = (run.file as NSString).deletingPathExtension
+            XCTAssertEqual(titleNow(), oldBase, "title before the rename (\(run.lang))")
+            // 1. edit + save under the first name
+            typeInPage(run.words[0])
+            XCTAssertTrue(saveNow("first"), "first save did not say Saved (\(run.lang)): \(statusNow())")
+
+            // 2. the title menu: Rename, Duplicate, Move…
+            app.buttons["xr-bar-title-menu"].tap()
+            for id in ["xr-title-rename", "xr-title-duplicate", "xr-title-move"] {
+                XCTAssertTrue(app.buttons[id].waitForExistence(timeout: 5), "the title menu has no \(id) (\(run.lang))")
+            }
+            shot(app, "61-ren-\(run.lang)-title-menu")
+            app.buttons["xr-title-rename"].tap()
+            // a TextField inside a SwiftUI .alert becomes the UIAlertController's own field and loses its identifier:
+            // find it as the alert's text field
+            let alert = app.alerts.firstMatch
+            let field = alert.textFields.firstMatch
+            guard alert.waitForExistence(timeout: 5), field.waitForExistence(timeout: 5) else {
+                XCTFail("no name field in the Rename alert (\(run.lang))")
+                shot(app, "62-ren-\(run.lang)-no-rename-field")
+                app.terminate()
+                continue                                   // the next language still runs
+            }
+            // the alert focuses its field with the cursor after the name: delete it, then type the new one
+            if !app.keyboards.firstMatch.waitForExistence(timeout: 3) { field.tap() }
+            for _ in 0..<3 {
+                let v = (field.value as? String) ?? ""
+                if v.isEmpty || v == field.placeholderValue || v == "Name" || v == "الاسم" { break }
+                field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: v.count + 2))
+            }
+            field.typeText(run.newName)
+            print("XR title menu \(run.lang): rename field = \((field.value as? String) ?? "?")")
+            shot(app, "62-ren-\(run.lang)-rename-alert")
+            let ok = app.alerts.buttons.matching(NSPredicate(format: "identifier == 'xr-rename-ok' OR label == %@",
+                                                             ar ? "إعادة التسمية" : "Rename")).firstMatch
+            guard ok.exists else {
+                XCTFail("no Rename button in the alert (\(run.lang))")
+                app.terminate()
+                continue
+            }
+            ok.tap()
+            var renamed = false
+            for _ in 0..<20 { if titleNow() == run.newName { renamed = true; break }; Thread.sleep(forTimeInterval: 0.5) }
+            print("XR title menu \(run.lang): title after rename = \(titleNow())")
+            XCTAssertTrue(renamed, "the title did not become the new name (\(run.lang)): \(titleNow())")
+            shot(app, "63-ren-\(run.lang)-renamed")
+
+            // 3. edit + save after the rename: the same editor page (no reopen), the file under its new name
+            typeInPage(run.words[1])
+            XCTAssertTrue(saveNow("after rename"), "save after the rename did not say Saved (\(run.lang)): \(statusNow())")
+
+            // 4. Duplicate: a copy beside it, said in a short notice
+            if titleMenu("xr-title-duplicate") {
+                // any element type (the capsule's text may surface as other than a static text); the notice stays 4 s
+                let toast = app.descendants(matching: .any).matching(identifier: "xr-toast").firstMatch
+                XCTAssertTrue(toast.waitForExistence(timeout: 15), "no notice after Duplicate (\(run.lang))")
+                print("XR title menu \(run.lang): duplicate notice = \(toast.exists ? toast.label : "-")")
+                shot(app, "64-ren-\(run.lang)-duplicated")
+            }
+            sleep(2)
+
+            // 5. back to the list: Recent shows the new name; reopen it from there, edit + save once more
+            app.buttons["xr-bar-back"].tap()
+            let reopen = app.buttons["xr-real-reopen"]
+            XCTAssertTrue(reopen.waitForExistence(timeout: 30), "the editor did not close (\(run.lang))")
+            sleep(2)
+            let recent = app.staticTexts["xr-real-recent"]
+            print("XR title menu \(run.lang): recent = \(recent.label)")
+            XCTAssertEqual(recent.label, run.newName + ".docx", "Recent does not show the renamed file (\(run.lang))")
+            reopen.tap()
+            guard waitEditor("reopened") else {
+                XCTFail("the renamed file did not reopen (\(run.lang)): \((try? app.staticTexts["xr-state"].snapshot())?.label ?? "?")")
+                app.terminate()
+                continue                                   // the next language still runs
+            }
+            XCTAssertEqual(titleNow(), run.newName, "title after reopening (\(run.lang))")
+            shot(app, "65-ren-\(run.lang)-reopened")
+            typeInPage(run.words[2])
+            XCTAssertTrue(saveNow("reopened"), "save after reopening did not say Saved (\(run.lang)): \(statusNow())")
+            app.buttons["xr-bar-back"].tap()
+            XCTAssertTrue(reopen.waitForExistence(timeout: 30), "the editor did not close after reopening (\(run.lang))")
+            sleep(2)
             app.terminate()
         }
     }
@@ -1147,18 +1323,32 @@ final class EditorUITests: XCTestCase {
              "sel='\(sel4)' menu=\(num(p4, "menu") ?? 0) \(focusInfo(p4))")
         shot(app, "52-touch-\(lang)-double-tap")
 
-        // 5) long press selects a word (iOS: the word, its handles and the edit menu)
+        // 5) long press selects a word (iOS: the word, its handles and the edit menu). Plan S5: the engine's desktop
+        //    right-click menu (which a long press used to open, selecting nothing) is swallowed on touch, the word under
+        //    the finger is selected and the app's native edit menu (UIEditMenuInteraction) is shown at it.
         tapEnd()
+        let em4 = num(probe(app), "em") ?? 0
         point(at(0.86), ly).press(forDuration: 1.2)
         let p5 = probe(app)
         let sel5 = str(p5, "sel").trimmingCharacters(in: .whitespacesAndNewlines)
         shot(app, "53-touch-\(lang)-long-press")
-        // KNOWN only for the shape seen today (the desktop menu opened, nothing selected): any other failure is a FAIL,
-        // so once long press is fixed a later regression of it is caught
         gate("long-press-selects-word", sel5.count >= 4 && !sel5.contains(" ") && t3.contains(sel5),
-             "sel='\(sel5)' web menu=\(num(p5, "menu") ?? 0) native menu=\(app.menuItems.count) \(focusInfo(p5))",
-             known: (num(p5, "menu") ?? 0) > 0 && sel5.isEmpty
-                ? "a long press opens the editor's desktop right-click menu (Cut/Copy/Paste/Paragraph...) and the keyboard can go down; no word is selected" : nil)
+             "sel='\(sel5)' web menu=\(num(p5, "menu") ?? 0) native menu=\(app.menuItems.count) \(focusInfo(p5))")
+        // the native menu was presented (iOS called the interaction's willPresent) and the desktop one stayed shut
+        let em5 = num(p5, "em") ?? 0
+        gate("long-press-native-menu", em5 > em4 && (num(p5, "menu") ?? 0) == 0,
+             "native presentations \(em4)->\(em5) web menu=\(num(p5, "menu") ?? 0) \(focusInfo(p5))")
+        // its Copy, tapped as a user taps it, runs the editor's copy (one bridge call): the answer comes back in the probe
+        let copyLabel = ar ? "\u{0646}\u{0633}\u{062E}" : "Copy"                                     // نسخ
+        let copyItem = app.menuItems[copyLabel].exists ? app.menuItems[copyLabel] : app.buttons[copyLabel]
+        if em5 > em4 && copyItem.exists && copyItem.isHittable {
+            copyItem.tap()
+            var pc = probe(app)
+            for _ in 0..<3 where str(pc, "ema").isEmpty { usleep(700_000); pc = probe(app) }
+            gate("edit-menu-copy", str(pc, "ema") == "copy:ok", "last action '\(str(pc, "ema"))' \(focusInfo(pc))")
+        } else {
+            info("edit-menu-copy", "Copy not found in the native menu (menu items: \(app.menuItems.count)); not tapped")
+        }
 
         // 6) a formatting tap keeps the keyboard: caret at the end, Bold, type on
         // close the menu the long press left with a tap in the page margin just above the line (the menu opens below
@@ -1284,6 +1474,66 @@ final class EditorUITests: XCTestCase {
              "caret \(caret11) -> \(caret12)")
         shot(app, "56-touch-\(lang)-sheet-closed")
         if !focused(p12) { tapEnd(); _ = probe(app) }
+
+        // 8b) the Aa format sheet (plan S1) from the keyboard bar: it opens with the keyboard down, its size stepper
+        //     reaches the engine (state "sz:" up one step, then back down: the text keeps its geometry), and closing
+        //     it brings back the keyboard and the caret where they were (the M14 rule for every native sheet)
+        var f0 = probe(app)
+        for _ in 0..<2 where !(str(f0, "sel").isEmpty && focused(f0)) { tapEnd(); f0 = probe(app) }
+        let caretF0 = (num(f0, "cx") ?? -1, num(f0, "cy") ?? -1)
+        func fontSize() -> Double {
+            let s = stateLabel.exists ? stateLabel.label : ""
+            return s.components(separatedBy: " ").first { $0.hasPrefix("sz:") }.flatMap { Double($0.dropFirst(3)) } ?? -1
+        }
+        let kbFormat = app.buttons["xr-kb-format"]
+        let aaShown = kbFormat.waitForExistence(timeout: 10) && kbFormat.isHittable
+        if aaShown { kbFormat.tap() }
+        let sizeUp = app.buttons["xr-fmt-size-up"], sizeDown = app.buttons["xr-fmt-size-down"]
+        let fmtShown = aaShown && sizeUp.waitForExistence(timeout: 10)
+        let f1 = probe(app)
+        shot(app, "55b-touch-\(lang)-format-sheet")
+        gate("fmt-sheet-opens", fmtShown, "Aa in the keyboard bar: \(aaShown) \(focusInfo(f0))")
+        // the keyboard is off the screen under the phone's sheet (UIKit may keep the responder: kb, not fr, is what the
+        // user sees); the iPad popover hangs from the top bar and may leave the keyboard up beside it
+        if UIDevice.current.userInterfaceIdiom == .pad && flag(f1, "kb") {
+            gate("fmt-sheet-keyboard-down", fmtShown, "iPad popover, keyboard stays up beside it: \(focusInfo(f1))")
+        } else {
+            gate("fmt-sheet-keyboard-down", fmtShown && !flag(f1, "kb"), focusInfo(f1))
+        }
+        var sizes: [Double] = [fontSize()]
+        if fmtShown {
+            for b in [sizeUp, sizeDown] {
+                let before = sizes.last ?? -1
+                b.tap()
+                var now = fontSize()
+                for _ in 0..<8 where now == before { usleep(500_000); now = fontSize() }
+                sizes.append(now)
+            }
+        }
+        gate("fmt-size-applies", sizes.count == 3 && sizes[0] > 0 && sizes[1] > sizes[0] && sizes[2] == sizes[0],
+             "size \(sizes.map { String(format: "%g", $0) }.joined(separator: " -> "))")
+        if fmtShown { app.buttons["xr-fmt-done"].tap() }
+        for _ in 0..<20 where sizeUp.exists { usleep(500_000) }
+        // the keyboard itself must be back on screen (kb: keyboardDidShow), not only the responder (round 1: fr=true
+        // kb=false passed a focus-only check): polled for up to 3 s for the dismissal and the keyboard animation
+        var f2 = probe(app)
+        for _ in 0..<6 where fmtShown && focused(f0) && !(focused(f2) && flag(f2, "kb")) { usleep(500_000); f2 = probe(app) }
+        let caretF2 = (num(f2, "cx") ?? -2, num(f2, "cy") ?? -2)
+        gate("fmt-sheet-return-keyboard", fmtShown && !sizeUp.exists && (!focused(f0) || (focused(f2) && flag(f2, "kb"))),
+             "before: \(focusInfo(f0)) after: \(focusInfo(f2))")
+        // the caret at the same place in the text: on screen within 2 pt, or at the very same document position (page
+        // + mm) with its top edge within 2 pt. CI round 4 (iPhone): same document position and same top, but the
+        // engine redrew the caret taller once the keyboard came back after the size round trip (h 7 -> 14 EN,
+        // 12 -> 20 AR), which moves its centre (cy) by half the difference; the height is in the detail line
+        let docF0 = "\(num(f0, "dpg") ?? -1)/\(num(f0, "dx") ?? -1)/\(num(f0, "dy") ?? -1)"
+        let docF2 = "\(num(f2, "dpg") ?? -2)/\(num(f2, "dx") ?? -2)/\(num(f2, "dy") ?? -2)"
+        let onScreen = abs(caretF2.0 - caretF0.0) <= 2 && abs(caretF2.1 - caretF0.1) <= 2
+        let top0 = caretF0.1 - (num(f0, "ch") ?? 0) / 2, top2 = caretF2.1 - (num(f2, "ch") ?? 0) / 2
+        let inText = num(f0, "dy") != nil && docF0 == docF2 && abs(caretF2.0 - caretF0.0) <= 2 && abs(top2 - top0) <= 2
+        gate("fmt-sheet-return-caret", fmtShown && (onScreen || inText),
+             "caret \(caretF0) -> \(caretF2) h \(num(f0, "ch") ?? -1) -> \(num(f2, "ch") ?? -1) document \(docF0) -> \(docF2)")
+        shot(app, "56b-touch-\(lang)-format-sheet-closed")
+        if !focused(f2) { tapEnd(); _ = probe(app) }
 
         // 9) pinch: the engine zooms (the page re-renders crisp: no WebKit bitmap scaling) and the zoom stays
         // pinch on the page itself: on a phone the Home panel opened for Bold folds down over the top of the page

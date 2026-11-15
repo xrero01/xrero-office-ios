@@ -74,11 +74,14 @@ TOUCH = {   # what EditorUITests.touchGate types per language: sentence, tapped-
 }
 # the checks every language must log (a missing line means the test stopped early: that is a failure too)
 TOUCH_CHECKS = ("editor-ready", "tap-places-caret-first-line", "typing", "line-direction", "tap-moves-caret-into-text",
-                "tap-then-type-inserts-there", "double-tap-selects-word", "long-press-selects-word", "caret-to-line-end",
+                "tap-then-type-inserts-there", "double-tap-selects-word", "long-press-selects-word", "long-press-native-menu",
+                "caret-to-line-end",
                 "bold-button-applies", "format-tap-keeps-keyboard", "type-after-format",
                 "kbar-shown", "kbar-bold-on", "kbar-keeps-keyboard", "kbar-next-word-bold", "kbar-align-cycles",
                 "enter-x5", "select-all",
-                "sheet-opens-and-closes", "sheet-return-keyboard", "sheet-return-caret", "pinch-in-zooms-page",
+                "sheet-opens-and-closes", "sheet-return-keyboard", "sheet-return-caret",
+                "fmt-sheet-opens", "fmt-sheet-keyboard-down", "fmt-size-applies", "fmt-sheet-return-keyboard",
+                "fmt-sheet-return-caret", "pinch-in-zooms-page",
                 "pinch-zoom-kept", "pinch-out-zooms-back", "kbar-hide-keyboard", "save", "reopen-keeps-text")
 
 
@@ -280,6 +283,41 @@ def doc_menu(d):
     return good
 
 
+def title_menu(d):
+    """The title menu (plan M4b, EditorUITests.testTitleMenuRenameSaveReopen, the real UIDocument path): after
+    type + save, Rename, type + save, Duplicate, reopen from Recent, type + save, the renamed file holds all three
+    words (the saves after the rename and after the reopen landed in it), nothing is left at the old name (no ghost
+    file), and the copy holds the first two. English and an Arabic file name."""
+    import unicodedata
+    good = True
+    names = {unicodedata.normalize("NFC", f): f for f in os.listdir(d)}
+    for old, new, words in (("xr-ren-en.docx", "Renamed note", ("Alpha", "Beta", "Gamma")),
+                            ("xr-ren-ar.docx", "ملاحظة الاجتماع", ("Delta", "Omega", "Sigma"))):
+        ghost = old in names
+        f = names.get(unicodedata.normalize("NFC", new + ".docx"))
+        if f is None:
+            print("%s.docx: MISSING (title menu > Rename of %s)%s" % (new, old, " - the file is still at the old name" if ghost else ""))
+            good = False; continue
+        try:
+            s = text(os.path.join(d, f))
+        except Exception as e:
+            print("%s: cannot read: %s" % (f, e)); good = False; continue
+        has = [w in s for w in words]
+        g = all(has) and not ghost
+        print("%s (renamed from %s): words %s=%s  old name gone=%s  text=%r -> %s"
+              % (f, old, "/".join(words), has, not ghost, s[:120], "OK" if g else "WRONG"))
+        good &= g
+        c = names.get(unicodedata.normalize("NFC", new + (" - نسخة" if old.endswith("-ar.docx") else " copy") + ".docx"))
+        if c is None:
+            print("  copy of %s: MISSING (title menu > Duplicate)" % new); good = False
+        else:
+            cs = text(os.path.join(d, c))
+            cg = words[0] in cs and words[1] in cs
+            print("  %s (Duplicate): %s+%s inside=%s -> %s" % (c, words[0], words[1], cg, "OK" if cg else "WRONG"))
+            good &= cg
+    return good
+
+
 root = sys.argv[1]
 ok = True
 def text(p):
@@ -415,6 +453,7 @@ for dev in sorted(os.listdir(root)) if os.path.isdir(root) else []:
     else:
         print("ar_letter.pdf: MISSING (PDF edit + save)"); ok = False
     ok &= doc_menu(d)
+    ok &= title_menu(d)
 if not (os.path.isdir(root) and os.listdir(root)):
     print("no saved files from any simulator"); ok = False
 try:   # out/qa/touch-gate.json beside out/saved: the gate's results per device + language (published in the evidence)

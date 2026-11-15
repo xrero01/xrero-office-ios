@@ -39,6 +39,16 @@ final class EditorState: ObservableObject {
     @Published private(set) var direction = Direction.ltr
     @Published private(set) var list = ListKind.none
     @Published private(set) var title = ""
+    // Word only, for the Aa format sheet (plan S1): the font, size, strikethrough, paragraph style, line spacing and
+    // text colour at the caret. "" / 0 / -1 = mixed or not known yet.
+    @Published private(set) var fontName = ""
+    @Published private(set) var fontSize = 0.0
+    @Published private(set) var strikeout = false
+    @Published private(set) var style = ""
+    /// The line spacing as a multiple (1, 1.15, 1.5, 2 ...); -1 for exact / at-least spacing.
+    @Published private(set) var lineSpacing = -1.0
+    /// "auto" or "RRGGBB".
+    @Published private(set) var textColor = ""
     /// How many state messages have arrived since the editor page loaded (tests, diagnostics).
     @Published private(set) var updates = 0
 
@@ -61,6 +71,12 @@ final class EditorState: ObservableObject {
             case "direction": put(\.direction, (v as? String).flatMap(Direction.init(rawValue:)))
             case "list": put(\.list, (v as? String).flatMap(ListKind.init(rawValue:)))
             case "title": put(\.title, v as? String)
+            case "font": put(\.fontName, v as? String)
+            case "size": put(\.fontSize, (v as? NSNumber)?.doubleValue)
+            case "strike": put(\.strikeout, v as? Bool)
+            case "style": put(\.style, v as? String)
+            case "spacing": put(\.lineSpacing, (v as? NSNumber)?.doubleValue)
+            case "color": put(\.textColor, v as? String)
             default: break
             }
         }
@@ -72,15 +88,18 @@ final class EditorState: ObservableObject {
         put(\.canUndo, false); put(\.canRedo, false); put(\.modified, false); put(\.saved, true)
         put(\.selection, Selection.none); put(\.bold, false); put(\.italic, false); put(\.underline, false)
         put(\.alignment, Alignment.none); put(\.direction, Direction.ltr); put(\.list, ListKind.none)
-        put(\.title, ""); put(\.updates, 0)
+        put(\.title, ""); put(\.fontName, ""); put(\.fontSize, 0); put(\.strikeout, false); put(\.style, "")
+        put(\.lineSpacing, -1); put(\.textColor, ""); put(\.updates, 0)
     }
 
-    /// One line for logs and the CI probe, e.g. "undo:1 redo:0 mod:1 saved:0 sel:text b:0 i:0 u:0 al:left dir:rtl list:none n:4".
+    /// One line for logs and the CI probe, e.g. "undo:1 redo:0 mod:1 saved:0 sel:text b:0 i:0 u:0 al:left dir:rtl list:none
+    /// sz:11 st:Heading_1 n:4" (spaces in the style name become "_", so every value stays one word).
     var summary: String {
         func f(_ b: Bool) -> String { b ? "1" : "0" }
         return "undo:\(f(canUndo)) redo:\(f(canRedo)) mod:\(f(modified)) saved:\(f(saved)) sel:\(selection.rawValue) " +
             "b:\(f(bold)) i:\(f(italic)) u:\(f(underline)) al:\(alignment.rawValue) dir:\(direction.rawValue) " +
-            "list:\(list.rawValue) n:\(updates)"
+            "list:\(list.rawValue) sz:\(String(format: "%g", fontSize)) st:\(style.replacingOccurrences(of: " ", with: "_")) " +
+            "n:\(updates)"
     }
 
     /// Sets a property only when the value really changed (an equal assignment would still notify every observer).
