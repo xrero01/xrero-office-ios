@@ -234,7 +234,8 @@ private struct ReadingProbe: View {
     private static let tick = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        Text("read\(engine.applied):\(page) app=\(model.reading ? 1 : 0)")
+        // verbatim: ASCII digits whatever the locale (the test parses the count)
+        Text(verbatim: "read\(engine.applied):\(page) app=\(model.reading ? 1 : 0)")
             .font(.system(size: 6))
             .lineLimit(1)
             .frame(maxWidth: 40, alignment: .leading)
