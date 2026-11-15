@@ -1012,6 +1012,14 @@ final class EditorUITests: XCTestCase {
                 return false
             }
         }
+        // the opened panel can still be laid out / animating: wait (up to ~3 s) until the button's own centre is the
+        // top element there, so the tap lands on the button and not on a layer still covering it
+        if key == "bold" {
+            for _ in 0..<6 where !str(p, "bhit").isEmpty && str(p, "bhit") != "id-toolbar-btn-bold" {
+                print("XR touch toolbar bold covered by \(str(p, "bhit")) [\(str(p, "bhitc"))] fold=\(str(p, "fold")) - waiting")
+                usleep(500_000); p = probe(app)
+            }
+        }
         guard let xy = (p["btn"] as? [String: Any])?[key] as? [NSNumber], xy.count == 2 else {
             print("XR touch toolbar button \(key) not visible: fold=\(str(p, "fold"))")
             return false
@@ -1176,7 +1184,7 @@ final class EditorUITests: XCTestCase {
         // decides (check_saved.py also checks that word is a bold run in the saved file)
         gate("bold-button-applies", tapped && (flag(p7, "bold") || flag(p8, "bold")),
              "tapped=\(tapped) bold after tap=\(flag(p7, "bold")) after typing=\(flag(p8, "bold")) fold=\(str(p7, "fold")) " +
-             "button active=\(flag(p7, "bact")) hit=\(str(p7, "bhit")) bold buttons=\(num(p7, "bn") ?? -1) before tap: fold=\(str(p6, "fold")) active=\(flag(p6, "bact"))")
+             "button active=\(flag(p7, "bact")) hit=\(str(p7, "bhit")) [\(str(p7, "bhitc"))] bold buttons=\(num(p7, "bn") ?? -1) before tap: fold=\(str(p6, "fold")) active=\(flag(p6, "bact"))")
         gate("type-after-format", plain(p8).contains(sentence.prefix(4)) && (plain(p8).components(separatedBy: "|").first ?? "").hasSuffix(boldWord),
              "bold=\(flag(p8, "bold")) text=\(plain(p8).prefix(80))")
 
