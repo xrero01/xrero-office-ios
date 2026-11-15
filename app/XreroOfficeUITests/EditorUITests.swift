@@ -890,23 +890,6 @@ final class EditorUITests: XCTestCase {
         let title = app.staticTexts["xr-bar-title"], status = app.staticTexts["xr-bar-status"]
         func text(_ id: String) -> String { (try? app.staticTexts[id].firstMatch.snapshot())?.label ?? "" }
         func titleNow() -> String { (try? title.firstMatch.snapshot())?.label ?? "(none)" }
-        /// the office files in Documents and what the last picker was (the harness's list button). The labels say
-        /// "files#<n>:": a tap swallowed by a sheet still sliding away would leave the previous answer, so the tap is
-        /// repeated until <n> changed.
-        func list() -> (files: [String], picker: String) {
-            func gen() -> String { String(text("xr-real-files").prefix { $0 != ":" }) }
-            let before = gen()
-            for _ in 0..<4 {
-                if listButton.exists && listButton.isHittable { listButton.tap() }
-                let end = Date().addingTimeInterval(2.5)
-                while Date() < end && gen() == before { Thread.sleep(forTimeInterval: 0.25) }
-                if gen() != before { break }
-            }
-            XCTAssertNotEqual(gen(), before, "the harness's list did not refresh")
-            let all = text("xr-real-files")
-            let f = all.drop { $0 != ":" }.dropFirst().split(separator: "|").map(String.init)
-            return (f, text("xr-real-picker"))
-        }
         func waitEditor(_ what: String) -> Bool {
             let end = Date().addingTimeInterval(120)
             while Date() < end {
@@ -928,6 +911,50 @@ final class EditorUITests: XCTestCase {
             sleep(1)
             return ok
         }
+        /// how many taps a harness button received (its counter label)
+        func taps(_ b: String) -> Int {
+            let t = text("xr-real-taps")
+            guard let r = t.range(of: b + "=") else { return -1 }
+            return Int(t[r.upperBound...].prefix { $0.isNumber }) ?? -1
+        }
+        /// Taps a harness button and checks that the tap reached the app (its counter went up). A lost tap is
+        /// diagnosed - which window / view takes a touch at that point (hit-test inside the app), what is presented -
+        /// and tried once more at the button's coordinate; a tap that still never arrives fails the test.
+        @discardableResult
+        func tapHarness(_ b: String) -> Bool {
+            let e = app.buttons["xr-real-" + b]
+            guard e.waitForExistence(timeout: 10) else { XCTFail("no \(b) button on the harness"); return false }
+            let before = taps(b)
+            e.tap()
+            func reached() -> Bool {
+                let end = Date().addingTimeInterval(3)
+                while Date() < end { if taps(b) > before { return true }; Thread.sleep(forTimeInterval: 0.2) }
+                return false
+            }
+            if reached() { return true }
+            let f = e.frame
+            XCUIDevice.shared.system.open(URL(string: "xrero-autotest://hit?x=\(Int(f.midX))&y=\(Int(f.midY))")!)
+            Thread.sleep(forTimeInterval: 2)
+            print("XR files tap on \(b) did not reach the app; frame \(f) hittable=\(e.isHittable); \(text("xr-real-hit")); \(text("xr-real-picker"))")
+            shot(app, "78-files-tap-lost-\(b)")
+            app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: f.midX, dy: f.midY)).tap()
+            if reached() { print("XR files tap on \(b): reached the app when tapped at its coordinate"); return true }
+            XCTFail("taps on \(b) never reach the app: \(text("xr-real-hit"))")
+            return false
+        }
+        /// the office files in Documents and what the last picker was (the harness's list button). The files label
+        /// says "files#<n>:", so a stale answer (a tap that never arrived) is told from a fresh one.
+        func list() -> (files: [String], picker: String) {
+            func gen() -> String { String(text("xr-real-files").prefix { $0 != ":" }) }
+            let before = gen()
+            tapHarness("list")
+            let end = Date().addingTimeInterval(5)
+            while Date() < end && gen() == before { Thread.sleep(forTimeInterval: 0.25) }
+            XCTAssertNotEqual(gen(), before, "the harness's list did not refresh")
+            let all = text("xr-real-files")
+            let f = all.drop { $0 != ":" }.dropFirst().split(separator: "|").map(String.init)
+            return (f, text("xr-real-picker"))
+        }
         func cancelButton() -> XCUIElement {
             app.buttons.matching(NSPredicate(format: "label IN {'Cancel', 'Close'}")).firstMatch
         }
@@ -942,8 +969,8 @@ final class EditorUITests: XCTestCase {
         }
 
         // 1. Browse files and Open a PDF: the system picker as a sheet over the screen, closed by its Cancel
-        for (button, kind) in [("xr-real-browse", "files"), ("xr-real-pdf", "pdf")] {
-            app.buttons[button].tap()
+        for (button, kind) in [("browse", "files"), ("pdf", "pdf")] {
+            tapHarness(button)
             let cancel = cancelButton()
             let up = cancel.waitForExistence(timeout: 20)
             sleep(2)
@@ -966,7 +993,7 @@ final class EditorUITests: XCTestCase {
         }
 
         // 2. A file picked in the picker opens where it is and is listed in Recent (its bookmark)
-        app.buttons["xr-real-browse"].tap()
+        tapHarness("browse")
         var picked = false
         if cancelButton().waitForExistence(timeout: 20) {
             sleep(2)
@@ -1031,7 +1058,7 @@ final class EditorUITests: XCTestCase {
         }
 
         // 3. New, closed without a change: the file and its Recent row are gone
-        app.buttons["xr-real-new"].tap()
+        tapHarness("new")
         guard waitEditor("new-untouched") else { XCTFail("the new document did not open"); app.terminate(); return }
         let made = titleNow()
         shot(app, "74-files-new-untouched")
@@ -1045,7 +1072,7 @@ final class EditorUITests: XCTestCase {
         shot(app, "75-files-untouched-removed")
 
         // 4. New, typed into, closed: kept (under the name that was free again), in Recent
-        app.buttons["xr-real-new"].tap()
+        tapHarness("new")
         guard waitEditor("new-typed") else { XCTFail("the second new document did not open"); app.terminate(); return }
         let kept = titleNow()
         XCTAssertEqual(kept, made, "the second new file did not get the removed file's free name")
