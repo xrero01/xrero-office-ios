@@ -434,6 +434,40 @@ def gallery(d):
 
 
 root = sys.argv[1]
+def scan_quick(d):
+    """plan S10 (ScanQuickActionUITests): the quick actions' new files are real files of the right format, and
+    Scan's save path wrote a 2-page PDF named "Scan <date>" (EN) and "مسح <date>" (AR)."""
+    import unicodedata
+    good = True
+    names = [unicodedata.normalize("NFC", f) for f in os.listdir(d)]
+    real = {unicodedata.normalize("NFC", f): f for f in os.listdir(d)}
+    for base, ext, part in (("Document", "docx", "word/document.xml"), ("Spreadsheet", "xlsx", "xl/workbook.xml"),
+                            ("Presentation", "pptx", "ppt/presentation.xml"),
+                            ("جدول بيانات", "xlsx", "xl/workbook.xml")):
+        hits = [n for n in names if n.startswith(base) and n.endswith("." + ext)]
+        fine = False
+        for n in hits:
+            try:
+                fine |= part in zipfile.ZipFile(os.path.join(d, real[n])).namelist()
+            except Exception:
+                pass
+        print("quick action new %s.%s: files=%s -> %s" % (base, ext, hits, "OK" if fine else "WRONG"))
+        good &= fine
+    for prefix in ("Scan 20", "مسح 20"):
+        hits = [n for n in names if n.startswith(prefix) and n.endswith(".pdf")]
+        pages = []
+        for n in hits:
+            try:
+                from pypdf import PdfReader
+                pages.append(len(PdfReader(os.path.join(d, real[n])).pages))
+            except Exception as e:
+                print("  %s: cannot read: %s" % (n, e)); pages.append(0)
+        fine = bool(hits) and all(p == 2 for p in pages)
+        print("scan to PDF %r: files=%s pages=%s -> %s" % (prefix, hits, pages, "OK" if fine else "WRONG"))
+        good &= fine
+    return good
+
+
 ok = True
 def text(p):
     z = zipfile.ZipFile(p)
@@ -572,6 +606,7 @@ for dev in sorted(os.listdir(root)) if os.path.isdir(root) else []:
     ok &= doc_menu(d)
     ok &= title_menu(d)
     ok &= gallery(d)
+    ok &= scan_quick(d)
 if not (os.path.isdir(root) and os.listdir(root)):
     print("no saved files from any simulator"); ok = False
 try:   # out/qa/touch-gate.json beside out/saved: the gate's results per device + language (published in the evidence)
