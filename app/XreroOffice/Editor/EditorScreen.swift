@@ -33,6 +33,8 @@ struct EditorScreen: View {
         EditorWebView(document: $document, title: title, lang: lang, onCommand: handle, controller: controller)
             .ignoresSafeArea(.container, edges: [.bottom])
             .editorRecovery(notice: $recovered, tooLarge: tooLarge, ar: lang == "ar", share: shareDocument, back: leave)
+            // spreadsheets (plan S3): the selection's Sum capsule and its Sum / Average / Min / Max / Count sheet
+            .sheetSum(kind: document.kind, state: controller.state, controller: controller, ar: lang == "ar")
             // one native bar (plan M4a): Back, name + Edited / Saved, Undo (+ Redo when wide), the ⋯ document menu
             // (plan M7b: Find, Redo, Save | Share, Export, Document info | Language, Account, About, All tools)
             .editorTopBar(title: (title as NSString).deletingPathExtension, state: controller.state, status: barStatus,

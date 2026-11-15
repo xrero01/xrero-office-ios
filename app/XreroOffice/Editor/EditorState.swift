@@ -39,6 +39,11 @@ final class EditorState: ObservableObject {
     @Published private(set) var direction = Direction.ltr
     @Published private(set) var list = ListKind.none
     @Published private(set) var title = ""
+    /// Spreadsheets (plan S3): the selection's address as the name box shows it ("A1"), the selection's figures for
+    /// the Sum capsule, and whether a cell is open for editing (the formula keys act on it).
+    @Published private(set) var cell = ""
+    @Published private(set) var math = SelectionMath.none
+    @Published private(set) var cellEdit = false
     /// How many state messages have arrived since the editor page loaded (tests, diagnostics).
     @Published private(set) var updates = 0
 
@@ -61,6 +66,9 @@ final class EditorState: ObservableObject {
             case "direction": put(\.direction, (v as? String).flatMap(Direction.init(rawValue:)))
             case "list": put(\.list, (v as? String).flatMap(ListKind.init(rawValue:)))
             case "title": put(\.title, v as? String)
+            case "cell": put(\.cell, v as? String)
+            case "math": put(\.math, (v as? String).map(SelectionMath.init(wire:)))
+            case "cellEdit": put(\.cellEdit, v as? Bool)
             default: break
             }
         }
@@ -72,15 +80,16 @@ final class EditorState: ObservableObject {
         put(\.canUndo, false); put(\.canRedo, false); put(\.modified, false); put(\.saved, true)
         put(\.selection, Selection.none); put(\.bold, false); put(\.italic, false); put(\.underline, false)
         put(\.alignment, Alignment.none); put(\.direction, Direction.ltr); put(\.list, ListKind.none)
-        put(\.title, ""); put(\.updates, 0)
+        put(\.title, ""); put(\.cell, ""); put(\.math, SelectionMath.none); put(\.cellEdit, false); put(\.updates, 0)
     }
 
-    /// One line for logs and the CI probe, e.g. "undo:1 redo:0 mod:1 saved:0 sel:text b:0 i:0 u:0 al:left dir:rtl list:none n:4".
+    /// One line for logs and the CI probe, e.g.
+    /// "undo:1 redo:0 mod:1 saved:0 sel:text b:0 i:0 u:0 al:left dir:rtl list:none cell:- edit:0 cnt:0 n:4".
     var summary: String {
         func f(_ b: Bool) -> String { b ? "1" : "0" }
         return "undo:\(f(canUndo)) redo:\(f(canRedo)) mod:\(f(modified)) saved:\(f(saved)) sel:\(selection.rawValue) " +
             "b:\(f(bold)) i:\(f(italic)) u:\(f(underline)) al:\(alignment.rawValue) dir:\(direction.rawValue) " +
-            "list:\(list.rawValue) n:\(updates)"
+            "list:\(list.rawValue) cell:\(cell.isEmpty ? "-" : cell) edit:\(f(cellEdit)) cnt:\(math.count) n:\(updates)"
     }
 
     /// Sets a property only when the value really changed (an equal assignment would still notify every observer).
@@ -88,4 +97,28 @@ final class EditorState: ObservableObject {
         guard let value, self[keyPath: key] != value else { return }
         self[keyPath: key] = value
     }
+}
+
+/// A spreadsheet selection's figures (plan S3), as the engine reports them for its status bar: the counts, and Sum,
+/// Average, Min and Max as text in the cells' own number format (empty when the selection holds no numbers).
+struct SelectionMath: Equatable {
+    var count = 0          // non-empty cells
+    var numbers = 0        // cells holding a number
+    var sum = "", average = "", min = "", max = ""
+
+    static let none = SelectionMath()
+
+    /// The state channel's form: "count|numbers|sum|average|min|max".
+    init(wire: String) {
+        let p = wire.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
+        func at(_ i: Int) -> String { i < p.count ? p[i] : "" }
+        count = Int(at(0)) ?? 0
+        numbers = Int(at(1)) ?? 0
+        sum = at(2); average = at(3); min = at(4); max = at(5)
+    }
+
+    init() {}
+
+    /// The capsule shows for a selection of more than one cell with at least one number in it.
+    var showsSum: Bool { count > 1 && numbers > 0 && !sum.isEmpty }
 }

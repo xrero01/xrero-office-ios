@@ -218,7 +218,8 @@ final class KeyboardBarHost: UIView {
 /// shows its own form bar only when that is nil, so `nil` here (no bar set, or iPhone landscape) is WebKit's
 /// behaviour unchanged.
 final class XRWebView: WKWebView {
-    var keyboardBar: KeyboardBarHost?
+    /// KeyboardBarHost (Word) or SheetKeyBarHost (spreadsheets, plan S3)
+    var keyboardBar: UIView?
 
     override var inputAccessoryView: UIView? {
         guard let bar = keyboardBar else { return super.inputAccessoryView }
