@@ -254,11 +254,9 @@ struct HomeScene: View {
         VStack(spacing: 12) {
             HStack(spacing: -10) {
                 ForEach(HomeTile.creatable) { t in
-                    Image(systemName: t.symbol)
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(t.color)
+                    t.icon
                         .frame(width: 44, height: 44)
-                        .background(Color(.tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                         .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color(.separator), lineWidth: 0.5))
                 }
             }
@@ -388,6 +386,11 @@ struct HomeTile: Identifiable {
     static var creatable: [HomeTile] { all.filter { OfficeKind.creatable.contains($0.kind) } }
 
     static func of(_ kind: OfficeKind?) -> HomeTile { all.first { $0.kind == kind } ?? all[0] }
+
+    /// the kind's own Xrero icon (Assets.xcassets KindIcon-<id>: a white page on Xrero teal with the kind's name)
+    var icon: some View {
+        Image("KindIcon-" + id).resizable().interpolation(.high).scaledToFit().accessibilityHidden(true)
+    }
 }
 
 /// A create tile: the kind glyph in its colour over the name and the format. No colour slab or stripe: colour is an
@@ -399,10 +402,9 @@ struct TileView: View {
 
     var body: some View {
         VStack(spacing: 6) {
-            Image(systemName: tile.symbol)
-                .font(.system(size: glyph * 0.8, weight: .regular))
-                .foregroundStyle(tile.color)
-                .frame(height: glyph)
+            tile.icon
+                .frame(width: glyph * 1.3, height: glyph * 1.3)
+                .clipShape(RoundedRectangle(cornerRadius: glyph * 0.3, style: .continuous))
             Text(ar ? tile.title.ar : tile.title.en)
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.primary)
