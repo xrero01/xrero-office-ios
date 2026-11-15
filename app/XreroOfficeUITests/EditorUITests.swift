@@ -1541,6 +1541,10 @@ final class EditorUITests: XCTestCase {
             let avg = app.staticTexts["xr-sum-value-average"].firstMatch
             if avg.waitForExistence(timeout: 10) {
                 func v(_ id: String) -> String { let e = app.staticTexts["xr-sum-value-" + id].firstMatch; return e.exists ? e.label : "-" }
+                // the last row (Count) must be there without scrolling; if it is not, note it and scroll for the values
+                let countShown = app.staticTexts["xr-sum-value-count"].firstMatch.exists
+                if !countShown { app.swipeUp(); usleep(600_000) }
+                info("sum-sheet-count-without-scroll", "\(countShown)")
                 let got = ["sum": v("sum"), "average": v("average"), "min": v("min"), "max": v("max"), "count": v("count")]
                 let ok = got["sum"] == "1,288" && got["average"] == "429.33" && got["min"] == "12" && got["max"] == "1,246" && got["count"] == "3"
                 gate("sum-sheet", ok, "values \(got)")

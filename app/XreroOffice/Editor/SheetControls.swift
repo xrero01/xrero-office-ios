@@ -52,7 +52,7 @@ private struct SumCapsuleSlot: View {
                     if (r as? String) != "ok" { NSLog("XR sum insert %@: %@", fn, (r as? String) ?? e ?? "?") }
                 }
             }
-            .presentationDetents([.height(380), .large])
+            .presentationDetents([.height(500), .large])      // all five rows on a phone, no scrolling
             .presentationDragIndicator(.visible)
             .environment(\.layoutDirection, ar ? .rightToLeft : .leftToRight)
         }
