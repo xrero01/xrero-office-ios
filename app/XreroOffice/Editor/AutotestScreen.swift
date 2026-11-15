@@ -609,6 +609,7 @@ struct RealDocumentHarness: View {
     @State private var state = "starting"
     @State private var files = "files:"
     @State private var picker = "picker:none"
+    @State private var listed = 0                   // "files#<n>:": the test sees that its tap refreshed the labels
     private let name = ProcessInfo.processInfo.environment["XR_NEW_NAME"] ?? "xr-real.docx"
     private let idle = ProcessInfo.processInfo.environment["XR_REAL_IDLE"] == "1"
 
@@ -651,12 +652,13 @@ struct RealDocumentHarness: View {
         opener.open(url)
     }
 
-    /// "files:a.docx|b.xlsx" (office files only, sorted) and "picker:<DocumentOpener.lastPicker>".
+    /// "files#<n>:a.docx|b.xlsx" (office files only, sorted) and "picker:<DocumentOpener.lastPicker>".
     private func list() {
+        listed += 1
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let names = ((try? FileManager.default.contentsOfDirectory(atPath: docs.path)) ?? [])
             .filter { OfficeKind(url: URL(fileURLWithPath: $0)) != nil }.sorted()
-        files = "files:" + names.joined(separator: "|")
+        files = "files#\(listed):" + names.joined(separator: "|")
         picker = "picker:" + (opener.lastPicker.isEmpty ? "none" : opener.lastPicker)
     }
 }

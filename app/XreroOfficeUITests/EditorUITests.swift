@@ -890,11 +890,21 @@ final class EditorUITests: XCTestCase {
         let title = app.staticTexts["xr-bar-title"], status = app.staticTexts["xr-bar-status"]
         func text(_ id: String) -> String { (try? app.staticTexts[id].firstMatch.snapshot())?.label ?? "" }
         func titleNow() -> String { (try? title.firstMatch.snapshot())?.label ?? "(none)" }
-        /// the office files in Documents and what the last picker was (the harness's list button)
+        /// the office files in Documents and what the last picker was (the harness's list button). The labels say
+        /// "files#<n>:": a tap swallowed by a sheet still sliding away would leave the previous answer, so the tap is
+        /// repeated until <n> changed.
         func list() -> (files: [String], picker: String) {
-            if listButton.exists && listButton.isHittable { listButton.tap() }
-            Thread.sleep(forTimeInterval: 0.6)
-            let f = text("xr-real-files").dropFirst("files:".count).split(separator: "|").map(String.init)
+            func gen() -> String { String(text("xr-real-files").prefix { $0 != ":" }) }
+            let before = gen()
+            for _ in 0..<4 {
+                if listButton.exists && listButton.isHittable { listButton.tap() }
+                let end = Date().addingTimeInterval(2.5)
+                while Date() < end && gen() == before { Thread.sleep(forTimeInterval: 0.25) }
+                if gen() != before { break }
+            }
+            XCTAssertNotEqual(gen(), before, "the harness's list did not refresh")
+            let all = text("xr-real-files")
+            let f = all.drop { $0 != ":" }.dropFirst().split(separator: "|").map(String.init)
             return (f, text("xr-real-picker"))
         }
         func waitEditor(_ what: String) -> Bool {
@@ -909,7 +919,10 @@ final class EditorUITests: XCTestCase {
         }
         /// Back, then the harness again (the editor and its save on close have finished)
         func closeEditor(_ what: String) -> Bool {
-            app.buttons["xr-bar-back"].tap()
+            let back = app.buttons["xr-bar-back"]
+            // a tap on a missing element would end the whole test: say so and go on with the next step instead
+            guard back.waitForExistence(timeout: 5) else { XCTFail("no editor to close (\(what))"); return false }
+            back.tap()
             let ok = listButton.waitForExistence(timeout: 40)
             XCTAssertTrue(ok, "the editor did not close (\(what))")
             sleep(1)
@@ -968,8 +981,20 @@ final class EditorUITests: XCTestCase {
             if cell.waitForExistence(timeout: 8) { cell.tap(); picked = true }
             else if name.exists && name.isHittable { name.tap(); picked = true }
         }
+        // the editor, within 60 s of the tap (the file's name tapped once more after 10 s, as a person would)
+        var opened = false
         if picked {
-            XCTAssertTrue(waitEditor("picked"), "the file picked in the picker did not open")
+            let name = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'xr-pick'")).firstMatch
+            let retry = Date().addingTimeInterval(10)
+            var retried = false
+            let end = Date().addingTimeInterval(60)
+            while Date() < end && !title.exists {
+                if !retried && Date() > retry && name.exists && name.isHittable { name.tap(); retried = true }
+                Thread.sleep(forTimeInterval: 0.5)
+            }
+            opened = title.exists && waitEditor("picked")
+        }
+        if opened {
             XCTAssertEqual(titleNow(), "xr-pick", "the picked file is not the one open")
             shot(app, "73-files-picked-open")
             if closeEditor("picked") {
@@ -977,14 +1002,20 @@ final class EditorUITests: XCTestCase {
                 XCTAssertTrue(list().picker.hasSuffix(" picked"), "the picker did not report the pick")
             }
         } else {
-            // not a pass: the picker could not reach the app's folder on this simulator (Files provider); the opening
-            // half is then checked by review-video on the newest one
-            print("XR files pick: the picker did not reach On My iPhone/iPad > Xrero Office here - not checked")
-            shot(app, "73-files-pick-not-reached")
+            shot(app, "73-files-pick-not-opened")
             let c = cancelButton()
-            if c.exists { c.tap() } else { app.swipeDown() }
+            if c.exists { c.tap() } else if !listButton.exists { app.swipeDown() }
             _ = listButton.waitForExistence(timeout: 10)
-            sleep(1)
+            sleep(2)
+            let r = list()
+            print("XR files pick: tapped=\(picked) nothing opened; \(r.picker)")
+            // the picker handed the file over (its delegate said picked) and the app did not open it: the app's fault.
+            // It never handed it over: this simulator's Files provider (macOS 15 hosts, see review-video.yml) - the
+            // opening half is then checked by review-video on the newest host, which asserts it.
+            XCTAssertFalse(r.picker.contains(" picked"), "the picker handed a file over and the app did not open it: \(r.picker)")
+            if !r.picker.contains(" picked") {
+                print("XR files pick: the picker on this host did not hand the file over - pick-and-open checked by review-video")
+            }
         }
 
         // 3. New, closed without a change: the file and its Recent row are gone
