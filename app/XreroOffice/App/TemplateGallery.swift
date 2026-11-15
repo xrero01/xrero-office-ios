@@ -199,7 +199,7 @@ struct TemplateThumbnail: View {
     let lang: String
     let title: String
 
-    private static let accent = Color(red: 0x0B / 255, green: 0x6E / 255, blue: 0x7F / 255)
+    private static let accent = Color(red: 11.0 / 255, green: 110.0 / 255, blue: 127.0 / 255)
     private static let ink = Color(red: 0.12, green: 0.16, blue: 0.19)
     private static let grey = Color(red: 0.80, green: 0.83, blue: 0.85)
     private static let light = Color(red: 0.91, green: 0.945, blue: 0.953)
@@ -232,11 +232,11 @@ struct TemplateThumbnail: View {
 
     // MARK: pieces
 
-    private func bar(_ w: CGFloat, _ u: CGFloat, h: CGFloat = 2.6, _ c: Color = grey) -> some View {
+    private func bar(_ w: CGFloat, _ u: CGFloat, h: CGFloat = 2.6, _ c: Color = TemplateThumbnail.grey) -> some View {
         RoundedRectangle(cornerRadius: h * u / 2).fill(c).frame(width: w * u, height: h * u)
     }
 
-    private func rule(_ u: CGFloat, _ c: Color = accent, h: CGFloat = 1) -> some View {
+    private func rule(_ u: CGFloat, _ c: Color = TemplateThumbnail.accent, h: CGFloat = 1) -> some View {
         Rectangle().fill(c).frame(width: 126 * u, height: h * u)
     }
 
