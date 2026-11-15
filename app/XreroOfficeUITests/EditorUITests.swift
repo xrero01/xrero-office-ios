@@ -669,7 +669,9 @@ final class EditorUITests: XCTestCase {
     func testArabicBlanksStartRightToLeft() {
         for kind in ["word", "cell", "slide"] {
             let app = XCUIApplication()
-            app.launchArguments = ["-xr.lang", "ar"]
+            // keyboard bar OFF here (its flag's default, plan M5; said explicitly): the Arabic typing path with WebKit's
+            // own bar stays covered, while the touch gate types Arabic with the bar on
+            app.launchArguments = ["-xr.lang", "ar", "-xr.keyboardBar", "NO"]
             app.launchEnvironment = ["XR_KIND": kind,
                                      "XR_DOC_NAME": "xr-test-ar." + ["word": "docx", "cell": "xlsx", "slide": "pptx"][kind]!]
             app.launch()
@@ -1020,7 +1022,8 @@ final class EditorUITests: XCTestCase {
 
     /// Touch gate (M14) + typing gate (F1) in a new Word document, in Arabic and in English (app in that language,
     /// so the Arabic document is the right-to-left blank): tap places the caret, a tap inside the text puts the next
-    /// letter there, double tap and long press select a word, a formatting tap (Bold) keeps the keyboard, 5x Enter,
+    /// letter there, double tap and long press select a word, a formatting tap (Bold) keeps the keyboard, the keyboard
+    /// bar's Bold (plan M5) keeps it too and the next word is bold, its "hide keyboard" puts it away, 5x Enter,
     /// Select All, a native sheet returns the keyboard and the caret, pinch zooms the page through the engine (crisp,
     /// not a magnified bitmap) and the zoom stays, then Save + reopen keeps the text. Taps are placed from the
     /// caret's / button's measured position, never fixed screen points. Every result goes to the editor log as a
@@ -1040,8 +1043,10 @@ final class EditorUITests: XCTestCase {
         let marker = ar ? "\u{0642}" : "Q"                                                        // ق
         let boldWord = ar ? "\u{0639}\u{0631}\u{064A}\u{0636}" : "Bold"                           // عريض
         let endWord = ar ? "\u{0646}\u{0647}\u{0627}\u{064A}\u{0629}" : "End"                      // نهاية
+        // typed after the keyboard bar's Bold (plan M5)
+        let barWord = ar ? "\u{0634}\u{0631}\u{064A}\u{0637}" : "Bar"                              // شريط
         let app = XCUIApplication()
-        app.launchArguments = ["-xr.lang", lang]
+        app.launchArguments = ["-xr.lang", lang, "-xr.keyboardBar", "YES"]   // the bar is off by default until its gate (plan M5)
         try? FileManager.default.removeItem(atPath: probeFile)
         pauseProbe(false)
         app.launchEnvironment = ["XR_KIND": "word", "XR_NEW_NAME": "xr-touch-\(lang).docx", "XR_PROBE": "1", "XR_PROBE_FILE": probeFile]
@@ -1170,10 +1175,61 @@ final class EditorUITests: XCTestCase {
         // the caret's text properties can still read not-bold until a letter is typed - so the word typed after the tap
         // decides (check_saved.py also checks that word is a bold run in the saved file)
         gate("bold-button-applies", tapped && (flag(p7, "bold") || flag(p8, "bold")),
-             "tapped=\(tapped) bold after tap=\(flag(p7, "bold")) after typing=\(flag(p8, "bold")) fold=\(str(p7, "fold"))")
+             "tapped=\(tapped) bold after tap=\(flag(p7, "bold")) after typing=\(flag(p8, "bold")) fold=\(str(p7, "fold")) " +
+             "button active=\(flag(p7, "bact")) hit=\(str(p7, "bhit")) bold buttons=\(num(p7, "bn") ?? -1) before tap: fold=\(str(p6, "fold")) active=\(flag(p6, "bact"))")
         gate("type-after-format", plain(p8).contains(sentence.prefix(4)) && (plain(p8).components(separatedBy: "|").first ?? "").hasSuffix(boldWord),
              "bold=\(flag(p8, "bold")) text=\(plain(p8).prefix(80))")
-        let paras8 = Int(num(p8, "paras") ?? 0)
+
+        // 6b) the keyboard bar (plan M5): its Bold keeps the keyboard and the next word comes out bold. The bar sits in
+        //     the keyboard's accessory (found by its identifier, tapped as a user taps it). Bold is tapped until it is
+        //     on: once when the word above ended not bold, twice (off, then on again) when it was bold - each tap checked
+        let kbBold = app.buttons["xr-kb-bold"]
+        let barShown = kbBold.waitForExistence(timeout: 10) && kbBold.isHittable
+        gate("kbar-shown", barShown, "bar over the keyboard: \(barShown) \(focusInfo(p8))")
+        var q1 = p8
+        if barShown {
+            for _ in 0..<2 {
+                let before = flag(q1, "bold")
+                kbBold.tap()
+                q1 = probe(app)
+                // the state follows the tap a moment later (as with the ribbon): look again, never tap twice for one
+                for _ in 0..<3 where flag(q1, "bold") == before { usleep(700_000); q1 = probe(app) }
+                gate(before ? "kbar-bold-off" : "kbar-bold-on", flag(q1, "bold") != before && focused(q1),
+                     "bold \(before) -> \(flag(q1, "bold")) \(focusInfo(q1))")
+                if flag(q1, "bold") || flag(q1, "bold") == before { break }
+            }
+        }
+        gate("kbar-keeps-keyboard", barShown && focused(q1), focusInfo(q1))
+        if !focused(q1) { tapEnd(); _ = probe(app) }
+        typeSlowly(app, " " + barWord)
+        let q2 = probe(app)
+        gate("kbar-next-word-bold", barShown && flag(q2, "bold") && (plain(q2).components(separatedBy: "|").first ?? "").hasSuffix(barWord),
+             "bold=\(flag(q2, "bold")) text=\(plain(q2).prefix(80))")
+        shot(app, "54b-touch-\(lang)-keyboard-bar")
+        // the bar's alignment cycles start -> centre -> end -> start (logical values: start = "left" in the engine, also
+        // in a right-to-left paragraph); three taps bring the line back where it was, so the later caret taps still fit
+        let stateLabel = app.staticTexts["xr-editor-state"]
+        func align() -> String {
+            let s = stateLabel.exists ? stateLabel.label : ""
+            return s.components(separatedBy: " ").first { $0.hasPrefix("al:") }.map { String($0.dropFirst(3)) } ?? "?"
+        }
+        let kbAlign = app.buttons["xr-kb-align"]
+        let a0 = align()
+        if barShown && a0 == "left" && kbAlign.exists {
+            var seen: [String] = []
+            for want in ["center", "right", "left"] {
+                kbAlign.tap()
+                var a = align()
+                for _ in 0..<6 where a != want { usleep(500_000); a = align() }
+                seen.append(a)
+            }
+            let q = probe(app)
+            gate("kbar-align-cycles", seen == ["center", "right", "left"] && focused(q),
+                 "start=\(a0) taps -> \(seen.joined(separator: ",")) \(focusInfo(q))")
+        } else {
+            gate("kbar-align-cycles", false, "bar=\(barShown) start alignment=\(a0) button=\(kbAlign.exists)")
+        }
+        let paras8 = Int(num(q2, "paras") ?? 0)
         pauseProbe(true)
         for _ in 0..<5 { app.typeText("\n"); usleep(300_000) }
         pauseProbe(false)
@@ -1252,6 +1308,28 @@ final class EditorUITests: XCTestCase {
         // keydown/input -> second requestAnimationFrame (not the canvas paint itself), with the probe paused while typing
         info("typing-latency", "n=\(num(lat, "n") ?? 0) median=\(num(lat, "med") ?? -1) ms p95=\(num(lat, "p95") ?? -1) ms (keydown->2rAF, probe paused, simulator)")
 
+        // 9b) the keyboard bar's last button puts the keyboard away (plan M5); the keyboard is brought up first when the
+        //     pinches left it down. Not with tapEnd(): its point was measured at the old zoom and the pinch-in changed
+        //     the page scale, so it can land in the text and open the desktop menu (CI run 43588342045, iPhone AR).
+        //     The caret's position is measured again at the current zoom and the tap goes into the text on the caret's
+        //     line, toward the line's start: a pinch can also open the desktop menu right beside the caret (iPad, CI run
+        //     43593838031), and a tap on the caret itself then lands in that menu. The tap closes the menu too.
+        var q0 = probe(app)
+        let webWidth = Double(web.frame.width)
+        for i in 0..<3 where !focused(q0) {
+            if let x = num(q0, "cx"), let y = num(q0, "cy") {
+                tap(min(max(x - dir * 50 * Double(i + 1), 24), webWidth - 24), y)
+            } else { tapEnd() }
+            usleep(500_000); q0 = probe(app)
+        }
+        let kbHide = app.buttons["xr-kb-hide"]
+        let hideShown = kbHide.waitForExistence(timeout: 10) && kbHide.isHittable
+        if hideShown { kbHide.tap() }
+        var q3 = probe(app)
+        for _ in 0..<3 where hideShown && flag(q3, "fr") { usleep(700_000); q3 = probe(app) }
+        gate("kbar-hide-keyboard", hideShown && !flag(q3, "fr"), "shown=\(hideShown) after: \(focusInfo(q3))")
+        shot(app, "58b-touch-\(lang)-keyboard-hidden")
+
         // 10) Save, then reload the editor from the saved bytes (the document data the save wrote; the file on disk is
         //     checked separately by check_saved.py, which opens xr-touch-<lang>.docx): the text is all there
         let saved = save(app)
@@ -1260,7 +1338,7 @@ final class EditorUITests: XCTestCase {
         let again = waitState(app, prefix: "ready", timeout: 120)
         let p15 = probe(app)
         let back = plain(p15)
-        gate("reopen-keeps-text", again == "ready" && back.contains(t3) && back.contains(boldWord) && back.contains(endWord),
+        gate("reopen-keeps-text", again == "ready" && back.contains(t3) && back.contains(boldWord) && back.contains(barWord) && back.contains(endWord),
              "\(again) text=\(back.prefix(100))")
         shot(app, "59-touch-\(lang)-reopened")
     }

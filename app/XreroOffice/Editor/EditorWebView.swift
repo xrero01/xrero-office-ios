@@ -21,7 +21,13 @@ struct EditorWebView: UIViewRepresentable {
         config.suppressesIncrementalRendering = false
         config.userContentController.addScriptMessageHandler(c, contentWorld: .page, name: "xr")   // scripts: load()
 
-        let web = WKWebView(frame: .zero, configuration: config)
+        let web = XRWebView(frame: .zero, configuration: config)
+        // the formatting bar above the keyboard (plan M5): Word first, behind the "xr.keyboardBar" flag
+        if document.kind == .word && KeyboardBar.enabled {
+            web.keyboardBar = KeyboardBarHost(KeyboardBar(state: controller.state, controller: controller, ar: lang == "ar"))
+        }
+        let barOn = web.keyboardBar != nil, log = onCommand
+        DispatchQueue.main.async { log("log", "keyboard bar: " + (barOn ? "on" : "off")) }     // after this view update
         #if DEBUG
         if #available(iOS 16.4, *) { web.isInspectable = true }
         #endif
@@ -60,7 +66,13 @@ struct EditorWebView: UIViewRepresentable {
         let c = context.coordinator
         c.parent = self
         controller.coordinator = c
-        if c.loadedLang != lang { c.load() }
+        if c.loadedLang != lang {
+            // the bar's labels and order follow the editor's language (the page reopens in it just below)
+            if let host = (web as? XRWebView)?.keyboardBar {
+                host.bar = KeyboardBar(state: controller.state, controller: controller, ar: lang == "ar")
+            }
+            c.load()
+        }
     }
 
     static func dismantleUIView(_ web: WKWebView, coordinator: Coordinator) {
@@ -448,6 +460,9 @@ final class EditorController: ObservableObject {
         coordinator?.web?.evaluateJavaScript(EditorController.accountScript(json), completionHandler: nil)
     }
     func answerSaveAs(_ ext: String) { coordinator?.answerSaveAs(ext) }
+    /// The keyboard bar's "hide keyboard": the web view gives up first responder (public UIView.endEditing). The
+    /// editor's caret and selection stay; a tap in the page brings the keyboard back.
+    func hideKeyboard() { coordinator?.web?.endEditing(true) }
     func save(onlyIfModified: Bool = false, then done: (() -> Void)? = nil) {
         if let c = coordinator { c.requestSave(onlyIfModified: onlyIfModified, then: done) } else { done?() }
     }
