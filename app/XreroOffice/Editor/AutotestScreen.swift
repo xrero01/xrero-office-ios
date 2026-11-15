@@ -88,6 +88,8 @@ struct AutotestScreen: View {
             EditorWebView(document: $document, title: name, lang: ProcessInfo.processInfo.environment["XR_LANG"] ?? AppLanguage.current,
                           onCommand: handle, controller: controller)
                 .ignoresSafeArea(.container, edges: [.bottom])      // same as the real editor screen
+                .pdfToolBar(kind: document.kind, controller: controller,    // plan S7, as in EditorScreen
+                            ar: (ProcessInfo.processInfo.environment["XR_LANG"] ?? AppLanguage.current) == "ar")
                 .editorRecovery(notice: $recovered, tooLarge: tooLarge, ar: (ProcessInfo.processInfo.environment["XR_LANG"] ?? AppLanguage.current) == "ar",
                                 hold: Double(ProcessInfo.processInfo.environment["XR_RECOVERY_HOLD"] ?? "") ?? 3,
                                 share: { state = "share" }, back: { state = "back" })
@@ -246,6 +248,13 @@ struct AutotestScreen: View {
                     handle("log", "pdf spike request: \((r as? String) ?? e ?? "?")")
                 }
             }
+            if url.host == "pdfstate" {         // PDF bar gate (S7): the tool that is on + the page objects, as JSON
+                let n = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "n" }?.value ?? "0"
+                controller.call("return window.__xrPdfState ? __xrPdfState() : '{}';") { r, e in
+                    state = "pdf\(n):" + ((r as? String) ?? ("{\"error\":\"" + (e ?? "?") + "\"}"))
+                }
+            }
+            if url.host == "pdfsigdelete" { SignatureStore.delete() }   // PDF bar gate: start without a saved signature
             if url.host == "bridge" { checkBridge() }
             if url.host == "contract" { checkContract() }
             if url.host == "openhome" {         // clipboard test: phones fold the ribbon - drop the Home panel so the
@@ -456,6 +465,7 @@ struct AutotestScreen: View {
             state = "saved:" + param
         case "export-failed": state = "export-failed:" + param
         case "docinfo": state = "docinfo:" + param
+        case "pdf-placed": state = "placed:" + param           // PDF bar (S7): a picture reached the page (or not)
         case "saveas": saveAsFormats = param.split(separator: ",").map(String.init)
         case "export":                       // Save As copy -> Documents/<name> for the workflow to check
             // (an export in the document's own format gets an "exp-" name: the test document's file is not replaced)
