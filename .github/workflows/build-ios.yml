@@ -69,11 +69,13 @@ jobs:
             xcrun simctl boot $DEV 2>/dev/null; xcrun simctl bootstatus $DEV -b >/dev/null
             ( while true; do xcrun simctl io $DEV screenshot "out/shots/$DEV-$(date +%H%M%S).png" >/dev/null 2>&1; sleep 6; done ) & SHOOT=$!
             xcodebuild test-without-building -project app/XreroOffice.xcodeproj -scheme XreroOffice -configuration Autotest \
-              -destination "id=$DEV" -derivedDataPath dd -resultBundlePath "out/ui-$DEV.xcresult"               -only-testing:XreroOfficeUITests/EditorUITests 2>&1 | grep -E "Test Case|error|passed|failed|XCTAssert|XR save path|XR save-as path|XR web buttons|XR geom|XR rotate|XR bridge|XR contract|XR chrome|XR touch|XR bar|XR menu|XR title menu" | tail -120
+              -destination "id=$DEV" -derivedDataPath dd -resultBundlePath "out/ui-$DEV.xcresult"               -only-testing:XreroOfficeUITests/EditorUITests -only-testing:XreroOfficeUITests/OpenInUITests 2>&1 | grep -E "Test Case|error|passed|failed|XCTAssert|XR save path|XR save-as path|XR web buttons|XR geom|XR rotate|XR bridge|XR contract|XR chrome|XR touch|XR bar|XR menu|XR title menu|XR open-in" | tail -120
             R=${PIPESTATUS[0]}; [ $R -ne 0 ] && RC=$R
             kill $SHOOT
             C=$(xcrun simctl get_app_container $DEV com.xrero.office data 2>/dev/null)
             [ -n "$C" ] && cp -R "$C/Documents" "out/saved/$DEV" 2>/dev/null
+            # open-in test (plan S11): the original opened in place, outside the app's folder
+            [ -n "$C" ] && [ -d "$C/Library/Application Support/Outside" ] && cp -R "$C/Library/Application Support/Outside" "out/saved/$DEV/_outside" 2>/dev/null
             xcrun xcresulttool export attachments --path "out/ui-$DEV.xcresult" --output-path "out/shots/attach-$DEV" >/dev/null 2>&1
             xcrun simctl shutdown $DEV
           done

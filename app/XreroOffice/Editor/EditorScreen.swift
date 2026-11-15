@@ -41,6 +41,8 @@ struct EditorScreen: View {
         EditorWebView(document: $document, title: title, lang: lang, onCommand: handle, controller: controller)
             .ignoresSafeArea(.container, edges: [.bottom])
             .editorRecovery(notice: $recovered, tooLarge: tooLarge, ar: lang == "ar", share: shareDocument, back: leave)
+            // an attachment from Mail / WhatsApp: "Editing a copy saved in Xrero Office" on the first edit (plan S11)
+            .importedCopyNotice(files?.origin, fileURL: fileURL, state: controller.state, ar: lang == "ar")
             // one native bar (plan M4a): Back, name + Edited / Saved, Undo (+ Redo when wide), the ⋯ document menu
             // (plan M7b: Find, Redo, Save | Share, Export, Document info | Language, Account, About, All tools)
             .editorTopBar(title: (title as NSString).deletingPathExtension, state: controller.state, status: barStatus,

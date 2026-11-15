@@ -29,6 +29,8 @@ final class OpenDocumentModel: ObservableObject {
     /// Where the file is now (the title menu's Rename / Move change it). Published so the editor's title, its ⋯ >
     /// Document info and the Share copy follow at once; the editor page itself is never reloaded for it.
     @Published private(set) var fileURL: URL
+    /// Where the saves go, set by DocumentOpener before the editor shows (plan S11: the imported-copy notice).
+    var origin: DocumentOrigin = .own
     /// A place picked in Move… outside the app's own folder: held open while the document is (later saves go there).
     private var scopedURL: URL?
 

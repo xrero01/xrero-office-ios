@@ -236,6 +236,61 @@ def title_menu(d):
     return good
 
 
+def open_in(d):
+    """Plan S11 (OpenInUITests.testOpenInCopyAndInPlace, the real UIDocument path): where the saved bytes landed.
+    A copy from Mail / WhatsApp (the Inbox) is moved into the app's folder under its clean name - next to, never over,
+    a file of that name - and holds every edit (also the one made after reopening it from Recent); nothing is left in
+    the Inbox. A file opened in place from Files (here: Library/Application Support/Outside, copied by the workflow to
+    _outside) holds its edit, and no copy of it appears in the app's folder. English and Arabic file names."""
+    import unicodedata
+    nfc = lambda s: unicodedata.normalize("NFC", s)
+    good = True
+    names = {nfc(f): f for f in os.listdir(d)}
+    inbox = os.path.join(d, "Inbox")
+    left = sorted(nfc(f) for f in os.listdir(inbox)) if os.path.isdir(inbox) else []
+    def words_in(path, words):
+        s = text(path)
+        return [w in s for w in words], s
+    # copies: (attachment name, where it must land, words, a file that was already there and must stay untouched)
+    for src, dest, words, clash in (("Quarterly report.docx", "Quarterly report 2.docx", ("Kappa", "Rho"), "Quarterly report.docx"),
+                                    ("تقرير الربع.docx", "تقرير الربع.docx", ("Lambda", "Tau"), None)):
+        f = names.get(nfc(dest))
+        if f is None:
+            print("open-in copy %s: MISSING %s in the app's folder" % (src, dest)); good = False; continue
+        try:
+            has, s = words_in(os.path.join(d, f), words)
+        except Exception as e:
+            print("open-in copy %s: cannot read %s: %s" % (src, f, e)); good = False; continue
+        still = nfc(src) in left
+        g = all(has) and not still
+        print("open-in copy %s -> %s: words %s=%s  inbox emptied=%s  text=%r -> %s"
+              % (src, f, "/".join(words), has, not still, s[:100], "OK" if g else "WRONG"))
+        good &= g
+        if clash:
+            c = names.get(nfc(clash))
+            if c is None:
+                print("  existing %s: GONE (replaced by the copy?) -> WRONG" % clash); good = False
+            else:
+                cs = text(os.path.join(d, c))
+                untouched = not any(w in cs for w in words)
+                print("  existing %s kept, not written: %s -> %s" % (clash, untouched, "OK" if untouched else "WRONG"))
+                good &= untouched
+    out = os.path.join(d, "_outside")
+    outside = {nfc(f): f for f in os.listdir(out)} if os.path.isdir(out) else {}
+    for name, word in (("Field notes.docx", "Mu"), ("ملاحظات الموقع.docx", "Nu")):
+        f = outside.get(nfc(name))
+        if f is None:
+            print("open-in in place %s: MISSING (original outside the app's folder)" % name); good = False; continue
+        s = text(os.path.join(out, f))
+        base = nfc(os.path.splitext(name)[0])
+        stray = [n for n in names if n.startswith(base)]
+        g = word in s and not stray
+        print("open-in in place %s: original edited=%s  copies in the app's folder=%s  text=%r -> %s"
+              % (name, word in s, stray or "none", s[:100], "OK" if g else "WRONG"))
+        good &= g
+    return good
+
+
 root = sys.argv[1]
 ok = True
 def text(p):
@@ -370,6 +425,7 @@ for dev in sorted(os.listdir(root)) if os.path.isdir(root) else []:
         print("ar_letter.pdf: MISSING (PDF edit + save)"); ok = False
     ok &= doc_menu(d)
     ok &= title_menu(d)
+    ok &= open_in(d)
 if not (os.path.isdir(root) and os.listdir(root)):
     print("no saved files from any simulator"); ok = False
 try:   # out/qa/touch-gate.json beside out/saved: the gate's results per device + language (published in the evidence)

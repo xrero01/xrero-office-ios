@@ -583,6 +583,7 @@ struct RealDocumentHarness: View {
     private func start() {
         guard state == "starting" else { return }
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        if let incoming = ProcessInfo.processInfo.environment["XR_INCOMING"] { startIncoming(incoming, docs: docs); return }
         let url = docs.appendingPathComponent(name)
         let kind = OfficeKind(url: url) ?? .word
         if !FileManager.default.fileExists(atPath: url.path) {
@@ -590,6 +591,43 @@ struct RealDocumentHarness: View {
         }
         state = "opened " + name
         opener.open(url)
+    }
+
+    /// Open-in test (plan S11, OpenInUITests): a file handed over by another app, through the app's own
+    /// DocumentOpener.openExternal. XR_INCOMING_MODE=copy (default): the system's copy in the Inbox (Mail, WhatsApp,
+    /// share sheet), Documents/Inbox or else tmp/<bundle>-Inbox; XR_INCOMING_CLASH=1 first puts a file of the same
+    /// name in the app's folder (the copy must not replace it). XR_INCOMING_MODE=inplace: a file outside the app's
+    /// folder (Library/Application Support/Outside, standing in for iCloud Drive / another app), opened in place.
+    private func startIncoming(_ name: String, docs: URL) {
+        let fm = FileManager.default
+        let env = ProcessInfo.processInfo.environment
+        let blank = OfficeDocument.blank(OfficeKind(url: URL(fileURLWithPath: name)) ?? .word)
+        if env["XR_INCOMING_MODE"] == "inplace" {
+            let dir = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("Outside", isDirectory: true)
+            try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            let url = dir.appendingPathComponent(name)
+            if !fm.fileExists(atPath: url.path) { try? blank.write(to: url, options: .atomic) }
+            state = "incoming inplace " + name
+            opener.openExternal(url)
+            return
+        }
+        if env["XR_INCOMING_CLASH"] == "1" {
+            let mine = docs.appendingPathComponent(name)
+            if !fm.fileExists(atPath: mine.path) { try? blank.write(to: mine, options: .atomic) }
+        }
+        var url = docs.appendingPathComponent("Inbox", isDirectory: true).appendingPathComponent(name)
+        do {
+            try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try blank.write(to: url, options: .atomic)
+        } catch {
+            let dir = fm.temporaryDirectory.appendingPathComponent("com.xrero.office-Inbox", isDirectory: true)
+            try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            url = dir.appendingPathComponent(name)
+            try? blank.write(to: url, options: .atomic)
+        }
+        state = "incoming copy " + url.deletingLastPathComponent().lastPathComponent
+        opener.openExternal(url)
     }
 
     private func reopen() {
