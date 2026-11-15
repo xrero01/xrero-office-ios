@@ -1338,10 +1338,12 @@ final class EditorUITests: XCTestCase {
              "size \(sizes.map { String(format: "%g", $0) }.joined(separator: " -> "))")
         if fmtShown { app.buttons["xr-fmt-done"].tap() }
         for _ in 0..<20 where sizeUp.exists { usleep(500_000) }
+        // the keyboard itself must be back on screen (kb: keyboardDidShow), not only the responder (round 1: fr=true
+        // kb=false passed a focus-only check): polled for up to 3 s for the dismissal and the keyboard animation
         var f2 = probe(app)
-        for _ in 0..<2 where fmtShown && !focused(f2) && focused(f0) { usleep(700_000); f2 = probe(app) }
+        for _ in 0..<6 where fmtShown && focused(f0) && !(focused(f2) && flag(f2, "kb")) { usleep(500_000); f2 = probe(app) }
         let caretF2 = (num(f2, "cx") ?? -2, num(f2, "cy") ?? -2)
-        gate("fmt-sheet-return-keyboard", fmtShown && !sizeUp.exists && (!focused(f0) || focused(f2)),
+        gate("fmt-sheet-return-keyboard", fmtShown && !sizeUp.exists && (!focused(f0) || (focused(f2) && flag(f2, "kb"))),
              "before: \(focusInfo(f0)) after: \(focusInfo(f2))")
         gate("fmt-sheet-return-caret", fmtShown && abs(caretF2.0 - caretF0.0) <= 2 && abs(caretF2.1 - caretF0.1) <= 2,
              "caret \(caretF0) -> \(caretF2)")

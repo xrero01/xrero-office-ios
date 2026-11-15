@@ -16,6 +16,9 @@ import CoreText
 /// caret back (M14 rule, checked by the touch gate).
 final class FormatSheetModel: ObservableObject {
     @Published var shown = false
+    /// false when the sheet closes for something that takes the screen next (photo picker, All tools) or inserts a
+    /// table / page break: the keyboard then stays down instead of flashing up behind the next screen.
+    var restoreKeyboard = true
 }
 
 /// Format sheet words, EN + AR.
@@ -53,14 +56,20 @@ struct FormatSheetPresenter: ViewModifier {
             // direction (CI, iPad in Arabic: the popover hung on the right while Aa was on the left), so Arabic
             // anchors on the left itself
             .popover(isPresented: $model.shown, attachmentAnchor: .point(ar ? .topLeading : .topTrailing), arrowEdge: .top) {
-                FormatSheet(state: controller.state, controller: controller, ar: ar) { model.shown = false }
+                FormatSheet(state: controller.state, controller: controller, ar: ar) { keyboard in
+                    model.restoreKeyboard = keyboard
+                    model.shown = false
+                }
                     .frame(idealWidth: 375, idealHeight: 560)
                     .presentationCompactAdaptation(.sheet)          // iPhone: a real sheet...
                     .presentationDetents([.height(320), .large])     // ...at thumb height, or full
                     .presentationDragIndicator(.visible)
                     .presentationBackgroundInteraction(.enabled(upThrough: .height(320)))
             }
-            .onChange(of: model.shown) { _, shown in if !shown { controller.formatClosed() } }
+            .onChange(of: model.shown) { _, shown in
+                if !shown { controller.formatClosed(restore: model.restoreKeyboard) }
+                model.restoreKeyboard = true
+            }
             // the page stays usable beside the 320 pt sheet: a tap there that brings the keyboard up means the user
             // wants to type - the sheet steps aside instead of sitting under the keyboard
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
@@ -80,7 +89,8 @@ struct FormatSheet: View {
     @ObservedObject var state: EditorState
     let controller: EditorController
     let ar: Bool
-    var close: () -> Void
+    /// Closes the sheet; `true` gives the keyboard back (Done), `false` keeps it down (the next screen takes over).
+    var close: (_ keyboard: Bool) -> Void
     @State private var tab = Tab.text
     @State private var showFonts = false
 
@@ -96,7 +106,7 @@ struct FormatSheet: View {
                 }
                 .pickerStyle(.segmented)
                 .accessibilityIdentifier("xr-fmt-tabs")
-                Button(FormatText.done(ar)) { close() }
+                Button(FormatText.done(ar)) { close(true) }
                     .font(.body.weight(.semibold))
                     .frame(minWidth: 44, minHeight: 44)
                     .accessibilityIdentifier("xr-fmt-done")
@@ -113,7 +123,7 @@ struct FormatSheet: View {
                     }
                     Divider()
                     Button {
-                        close()
+                        close(false)
                         controller.allTools()
                     } label: {
                         Label(FormatText.allTools(ar), systemImage: "slider.horizontal.3")
@@ -153,7 +163,11 @@ struct FormatSheet: View {
                 HStack(spacing: 8) {
                     ForEach(Self.styles, id: \.name) { s in
                         let on = state.style.lowercased() == s.name.lowercased()     // a file may store "heading 1"
-                        Button { apply("style", "if(window.__xrStyle)__xrStyle(\(js(s.name)));else a.put_Style(\(js(s.name)))") } label: {
+                        // a tap on the chip that is already on does nothing: the engine's SetParagraphStyle CLEARS the
+                        // paragraph's formatting when the style is applied a second time, a surprise for a highlighted chip
+                        Button {
+                            if !on { apply("style", "if(window.__xrStyle)__xrStyle(\(js(s.name)));else a.put_Style(\(js(s.name)))") }
+                        } label: {
                             Text(ar ? s.ar : s.en)
                                 .font(ar ? .custom("Cairo", size: s.size).weight(s.weight) : .system(size: s.size, weight: s.weight))
                                 .lineLimit(1)
@@ -228,7 +242,8 @@ struct FormatSheet: View {
             Button { apply("size \(fmt(down))", "a.put_TextPrFontSize(\(fmt(down)))") } label: {
                 Image(systemName: "minus").frame(width: 44, height: 44).contentShape(Rectangle())
             }
-            .disabled(size > 0 && size <= Self.sizes[0])
+            // mixed or not known yet (0): no step at all - "one step down / up" from nothing would jump to 8 pt
+            .disabled(size <= 0 || size <= Self.sizes[0])
             .accessibilityLabel(ar ? "تصغير الخط" : "Smaller")
             .accessibilityIdentifier("xr-fmt-size-down")
             Text(size > 0 ? fmt(size) : "—")
@@ -238,7 +253,7 @@ struct FormatSheet: View {
             Button { apply("size \(fmt(up))", "a.put_TextPrFontSize(\(fmt(up)))") } label: {
                 Image(systemName: "plus").frame(width: 44, height: 44).contentShape(Rectangle())
             }
-            .disabled(size >= Self.sizes[Self.sizes.count - 1])
+            .disabled(size <= 0 || size >= Self.sizes[Self.sizes.count - 1])
             .accessibilityLabel(ar ? "تكبير الخط" : "Larger")
             .accessibilityIdentifier("xr-fmt-size-up")
         }
@@ -279,24 +294,28 @@ struct FormatSheet: View {
     }
 
     /// Highlight paints the SELECTED text (the engine's marker: on with a colour, applied, off again at once so no
-    /// highlighter mode is left running). With nothing selected it changes nothing - the label says so.
+    /// highlighter mode is left running). With nothing selected it changes nothing - the label says so, and the bridge
+    /// call stops before the engine (SetMarkerFormat would still overwrite the format painter's copied format).
     private var highlightRow: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(ar ? "تظليل النص المحدد" : "Highlight selected text").font(.subheadline).foregroundStyle(.secondary)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     swatch(nil, on: false, label: ar ? "بلا تظليل" : "No highlight", id: "xr-fmt-highlight-none") {
-                        apply("highlight none", "a.SetMarkerFormat(true,false);a.SetMarkerFormat(false)")
+                        apply("highlight none", Self.ifSelected + "a.SetMarkerFormat(true,false);a.SetMarkerFormat(false)")
                     }
                     ForEach(Self.highlights, id: \.hex) { c in
                         swatch(c.hex, on: false, label: ar ? c.ar : c.en, id: "xr-fmt-highlight-" + c.hex) {
-                            apply("highlight " + c.hex, "a.SetMarkerFormat(true,true,\(rgb(c.hex)));a.SetMarkerFormat(false)")
+                            apply("highlight " + c.hex, Self.ifSelected + "a.SetMarkerFormat(true,true,\(rgb(c.hex)));a.SetMarkerFormat(false)")
                         }
                     }
                 }
             }
         }
     }
+
+    /// Ends the bridge call when no text is selected (can_CopyCut = a non-empty selection).
+    private static let ifSelected = "if(!a.can_CopyCut()){if(window.XreroHost)XreroHost.log('format sheet: highlight - nothing selected');return 'ok';}"
 
     // MARK: Paragraph
 
@@ -386,7 +405,7 @@ struct FormatSheet: View {
                             ForEach(1...6, id: \.self) { c in
                                 Button {
                                     apply("table \(c)x\(r)", "a.put_Table(\(c),\(r))")
-                                    close()
+                                    close(false)
                                 } label: {
                                     RoundedRectangle(cornerRadius: 4, style: .continuous)
                                         .fill(Color(uiColor: .secondarySystemGroupedBackground))
@@ -407,7 +426,7 @@ struct FormatSheet: View {
                 Button {
                     // the photo picker comes up over the editor once the sheet is gone (the engine's own picture
                     // path: OpenFilenameDialog -> the app's photo picker -> document media)
-                    close()
+                    close(false)
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { apply("photo", "a.asc_addImage()") }
                 } label: { row(ar ? "صورة" : "Photo", "photo") }
                 .buttonStyle(.plain)
@@ -415,7 +434,7 @@ struct FormatSheet: View {
                 Divider()
                 Button {
                     apply("page break", "a.put_AddPageBreak()")
-                    close()
+                    close(false)
                 } label: { row(ar ? "فاصل صفحة" : "Page break", "doc.badge.plus") }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("xr-fmt-page-break")

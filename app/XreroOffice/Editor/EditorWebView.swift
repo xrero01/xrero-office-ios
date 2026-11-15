@@ -494,6 +494,15 @@ final class EditorController: ObservableObject {
     let formatSheet = FormatSheetModel()
     /// The view that held the keyboard when the sheet opened (WebKit's content view); it gets it back on close.
     private weak var keyboardOwner: UIView?
+    /// The top view controller before the sheet was presented: the keyboard is given back only once it is the top
+    /// one again (the sheet / popover fully gone).
+    private weak var formatBase: UIViewController?
+
+    private static func topController(_ window: UIWindow?) -> UIViewController? {
+        var c = window?.rootViewController
+        while let p = c?.presentedViewController { c = p }
+        return c
+    }
 
     /// Aa: opens the format sheet - never over a word still being composed (plan S1 risk): the marked text is
     /// committed natively (UITextInput.unmarkText) and in the engine (__xrEndComposition), THEN the keyboard goes down
@@ -508,6 +517,7 @@ final class EditorController: ObservableObject {
             self.coordinator?.parent.onCommand("log", "format sheet: open (keyboard \(owner == nil ? "down" : "up"), " +
                 "marked text \(marked ? "committed" : "none"), engine composition: \((r as? String) ?? e ?? "?"))")
             self.keyboardOwner = owner
+            self.formatBase = Self.topController(web.window)
             _ = owner?.resignFirstResponder()
             self.formatSheet.shown = true
         }
@@ -515,17 +525,36 @@ final class EditorController: ObservableObject {
 
     /// The sheet closed (Done, swipe, tap outside the iPad popover): the keyboard and the caret come back where they
     /// were when it was opened with the keyboard up (M14 rule). The engine kept its caret and its input field focus;
-    /// only the responder is handed back - the same thing UIKit does after a modal sheet.
-    func formatClosed() {
-        let owner = keyboardOwner
+    /// only the responder is handed back - the same thing UIKit does after a modal sheet. Not while the sheet is still
+    /// being dismissed: a responder taken back then is first responder again but UIKit's dismissal puts back the
+    /// input views it saved at presentation (none: the keyboard was down), so the keyboard never shows (CI round 1:
+    /// fr=true kb=false). It waits until the presenter is the top controller again and no transition runs.
+    /// `restore` false (photo, All tools, table, page break): the keyboard stays down - the next screen takes over.
+    func formatClosed(restore: Bool = true) {
+        let saved = keyboardOwner, base = formatBase
         keyboardOwner = nil
-        guard let web = coordinator?.web else { return }
-        var back = "keyboard was down"
-        if let owner {
-            if XRWebView.firstResponder(in: web) == nil { _ = owner.becomeFirstResponder() }
-            back = "keyboard back: \(XRWebView.firstResponder(in: web) != nil)"
+        formatBase = nil
+        guard let owner = saved, restore else {
+            coordinator?.parent.onCommand("log", "format sheet: closed (\(saved == nil ? "keyboard was down" : "keyboard stays down"))")
+            return
         }
-        coordinator?.parent.onCommand("log", "format sheet: closed (\(back))")
+        giveKeyboardBack(owner, base: base, tries: 0)
+    }
+
+    private func giveKeyboardBack(_ owner: UIView, base: UIViewController?, tries: Int) {
+        guard let web = coordinator?.web else { return }
+        let top = Self.topController(web.window)
+        let settling = (base != nil && top !== base) || top?.transitionCoordinator != nil || top?.isBeingDismissed == true
+        if settling && tries < 30 {                                   // 30 x 0.1 s at most, then try anyway
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                self?.giveKeyboardBack(owner, base: base, tries: tries + 1)
+            }
+            return
+        }
+        // a tap on the page while the sheet was up already brought the keyboard back: nothing to do
+        if XRWebView.firstResponder(in: web) == nil { _ = owner.becomeFirstResponder() }
+        coordinator?.parent.onCommand("log", "format sheet: closed (keyboard back: \(XRWebView.firstResponder(in: web) != nil), " +
+            "waited \(tries * 100) ms)")
     }
 
     // MARK: the ⋯ document menu (plan M7b; xr-host.js __xrFind / __xrAllTools / __xrExport / __xrDocInfo). Each one
