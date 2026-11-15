@@ -1046,7 +1046,14 @@ final class EditorUITests: XCTestCase {
         // native Present
         present.tap()
         let overlay = any("xr-present-overlay")
-        let started = overlay.waitForExistence(timeout: 15)
+        var started = overlay.waitForExistence(timeout: 10)
+        if !started {
+            // seen once (CI, iPad, Arabic): the bar's first tap after the editor opened never reached the app (no
+            // "present start" in its log) - the same lost first tap the ⋯ menu test records; noted, then tapped again
+            info("present-first-tap-ignored", "the show started only after a second tap")
+            present.tap()
+            started = overlay.waitForExistence(timeout: 15)
+        }
         sleep(2)
         shot(app, "64-slides-\(lang)-present")
         gate("present-starts", started, "")
