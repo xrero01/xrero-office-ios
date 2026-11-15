@@ -575,6 +575,11 @@ private struct ProbeLabel: View {
         // would otherwise sit inside the keypress-latency samples it collects
         if let f = ProcessInfo.processInfo.environment["XR_PROBE_FILE"], FileManager.default.fileExists(atPath: f + ".pause") { return }
         probing = true
+        // the probe's time is when its read STARTED: the test takes the first probe stamped after its action, and a
+        // read already running when the action happened (one takes up to a second on a busy iPad) returns the page as
+        // it was before it - stamped with its end time, CI run 138 read "nothing selected, no menu" right after a long
+        // press whose word and native menu were already on screen (the gate's own screenshot, taken just after)
+        let started = Int64(Date().timeIntervalSince1970 * 1000)
         web.evaluateJavaScript(Self.probeJS) { r, e in
             probing = false
             var o = ((r as? String)?.data(using: .utf8)).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
@@ -587,7 +592,7 @@ private struct ProbeLabel: View {
             // plan C1: the paragraph direction at the caret (state channel) and the last keyboard switch's answer
             o["dir"] = controller.state.direction.rawValue
             o["kbd"] = controller.kbDirLast
-            let line = "t=\(Int64(Date().timeIntervalSince1970 * 1000))|"
+            let line = "t=\(started)|"
                 + ((try? JSONSerialization.data(withJSONObject: o)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}")
             // the simulator shares the Mac's file system: a file the test reads costs no accessibility query (each one
             // walks the whole editor page and times out on the iPad); the label stays as the fallback
