@@ -422,7 +422,9 @@
   // Keys and values (EditorState.swift mirrors them): canUndo, canRedo, modified, saved (booleans); bold, italic,
   // underline (booleans); align 'left'|'center'|'right'|'justify'|'distributed'|'none'; direction 'ltr'|'rtl';
   // list 'none'|'bullet'|'number'; selection 'text'|'table'|'image'|'shape'|'chart'|'equation'|'header'|'slide'|
-  // 'cells'|'none'; title (string). Engine constants are read by name (Asc.* / AscCommon.*, listed in xr-contract.json).
+  // 'cells'|'none'; title (string); Word only (Aa format sheet): font (string), size (points), strike (boolean),
+  // style (paragraph style name), spacing (line multiple, -1 = other), color ('auto' or 'RRGGBB').
+  // Engine constants are read by name (Asc.* / AscCommon.*, listed in xr-contract.json).
   var hub = (function () {
     var state = {}, pending = null, cost = { n: 0, ms: 0, max: 0 }, failed = {};
     // the next frame; and a 250 ms timer as well, because a page that is not on screen gets no frames (WebKit pauses
@@ -501,6 +503,15 @@
     }
     return listKind;
   }
+  var styleNames = [];
+  // The Aa sheet's style row (plan S1; on a tap only): the paragraph style by name, matched without regard to case
+  window.__xrStyle = function (name) {
+    var api = window.__xrApi, want = String(name).toLowerCase(), hit = null;
+    if (!api) return 'no editor';
+    for (var i = 0; i < styleNames.length && !hit; i++) if (styleNames[i].toLowerCase() === want) hit = styleNames[i];
+    api.put_Style(hit || String(name));
+    return hit ? 'ok' : 'ok (not in the style list)';
+  };
   function watchState(api) {
     var cells = /spreadsheeteditor/.test(location.pathname), word = /documenteditor/.test(location.pathname);
     hub.on(api, cells ? 'asc_onCanUndoChanged' : 'asc_onCanUndo', function (v) { hub.set('canUndo', !!v); });
@@ -531,6 +542,30 @@
     hub.on(api, 'asc_onFocusObject', function (objs) {
       hub.set('selection', selectionKind(objs));
       if (word) hub.set('list', wordList(api));
+    });
+    if (!word) return;
+    // Word's text format for the Aa format sheet (plan S1): the same callbacks the ribbon's font / size / style /
+    // line-spacing / colour controls listen to, each O(1) like the ones above
+    hub.on(api, 'asc_onFontFamily', function (f) { hub.set('font', f && f.asc_getName ? String(f.asc_getName() || '') : ''); });
+    hub.on(api, 'asc_onFontSize', function (v) { hub.set('size', typeof v === 'number' ? v : (parseFloat(v) || 0)); });
+    hub.on(api, 'asc_onStrikeout', function (v) { hub.set('strike', !!v); });
+    hub.on(api, 'asc_onParaStyleName', function (n) { hub.set('style', String(n || '')); });
+    // only "multiple" spacing (Asc.linerule_Auto) has a value the sheet offers (1, 1.15, 1.5, 2); anything else is -1
+    hub.on(api, 'asc_onParaSpacingLine', function (s) {
+      var r = s && s.get_LineRule ? s.get_LineRule() : null, l = s && s.get_Line ? s.get_Line() : null;
+      hub.set('spacing', (r === Asc.linerule_Auto && l != null) ? Math.round(l * 100) / 100 : -1);
+    });
+    // the document's own style names (the ribbon's style gallery list), so the sheet's "Heading 1" finds the
+    // document's style whatever case its file stored it in ("heading 1"); kept here, never posted to the app
+    hub.on(api, 'asc_onInitEditorStyles', function (p) {
+      var m = p && p.get_MergedStyles ? p.get_MergedStyles() : [];
+      styleNames = [];
+      for (var i = 0; i < m.length; i++) styleNames.push(String(m[i].get_Name()));
+    });
+    hub.on(api, 'asc_onTextColor', function (c) {
+      if (!c) return;
+      hub.set('color', c.get_auto && c.get_auto() ? 'auto'
+        : ((1 << 24) | (c.get_r() << 16) | (c.get_g() << 8) | c.get_b()).toString(16).slice(1).toUpperCase());
     });
   }
 
@@ -714,15 +749,22 @@
   // committed first, the way the engine's own touch manager does before it acts (apiCompositeEnd) - an undo in the
   // middle of a composition would leave the composite input pointing at text the undo just removed. Spreadsheets
   // name the call asc_Undo / asc_Redo. Returns 'ok', 'nothing to undo' / 'nothing to redo' or the reason it could not.
-  window.__xrUndo = function (redo) {
-    var api = window.__xrApi;
-    if (!api) return 'no editor';
+  function endComposition(why) {
     try {
       var c = window.AscCommon && AscCommon.g_inputContext;
       // always end it: the engine's own apiCompositeEnd returns at once when no composition is open, so no
       // instance flag (not in the engine contract, could be renamed) decides whether the half-typed word commits
-      if (c && c.apiCompositeEnd) c.apiCompositeEnd();
-    } catch (e) { log('undo: composition', e && e.message || e); }
+      if (c && c.apiCompositeEnd) { c.apiCompositeEnd(); return 'ok'; }
+      return 'no input context';
+    } catch (e) { log(why + ': composition', e && e.message || e); return 'error'; }
+  }
+  // The Aa format sheet (plan S1) never opens over a word still being composed: the app calls this first (on the
+  // Aa tap only), so the sheet's changes apply to committed text and the composite input never outlives the focus
+  window.__xrEndComposition = function () { return window.__xrApi ? endComposition('format sheet') : 'no editor'; };
+  window.__xrUndo = function (redo) {
+    var api = window.__xrApi;
+    if (!api) return 'no editor';
+    endComposition('undo');
     var can = redo ? (api.asc_getCanRedo || api.getCanRedo) : (api.asc_getCanUndo || api.getCanUndo);
     try { if (can && !can.call(api)) return redo ? 'nothing to redo' : 'nothing to undo'; } catch (e) {}
     var fn = redo ? (api.Redo || api.asc_Redo) : (api.Undo || api.asc_Undo);

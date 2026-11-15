@@ -515,6 +515,106 @@ final class EditorController: ObservableObject {
         }
     }
 
+    /// One formatting command from a native control (keyboard bar, Aa format sheet): `js` runs with `a` = the engine
+    /// API, then the editor log gets "<source>: <name>" (one line per tap - CI reads it; never anything per keystroke).
+    func format(_ source: String, _ name: String, _ js: String) {
+        call("var a=window.__xrApi;if(!a)return 'no editor api';" + js +
+             ";if(window.XreroHost)XreroHost.log('\(source): \(name)');return 'ok';") { r, e in
+            if (r as? String) != "ok" { NSLog("XR %@ %@: %@", source, name, (r as? String) ?? e ?? "?") }
+        }
+    }
+
+    // MARK: the Aa format sheet (plan S1, FormatSheet.swift)
+
+    /// Shown / hidden state of the Aa format sheet, shared by its two buttons (top bar, keyboard bar) and the screen
+    /// that presents it (formatSheet modifier). Its own object, so opening the sheet redraws only that modifier.
+    let formatSheet = FormatSheetModel()
+    /// The view that held the keyboard when the sheet opened (WebKit's content view); it gets it back on close.
+    private weak var keyboardOwner: UIView?
+    /// The top view controller before the sheet was presented: the keyboard is given back only once it is the top
+    /// one again (the sheet / popover fully gone).
+    private weak var formatBase: UIViewController?
+
+    private static func topController(_ window: UIWindow?) -> UIViewController? {
+        var c = window?.rootViewController
+        while let p = c?.presentedViewController { c = p }
+        return c
+    }
+
+    /// Aa: opens the format sheet - never over a word still being composed (plan S1 risk): the marked text is
+    /// committed natively (UITextInput.unmarkText) and in the engine (__xrEndComposition), THEN the sheet comes up.
+    /// With the keyboard up the sheet is modal and UIKit itself takes the keyboard down for it (the sheet opens at
+    /// thumb height with the text visible above it, M14) and brings it back on dismissal (FormatSheetModel.modal).
+    func showFormat() {
+        guard !formatSheet.shown, let web = coordinator?.web else { return }
+        let owner = XRWebView.firstResponder(in: web)
+        var marked = false
+        if let input = owner as? UITextInput, input.markedTextRange != nil { input.unmarkText(); marked = true }
+        call("return window.__xrEndComposition ? __xrEndComposition() : 'no editor';") { [weak self] r, e in
+            guard let self, !self.formatSheet.shown else { return }
+            self.coordinator?.parent.onCommand("log", "format sheet: open (keyboard \(owner == nil ? "down" : "up"), " +
+                "marked text \(marked ? "committed" : "none"), engine composition: \((r as? String) ?? e ?? "?"))")
+            self.keyboardOwner = owner
+            self.formatBase = Self.topController(web.window)
+            self.formatSheet.modal = owner != nil
+            self.formatSheet.shown = true
+        }
+    }
+
+    /// The sheet is on screen. On a phone the keyboard must be down by now (UIKit hid it for the modal sheet); if it
+    /// is still up the responder is resigned by hand - the sheet is never left under the keyboard (that keyboard
+    /// would not come back by itself on close: see FormatSheetModel.modal; the log says which path ran).
+    func formatShown() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            guard let self, self.formatSheet.shown, let web = self.coordinator?.web else { return }
+            let phone = UIDevice.current.userInterfaceIdiom == .phone
+            let up = self.formatSheet.keyboardVisible
+            if phone && up, let r = XRWebView.firstResponder(in: web) { _ = r.resignFirstResponder() }
+            self.coordinator?.parent.onCommand("log", "format sheet: shown (keyboard \(up ? (phone ? "stayed up: resigned" : "stays up beside the popover") : "down"))")
+        }
+    }
+
+    /// The sheet closed (Done, swipe, tap outside): the keyboard and the caret come back where they were when it was
+    /// opened with the keyboard up (M14 rule). The engine kept its caret and its input field focus. UIKit gives the
+    /// keyboard back itself after a modal sheet; this only makes sure, once the dismissal is over (the presenter is
+    /// the top controller again, no transition), that the editor holds the responder again.
+    /// `restore` false (photo, All tools, table, page break): the keyboard goes down - the next screen takes over.
+    func formatClosed(restore: Bool = true) {
+        let saved = keyboardOwner, base = formatBase
+        keyboardOwner = nil
+        formatBase = nil
+        formatSheet.modal = false
+        guard let owner = saved, restore else {
+            // now and once more after the dismissal: UIKit's restore after a modal sheet could bring the keyboard back
+            let down = { [weak self] in
+                if let web = self?.coordinator?.web, let r = XRWebView.firstResponder(in: web) { _ = r.resignFirstResponder() }
+            }
+            down()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                if self?.formatSheet.shown == false { down() }
+            }
+            coordinator?.parent.onCommand("log", "format sheet: closed (\(saved == nil ? "keyboard was down" : "keyboard stays down"))")
+            return
+        }
+        giveKeyboardBack(owner, base: base, tries: 0)
+    }
+
+    private func giveKeyboardBack(_ owner: UIView, base: UIViewController?, tries: Int) {
+        guard let web = coordinator?.web else { return }
+        let top = Self.topController(web.window)
+        let settling = (base != nil && top !== base) || top?.transitionCoordinator != nil || top?.isBeingDismissed == true
+        if settling && tries < 30 {                                   // 30 x 0.1 s at most, then try anyway
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                self?.giveKeyboardBack(owner, base: base, tries: tries + 1)
+            }
+            return
+        }
+        // a tap on the page while the sheet was up already brought the keyboard back: nothing to do
+        if XRWebView.firstResponder(in: web) == nil { _ = owner.becomeFirstResponder() }
+        coordinator?.parent.onCommand("log", "format sheet: closed (keyboard back: \(XRWebView.firstResponder(in: web) != nil), " +
+            "waited \(tries * 100) ms)")
+    }
+
     // MARK: the ⋯ document menu (plan M7b; xr-host.js __xrFind / __xrAllTools / __xrExport / __xrDocInfo). Each one
     // runs on its tap only and logs its answer (the CI checks read the log).
 

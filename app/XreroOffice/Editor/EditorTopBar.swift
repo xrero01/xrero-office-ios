@@ -10,6 +10,7 @@ import SwiftUI
 /// and a second binding here would undo twice.
 ///
 /// A tap on the file name opens the title menu (plan M4b): Rename, Duplicate, Move… (the screen passes `titleMenu`).
+/// Aa (Word) opens the format sheet (plan S1, FormatSheet.swift); the iPad popover hangs under it.
 ///
 /// The ⋯ menu (plan M7b) starts with Find, Redo (compact width) and Save; the screen adds the rest of the document
 /// menu (`more` = DocumentMenuItems: Share, Export, Document info, Language, Account, About, All tools).
@@ -28,6 +29,8 @@ struct EditorTopBar<More: View>: ViewModifier {
     var menuKey: String
     /// The title menu (plan M4b: Rename, Duplicate, Move…); nil = the title is not a button (CI screens without a file).
     var titleMenu: TitleMenuActions? = nil
+    /// Aa (the format sheet, plan S1) in the bar: Word only for now.
+    var format: Bool
     @ViewBuilder var more: () -> More
     @Environment(\.horizontalSizeClass) var sizeClass      // not private: that would hide the memberwise init
 
@@ -75,6 +78,11 @@ struct EditorTopBar<More: View>: ViewModifier {
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     UndoButton(state: state, redo: false, ar: ar) { undo(false) }
                     if wide { UndoButton(state: state, redo: true, ar: ar) { undo(true) } }
+                    if format {
+                        Button { controller.showFormat() } label: { FormatGlyph() }
+                            .accessibilityLabel(FormatText.format(ar))
+                            .accessibilityIdentifier("xr-bar-format")
+                    }
                     // equatable: the menu is rebuilt only when what it shows changes (language, width, account...),
                     // never because the screen redrew - a menu rebuilt while it is open stays on screen with every tap
                     // ignored (CI: the dead ⋯ menu after Document info / Language)
@@ -93,10 +101,10 @@ struct EditorTopBar<More: View>: ViewModifier {
 extension View {
     func editorTopBar<More: View>(title: String, state: EditorState, status: EditorBarStatus, controller: EditorController,
                                   ar: Bool, back: @escaping () -> Void, save: @escaping () -> Void,
-                                  find: (() -> Void)? = nil, menuKey: String = "", titleMenu: TitleMenuActions? = nil,
+                                  find: (() -> Void)? = nil, menuKey: String = "", titleMenu: TitleMenuActions? = nil, format: Bool = false,
                                   @ViewBuilder more: @escaping () -> More) -> some View {
         modifier(EditorTopBar(title: title, state: state, status: status, controller: controller, ar: ar,
-                              back: back, save: save, find: find, menuKey: menuKey, titleMenu: titleMenu, more: more))
+                              back: back, save: save, find: find, menuKey: menuKey, titleMenu: titleMenu, format: format, more: more))
     }
 }
 

@@ -48,7 +48,8 @@ struct EditorScreen: View {
                           find: { controller.find() },
                           menuKey: "\(lang)|\(account.isSignedIn)|\(document.kind.rawValue)",
                           titleMenu: files == nil ? nil : TitleMenuActions(rename: startRename, duplicate: duplicate,
-                                                                           move: startMove)) {
+                                                                           move: startMove),
+                          format: document.kind == .word) {
                 DocumentMenuItems(kind: document.kind, lang: lang, signedIn: account.isSignedIn, model: menu,
                                   controller: controller,
                                   language: { if $0 != lang { pendingLang = $0 } },
@@ -58,6 +59,8 @@ struct EditorScreen: View {
             }
             .documentMenuChrome(model: menu, kind: document.kind, name: title, size: document.data.count,
                                 fileURL: fileURL, ar: lang == "ar")
+            // Aa (top bar, keyboard bar): the format sheet / iPad popover (plan S1)
+            .formatSheet(controller, ar: lang == "ar")
             .overlay(alignment: .bottom) {
                 // short failure notice (paste): a capsule above the editor's bottom bar, gone after 2 s
                 if let toast {
