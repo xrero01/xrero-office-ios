@@ -843,6 +843,25 @@
   // The Aa format sheet (plan S1) never opens over a word still being composed: the app calls this first (on the
   // Aa tap only), so the sheet's changes apply to committed text and the composite input never outlives the focus
   window.__xrEndComposition = function () { return window.__xrApi ? endComposition('format sheet') : 'no editor'; };
+  // ---- Paragraph direction follows the keyboard (plan C1, Word). The app calls this ONCE per keyboard switch
+  // (UITextInputMode.currentInputModeDidChangeNotification), never per keystroke. Only an EMPTY paragraph at a plain
+  // caret changes: a paragraph with text (or a word still being composed, which is text in the paragraph) and a
+  // selection are left alone, and a paragraph already in that direction gets no undo step. `rtl` true = Arabic /
+  // Hebrew keyboard, false = a left-to-right one. Returns 'ok rtl' | 'ok ltr' | 'same' | 'skip: <why>' | an error.
+  window.__xrKbDirection = function (rtl) {
+    var api = window.__xrApi, ld = api && api.WordControl && api.WordControl.m_oLogicDocument;
+    if (!ld || !ld.GetCurrentParagraph || !api.asc_setRtlTextDirection) return 'no editor';
+    try {
+      if (ld.IsSelectionUse() && !ld.IsSelectionEmpty()) return 'skip: selection';
+      var p = ld.GetCurrentParagraph(false, false, { FirstInSelection: true });
+      if (!p || !p.Is_Empty) return 'skip: no paragraph';
+      if (!p.Is_Empty()) return 'skip: has text';
+      rtl = !!rtl;
+      if (!!api.asc_isRtlTextDirection() === rtl) return 'same';
+      api.asc_setRtlTextDirection(rtl);
+      return 'ok ' + (rtl ? 'rtl' : 'ltr');
+    } catch (e) { return 'error: ' + (e && e.message || e); }
+  };
   window.__xrUndo = function (redo) {
     var api = window.__xrApi;
     if (!api) return 'no editor';
