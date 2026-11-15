@@ -84,13 +84,18 @@ final class OpenInUITests: XCTestCase {
         // first edit: a copy says so (and where it is) at once; an original says nothing
         typeInPage(run.words[0])
         if run.mode == "copy" {
-            XCTAssertTrue(notice.waitForExistence(timeout: 15), "no copy notice on the first edit (\(tag))")
-            let text = notice.exists ? notice.label : "-"
-            let place = app.descendants(matching: .any).matching(identifier: "xr-copy-notice-place").firstMatch
-            print("XR open-in \(tag): notice = \(text) | \(place.exists ? place.label : "-")")
-            XCTAssertTrue(text.contains(ar ? "نسخة" : "copy"), "the notice does not say it is a copy (\(tag)): \(text)")
-            XCTAssertTrue(text.contains("Xrero Office"), "the notice does not say where the copy is (\(tag)): \(text)")
-            XCTAssertTrue(app.buttons["xr-copy-show"].exists, "no Show in Files on the notice (\(tag))")
+            let shown = notice.waitForExistence(timeout: 20)
+            XCTAssertTrue(shown, "no copy notice on the first edit (\(tag))")
+            // read at once, from snapshots: the notice leaves by itself after a few seconds
+            let button = app.buttons["xr-copy-show"].exists
+            let text = (try? notice.snapshot())?.label ?? "-"
+            let place = (try? app.descendants(matching: .any).matching(identifier: "xr-copy-notice-place").firstMatch.snapshot())?.label ?? "-"
+            print("XR open-in \(tag): notice = \(text) | \(place) | show-in-files=\(button)")
+            if shown {
+                XCTAssertTrue(text.contains(ar ? "نسخة" : "copy"), "the notice does not say it is a copy (\(tag)): \(text)")
+                XCTAssertTrue(text.contains("Xrero Office"), "the notice does not say where the copy is (\(tag)): \(text)")
+                XCTAssertTrue(button, "no Show in Files on the notice (\(tag))")
+            }
             shot(app, "72-openin-\(tag)-notice")
         } else {
             sleep(4)

@@ -108,6 +108,9 @@ struct ImportedCopyNotice: View {
     let ar: Bool
     @State private var phase = 0                       // 0 waiting for the first edit, 1 shown, 2 done (one time)
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.horizontalSizeClass) private var sizeClass
+
+    private var compact: Bool { sizeClass == .compact }
 
     private var pad: Bool { UIDevice.current.userInterfaceIdiom == .pad }
     private var headline: String { ar ? "تعديل نسخة محفوظة في Xrero Office" : "Editing a copy saved in Xrero Office" }
@@ -135,50 +138,37 @@ struct ImportedCopyNotice: View {
         NSLog("XR open-in notice shown")
         UIAccessibility.post(notification: .announcement, argument: headline + ". " + place)
         // long enough to read and reach the button; longer when VoiceOver reads it
-        let hold: Double = UIAccessibility.isVoiceOverRunning ? 20 : 9
+        let hold: Double = UIAccessibility.isVoiceOverRunning ? 20 : 12
         DispatchQueue.main.asyncAfter(deadline: .now() + hold) { if phase == 1 { phase = 2 } }
     }
 
     private var capsule: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "doc.on.doc.fill")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(Color.xrOnTeal)
-                .frame(width: 34, height: 34)
-                .background(Color.xrTeal, in: Circle())
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(headline)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
-                    .accessibilityIdentifier("xr-copy-notice-text")
-                Text(place)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .accessibilityIdentifier("xr-copy-notice-place")
-            }
-            .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 4)
-            Button(action: showInFiles) {
-                Text(ar ? "عرض في الملفات" : "Show in Files")
-                    .font(.subheadline.weight(.semibold))
+        // a phone is too narrow for the words and the button on one line (Arabic most of all): the button goes under
+        // them there, at the trailing edge; wider screens keep one line
+        VStack(alignment: .trailing, spacing: 8) {
+            HStack(spacing: 12) {
+                Image(systemName: "doc.on.doc.fill")
+                    .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(Color.xrOnTeal)
-                    .padding(.horizontal, 14)
-                    .frame(minHeight: 36)
-                    .background(Color.xrTeal, in: Capsule())
+                    .frame(width: 34, height: 34)
+                    .background(Color.xrTeal, in: Circle())
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(headline)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .accessibilityIdentifier("xr-copy-notice-text")
+                    Text(place)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("xr-copy-notice-place")
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 4)
+                if !compact { showButton }
+                closeButton
             }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("xr-copy-show")
-            Button { phase = 2 } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 30, height: 30)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(ar ? "إغلاق" : "Close")
-            .accessibilityIdentifier("xr-copy-close")
+            if compact { showButton }
         }
         .padding(.leading, 10)
         .padding(.trailing, 8)
@@ -191,6 +181,33 @@ struct ImportedCopyNotice: View {
         .padding(.top, 8)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("xr-copy-notice")
+    }
+
+    private var showButton: some View {
+        Button(action: showInFiles) {
+            Text(ar ? "عرض في الملفات" : "Show in Files")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.xrOnTeal)
+                .padding(.horizontal, 16)
+                .frame(minHeight: 38)
+                .background(Color.xrTeal, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
+        .accessibilityIdentifier("xr-copy-show")
+    }
+
+    private var closeButton: some View {
+        Button { phase = 2 } label: {
+            Image(systemName: "xmark")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(.secondary)
+                .frame(width: 30, height: 30)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(ar ? "إغلاق" : "Close")
+        .accessibilityIdentifier("xr-copy-close")
     }
 
     /// Opens the Files app at the copy's folder (On My iPhone > Xrero Office).
