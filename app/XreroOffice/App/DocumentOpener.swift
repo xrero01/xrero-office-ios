@@ -37,6 +37,12 @@ final class DocumentOpener: NSObject, ObservableObject, UIDocumentBrowserViewCon
         catch { alert(L.cannotCreate, error.localizedDescription) }
     }
 
+    /// A new file from a gallery template (plan S8), opened in the editor at once.
+    func create(from template: TemplateManifest.Template, lang: String) {
+        do { open(try NewDocuments.create(from: template, lang: lang)) }
+        catch { alert(L.cannotCreate, error.localizedDescription) }
+    }
+
     /// The system document browser (Recents / Shared / Browse, like the Files app), optionally for one kind of file.
     func browse(_ types: [UTType] = [.docx, .xlsx, .pptx, .pdf]) {
         guard let root, !editorOpen else { return }

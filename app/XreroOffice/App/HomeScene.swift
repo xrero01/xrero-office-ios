@@ -17,6 +17,11 @@ struct HomeScene: View {
     @AppStorage("xr.welcomeShown") private var accountOffered = false
     @State private var showAccount = false
     @State private var showAbout = false
+    @State private var showTemplates = false
+    @State private var templateCategory: String?
+    /// the template chosen in the gallery: made and opened once the sheet has gone (the editor is presented from the
+    /// top view controller, which is the sheet while it is still up)
+    @State private var pickedTemplate: (TemplateManifest.Template, String)?
     @State private var missing: String?
     @State private var query = ""
     @State private var share: ShareFile?
@@ -64,6 +69,13 @@ struct HomeScene: View {
                 ToolbarItem(placement: .topBarTrailing) { moreMenu }
             }
             .sheet(isPresented: $showAbout) { AboutSheet() }
+            .sheet(isPresented: $showTemplates, onDismiss: openPickedTemplate) {
+                TemplateGallerySheet(ar: ar, category: templateCategory) { t, lang in
+                    pickedTemplate = (t, lang)
+                    showTemplates = false
+                }
+                .appLanguageEnvironment()                 // its own hosting controller: UIKit mirrored as Home is
+            }
             .sheet(item: $share, onDismiss: {
                 sharedScoped?.stopAccessingSecurityScopedResource()
                 sharedScoped = nil
@@ -187,10 +199,27 @@ struct HomeScene: View {
                         .buttonStyle(.plain)                 // each tile its own button inside the one list row
                         .accessibilityLabel(ar ? "\(t.title.ar) جديد (\(t.ext))" : "New \(t.title.en.lowercased()) (\(t.ext))")
                         .accessibilityIdentifier("xr-home-" + t.id)
+                        // a tap still makes a blank file at once; a long press also offers the templates (plan S8)
+                        .contextMenu {
+                            Button { opener.create(t.kind) } label: {
+                                Label(ar ? "ملف فارغ" : "Blank file", systemImage: "doc")
+                            }
+                            Button { openTemplates(for: t.kind) } label: {
+                                Label(ar ? "من قالب…" : "From a template…", systemImage: "square.grid.2x2")
+                            }
+                            .accessibilityIdentifier("xr-home-templates-" + t.id)
+                        }
                 }
             }
             .listRowInsets(EdgeInsets())
             .listRowBackground(Color.clear)
+            OpenRow(symbol: "square.grid.2x2.fill", color: .xrTeal,
+                    title: ar ? "القوالب" : "Templates",
+                    detail: ar ? "خطاب رسمي، فاتورة ضريبية، سيرة ذاتية، محضر اجتماع، ميزانية - بالعربية والإنجليزية"
+                               : "Letter, tax invoice, CV, minutes, budget - in English and Arabic") {
+                openTemplates(for: nil)
+            }
+            .accessibilityIdentifier("xr-home-templates")
         } header: {
             Text(ar ? "جديد" : "New")
         }
@@ -318,6 +347,24 @@ struct HomeScene: View {
             } preview: {
                 RecentThumbnail(item: item, width: 240, height: 320)
             }
+    }
+
+    // MARK: templates
+
+    /// The gallery, on the category that fits the tile it was asked from (documents: business, spreadsheets: finance).
+    private func openTemplates(for kind: OfficeKind?) {
+        switch kind {
+        case .word?: templateCategory = "business"
+        case .cell?: templateCategory = "finance"
+        default: templateCategory = nil
+        }
+        showTemplates = true
+    }
+
+    private func openPickedTemplate() {
+        guard let p = pickedTemplate else { return }
+        pickedTemplate = nil
+        opener.create(from: p.0, lang: p.1)
     }
 
     private func remove(_ item: RecentFiles.Item) {

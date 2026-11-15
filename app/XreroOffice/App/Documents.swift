@@ -171,18 +171,33 @@ struct EditorHost: View {
 /// New documents from the editors' blank templates, in the app's own folder ("On My iPhone > Xrero Office").
 enum NewDocuments {
     static func create(_ kind: OfficeKind) throws -> URL {
-        let fm = FileManager.default
-        let folder = try fm.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-        let base = L.name(kind)
-        var url = folder.appendingPathComponent(base + "." + kind.fileExtension)
-        var n = 2
-        while fm.fileExists(atPath: url.path) {
-            url = folder.appendingPathComponent("\(base) \(n).\(kind.fileExtension)")
-            n += 1
-        }
         let data = OfficeDocument.blank(kind)
         guard !data.isEmpty else { throw CocoaError(.fileWriteUnknown) }
+        let url = try freeURL(L.name(kind), kind.fileExtension)
         try data.write(to: url, options: .atomic)
+        return url
+    }
+
+    /// A new file from a gallery template (plan S8): a copy of the bundled file in the chosen language, named after
+    /// the template in that language ("Tax invoice" / "فاتورة ضريبية", then "... 2", "... 3").
+    static func create(from template: TemplateManifest.Template, lang: String) throws -> URL {
+        let data = try Data(contentsOf: template.url(lang))
+        guard !data.isEmpty else { throw CocoaError(.fileReadCorruptFile) }
+        let url = try freeURL(template.name.text(lang), template.officeKind.fileExtension)
+        try data.write(to: url, options: .atomic)
+        return url
+    }
+
+    /// "<base>.<ext>" in the app's Documents folder, or "<base> 2.<ext>", "<base> 3.<ext>"... when it is taken.
+    private static func freeURL(_ base: String, _ ext: String) throws -> URL {
+        let fm = FileManager.default
+        let folder = try fm.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+        var url = folder.appendingPathComponent(base + "." + ext)
+        var n = 2
+        while fm.fileExists(atPath: url.path) {
+            url = folder.appendingPathComponent("\(base) \(n).\(ext)")
+            n += 1
+        }
         return url
     }
 }
