@@ -1739,8 +1739,7 @@ final class EditorUITests: XCTestCase {
         }
         let result = "XR a11y RESULT \(failures.isEmpty ? "PASS" : "FAIL (\(failures.count))")"
         print(result)
-        let summary = XCTAttachment(string: (lines + [result]).joined(separator: "
-"))
+        let summary = XCTAttachment(string: (lines + [result]).joined(separator: "\n"))
         summary.name = "a11y-summary"; summary.lifetime = .keepAlways; add(summary)
     }
 }
