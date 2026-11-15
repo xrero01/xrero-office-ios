@@ -773,8 +773,16 @@ final class EditorUITests: XCTestCase {
             }
             shot(app, "61-ren-\(run.lang)-title-menu")
             app.buttons["xr-title-rename"].tap()
-            let field = app.textFields["xr-rename-field"]
-            XCTAssertTrue(field.waitForExistence(timeout: 5), "no name field in the Rename alert (\(run.lang))")
+            // a TextField inside a SwiftUI .alert becomes the UIAlertController's own field and loses its identifier:
+            // find it as the alert's text field
+            let alert = app.alerts.firstMatch
+            let field = alert.textFields.firstMatch
+            guard alert.waitForExistence(timeout: 5), field.waitForExistence(timeout: 5) else {
+                XCTFail("no name field in the Rename alert (\(run.lang))")
+                shot(app, "62-ren-\(run.lang)-no-rename-field")
+                app.terminate()
+                continue                                   // the next language still runs
+            }
             // the alert focuses its field with the cursor after the name: delete it, then type the new one
             if !app.keyboards.firstMatch.waitForExistence(timeout: 3) { field.tap() }
             for _ in 0..<3 {
@@ -787,7 +795,11 @@ final class EditorUITests: XCTestCase {
             shot(app, "62-ren-\(run.lang)-rename-alert")
             let ok = app.alerts.buttons.matching(NSPredicate(format: "identifier == 'xr-rename-ok' OR label == %@",
                                                              ar ? "إعادة التسمية" : "Rename")).firstMatch
-            XCTAssertTrue(ok.exists, "no Rename button in the alert (\(run.lang))")
+            guard ok.exists else {
+                XCTFail("no Rename button in the alert (\(run.lang))")
+                app.terminate()
+                continue
+            }
             ok.tap()
             var renamed = false
             for _ in 0..<20 { if titleNow() == run.newName { renamed = true; break }; Thread.sleep(forTimeInterval: 0.5) }

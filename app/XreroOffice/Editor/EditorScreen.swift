@@ -212,7 +212,15 @@ extension EditorScreen {
         guard let files else { return }
         let ar = lang == "ar"
         let base = BarText.copyName(baseName, ar)
+        // the save may never answer (the converter stuck): say the copy failed rather than nothing at all
+        final class Once { var done = false }
+        let once = Once()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 45) {
+            if !once.done { once.done = true; showToast(BarText.copyFailed(ar)) }
+        }
         controller.save(onlyIfModified: true) {
+            guard !once.done else { return }
+            once.done = true
             files.duplicate(as: base) { url in
                 showToast(url.map { BarText.copySaved($0.deletingPathExtension().lastPathComponent, ar) } ?? BarText.copyFailed(ar))
             }
@@ -290,7 +298,12 @@ struct TitleMenuChrome: ViewModifier {
         }))
         if !ext.isEmpty && s.lowercased().hasSuffix("." + ext.lowercased()) { s = String(s.dropLast(ext.count + 1)) }
         while s.hasPrefix(".") { s.removeFirst() }
-        return String(s.trimmingCharacters(in: .whitespaces).prefix(200))
+        s = s.trimmingCharacters(in: .whitespaces)
+        // the file system's limit is 255 BYTES per name, extension included: an Arabic letter takes 2 bytes, so a
+        // character count would let a long Arabic name fail with the generic "couldn't rename"
+        let room = 250 - (ext.isEmpty ? 0 : ext.utf8.count + 1)
+        while s.utf8.count > room { s.removeLast() }
+        return s.trimmingCharacters(in: .whitespaces)
     }
 }
 

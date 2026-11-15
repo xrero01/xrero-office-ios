@@ -195,7 +195,13 @@ final class RecentFiles: ObservableObject {
     /// bookmark, keeping its position and date, so Home shows the new name and reopens the file where it is now.
     func replace(_ old: URL, with new: URL) {
         guard let bm = try? new.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil) else { return }
-        guard let i = items.firstIndex(where: { $0.id == old.path }) else { add(new); return }
+        // compared in one form: the editor's file URL can differ from the opened one (/var vs /private/var), and a
+        // missed match would leave the old row behind, its bookmark now pointing at the renamed file (two rows)
+        func same(_ id: String) -> Bool {
+            URL(fileURLWithPath: id).standardizedFileURL.resolvingSymlinksInPath().path
+                == old.standardizedFileURL.resolvingSymlinksInPath().path
+        }
+        guard let i = items.firstIndex(where: { $0.id == old.path || same($0.id) }) else { add(new); return }
         var list = items
         list[i] = Item(id: new.path, name: new.lastPathComponent, date: list[i].date, bookmark: bm, place: Self.place(of: new))
         // one row per file: an older row for the new path (a file once known by this name) goes

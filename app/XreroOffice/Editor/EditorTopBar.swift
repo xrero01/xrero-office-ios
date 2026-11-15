@@ -210,6 +210,9 @@ private struct BarTitle: View {
     var ar: Bool
     /// The title opens the title menu: a small chevron after the name says so (as in Pages / Files).
     var menu = false
+    /// With VoiceOver on, the title menu button over the name already reads it: the name itself is then hidden so it
+    /// is not read twice (with VoiceOver off - as in the UI tests - it stays a readable text).
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
 
     private var line: String? {
         if !status.ready { return BarText.opening(ar) }
@@ -228,6 +231,7 @@ private struct BarTitle: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .accessibilityIdentifier("xr-bar-title")
+                    .accessibilityHidden(menu && voiceOver)
                 if menu {
                     Image(systemName: "chevron.down")
                         .font(.system(size: 11, weight: .bold))
