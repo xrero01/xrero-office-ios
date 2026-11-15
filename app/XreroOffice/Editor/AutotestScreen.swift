@@ -487,7 +487,8 @@ private struct ProbeLabel: View {
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in keyboardUp = false }
     }
 
-    /// Touch gate probe (Word): the caret's place on screen (web view points), the selected text, the document text,
+    /// Touch gate probe (Word): the caret's place on screen (web view points) and in the document (dx / dy in mm on
+    /// page dpg: unchanged when only the view scrolled), the selected text, the document text,
     /// bold at the caret (Bold or, for Arabic script, BoldCS), the engine zoom, the visual viewport scale (1 = WebKit is not magnifying a bitmap), who has
     /// focus in the editor frame, whether the phone ribbon is folded, plus keypress-to-frame latency samples taken by
     /// listeners on the editor's input field (keydown/input -> second requestAnimationFrame, not the canvas paint itself;
@@ -503,7 +504,8 @@ private struct ProbeLabel: View {
      var ld=a.WordControl.m_oLogicDocument;
      if(ld){try{r.sel=(ld.IsSelectionUse()&&!ld.IsSelectionEmpty())?(ld.GetSelectedText(false)||''):'';}catch(e){r.sel='';r.selErr=String(e);}
       try{r.text=ld.Content.map(function(p){return p.GetText?p.GetText({ParaSeparator:''}):'';}).join('|');r.paras=ld.Content.length;}catch(e){r.text='';}
-      try{var tp=ld.GetCalculatedTextPr();r.bold=!!(tp.Bold||tp.BoldCS);}catch(e){}}
+      try{var tp=ld.GetCalculatedTextPr();r.bold=!!(tp.Bold||tp.BoldCS);}catch(e){}
+      try{var q=ld.GetCurPosXY();r.dx=Math.round(q.X*10)/10;r.dy=Math.round(q.Y*10)/10;r.dpg=q.PageNum;}catch(e){}}
      r.zoom=a.WordControl.m_nZoomValue;
      r.vv=window.visualViewport?Math.round(window.visualViewport.scale*100)/100:1;r.vvi=w.visualViewport?Math.round(w.visualViewport.scale*100)/100:1;
      var ic=w.AscCommon&&w.AscCommon.g_inputContext,A=ic&&ic.HtmlArea,ae=d.activeElement;
