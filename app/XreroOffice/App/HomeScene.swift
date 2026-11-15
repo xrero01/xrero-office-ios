@@ -128,6 +128,7 @@ struct HomeScene: View {
                 .frame(minWidth: 44, minHeight: 44)
         }
         .accessibilityLabel(ar ? "المزيد" : "More")
+        .accessibilityHint(A11yText.homeMoreHint(ar))
         .accessibilityIdentifier("xr-home-more")
     }
 
@@ -148,7 +149,10 @@ struct HomeScene: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                HStack(spacing: 8) {
+                // side by side; one above the other at accessibility text sizes, so neither word is cut (S12)
+                let buttons = typeSize.isAccessibilitySize
+                    ? AnyLayout(VStackLayout(spacing: 8)) : AnyLayout(HStackLayout(spacing: 8))
+                buttons {
                     Button { showAccount = true } label: {
                         Text(ar ? "تسجيل الدخول" : "Sign in")
                             .font(.subheadline.weight(.semibold))
@@ -186,6 +190,7 @@ struct HomeScene: View {
                     Button { opener.create(t.kind) } label: { TileView(tile: t, ar: ar) }
                         .buttonStyle(.plain)                 // each tile its own button inside the one list row
                         .accessibilityLabel(ar ? "\(t.title.ar) جديد (\(t.ext))" : "New \(t.title.en.lowercased()) (\(t.ext))")
+                        .accessibilityHint(A11yText.newHint(ar))
                         .accessibilityIdentifier("xr-home-" + t.id)
                 }
             }
@@ -203,12 +208,14 @@ struct HomeScene: View {
                     detail: ar ? "على هذا الجهاز وiCloud Drive والتطبيقات الأخرى" : "On this device, iCloud Drive and other apps") {
                 opener.browse()
             }
+            .accessibilityHint(A11yText.browseHint(ar))
             .accessibilityIdentifier("xr-home-browse")
             OpenRow(symbol: "doc.richtext.fill", color: .xrPDF,
                     title: ar ? "فتح ملف PDF" : "Open a PDF",
                     detail: ar ? "عرض وتعبئة وتعليق" : "View, fill and annotate") {
                 opener.browse([.pdf])
             }
+            .accessibilityHint(A11yText.browseHint(ar))
             .accessibilityIdentifier("xr-home-pdf")
         } header: {
             Text(ar ? "فتح" : "Open")
@@ -290,6 +297,7 @@ struct HomeScene: View {
     private func recentRow(_ item: RecentFiles.Item) -> some View {
         Button { openRecent(item) } label: { RecentRow(item: item, ar: ar, locale: language.locale) }
             .buttonStyle(.plain)
+            .accessibilityHint(A11yText.recentHint(ar))
             .accessibilityIdentifier("xr-recent-" + item.name)
             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                 Button(role: .destructive) { remove(item) } label: {
@@ -399,6 +407,8 @@ struct TileView: View {
     let tile: HomeTile
     let ar: Bool
     @ScaledMetric(relativeTo: .title) private var glyph: CGFloat = 40
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {
         VStack(spacing: 6) {
@@ -408,7 +418,8 @@ struct TileView: View {
             Text(ar ? tile.title.ar : tile.title.en)
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.primary)
-                .lineLimit(1).minimumScaleFactor(0.8)
+                .lineLimit(typeSize.isAccessibilitySize ? 2 : 1).minimumScaleFactor(0.8)
+                .multilineTextAlignment(.center)
             // the extension is Latin text: kept left-to-right inside an Arabic layout
             Text(verbatim: tile.ext)
                 .font(.caption)
@@ -419,6 +430,12 @@ struct TileView: View {
         .padding(.horizontal, 6)
         .frame(maxWidth: .infinity, minHeight: 96)
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        // Increase Contrast: the tile gets an edge, so it does not melt into the grouped background (S12)
+        .overlay {
+            if contrast == .increased {
+                RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Color.primary.opacity(0.5), lineWidth: 1)
+            }
+        }
         .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }
@@ -462,6 +479,7 @@ struct RecentRow: View {
     let item: RecentFiles.Item
     let ar: Bool
     let locale: Locale
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         HStack(spacing: 12) {
@@ -470,11 +488,11 @@ struct RecentRow: View {
                 Text((item.name as NSString).deletingPathExtension)
                     .font(.body)
                     .foregroundStyle(.primary)
-                    .lineLimit(1)
+                    .lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
                 Text(subtitle)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .lineLimit(typeSize.isAccessibilitySize ? 3 : 1)
             }
             Spacer(minLength: 0)
         }

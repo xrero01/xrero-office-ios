@@ -31,6 +31,7 @@ struct KeyboardBar: View {
     let controller: EditorController
     let ar: Bool
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -58,11 +59,15 @@ struct KeyboardBar: View {
                 // Aa: everything else (font, size, style, colour, spacing, insert) in the format sheet (plan S1)
                 Button { controller.showFormat() } label: { FormatGlyph() }
                     .accessibilityLabel(FormatText.format(ar))
+                    .accessibilityHint(A11yText.formatHint(ar))
+                    .accessibilityShowsLargeContentViewer()
                     .accessibilityIdentifier("xr-kb-format")
                 Button { controller.hideKeyboard() } label: {
                     symbol("keyboard.chevron.compact.down", on: false)
                 }
                 .accessibilityLabel(ar ? "إخفاء لوحة المفاتيح" : "Hide keyboard")
+                .accessibilityHint(A11yText.hideKeyboardHint(ar))
+                .accessibilityShowsLargeContentViewer()
                 .accessibilityIdentifier("xr-kb-hide")
             }
             .padding(.horizontal, 8)
@@ -81,7 +86,9 @@ struct KeyboardBar: View {
             if reduceTransparency { Color(uiColor: .secondarySystemBackground) } else { Rectangle().fill(.bar) }
         }
         .overlay(alignment: .top) {
-            Rectangle().fill(Color(uiColor: .separator)).frame(height: 0.5)     // 0.5 pt hairline
+            // 0.5 pt hairline; Increase Contrast: a 1 pt stronger line (S12)
+            Rectangle().fill(contrast == .increased ? Color.primary.opacity(0.6) : Color(uiColor: .separator))
+                .frame(height: contrast == .increased ? 1 : 0.5)
         }
         .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         // Arabic: the whole order mirrors (the direction toggle stays in the leading slot = the right edge)
@@ -106,6 +113,7 @@ struct KeyboardBar: View {
             .contentShape(Rectangle())
         }
         .accessibilityLabel(ar ? "اتجاه الفقرة" : "Paragraph direction")
+        .accessibilityShowsLargeContentViewer()
         .accessibilityValue(rtl ? (ar ? "من اليمين إلى اليسار" : "Right to left")
                                 : (ar ? "من اليسار إلى اليمين" : "Left to right"))
         .accessibilityIdentifier("xr-kb-direction")
@@ -150,6 +158,7 @@ struct KeyboardBar: View {
             symbol(glyph, on: false).environment(\.layoutDirection, .leftToRight)
         }
         .accessibilityLabel(ar ? "المحاذاة" : "Alignment")
+        .accessibilityShowsLargeContentViewer()
         .accessibilityValue(value)
         .accessibilityHint(ar ? "يبدّل بين البداية والوسط والنهاية" : "Cycles start, centre and end")
         .accessibilityIdentifier("xr-kb-align")
@@ -165,6 +174,7 @@ struct KeyboardBar: View {
         }
         .accessibilityLabel(ar ? arLabel : en)
         .accessibilityAddTraits(on ? .isSelected : [])
+        .accessibilityShowsLargeContentViewer()
         .accessibilityIdentifier(id)
     }
 
