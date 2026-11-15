@@ -140,6 +140,68 @@ def touch_gate(d, lang):
     return good and saved
 
 
+KBDIR_CHECKS = ("editor-ready", "keyboard-up", "empty-arabic-rtl", "empty-english-ltr", "empty-arabic-rtl-again",
+                "arabic-typed", "text-paragraph-kept", "new-empty-english-ltr", "english-text-kept", "both-typed", "save")
+
+
+def para_bidi(p, word):
+    """the effective w:bidi of the paragraph holding `word`: its own pPr, else its style chain, else the document
+    defaults (as arabic_blank_docx resolves it); None when the word is not found"""
+    z = zipfile.ZipFile(p)
+    doc, sty = ET.fromstring(z.read("word/document.xml")), ET.fromstring(z.read("word/styles.xml"))
+    styles = {s.get(W + "styleId"): s for s in sty.iter(W + "style")}
+    default = next((s.get(W + "styleId") for s in sty.iter(W + "style") if s.get(W + "type") == "paragraph"
+                    and s.get(W + "default") in ("1", "true", "on")), "Normal")
+    para = next((q for q in doc.iter(W + "p") if word in "".join(t.text or "" for t in q.iter(W + "t"))), None)
+    if para is None:
+        return None, "not found"
+    bidi, src = para.find(W + "pPr/" + W + "bidi"), "paragraph"
+    if bidi is None:
+        ps = para.find(W + "pPr/" + W + "pStyle")
+        sid, seen = (ps.get(W + "val") if ps is not None else default), set()
+        while bidi is None and sid in styles and sid not in seen:
+            seen.add(sid)
+            bidi, src = styles[sid].find(W + "pPr/" + W + "bidi"), "style " + sid
+            b = styles[sid].find(W + "basedOn")
+            sid = b.get(W + "val") if b is not None else None
+    if bidi is None:
+        bidi, src = sty.find(W + "docDefaults/" + W + "pPrDefault/" + W + "pPr/" + W + "bidi"), "docDefaults"
+    return on(bidi), src
+
+
+def kbdir_gate(d, lang):
+    """plan C1 (EditorUITests.testZZKeyboardDirectionFollowsKeyboard): every kbdir-* line PASS, and the saved
+    xr-kbdir-<lang>.docx keeps the Arabic paragraph right-to-left and the English one left-to-right"""
+    good = True
+    lg = os.path.join(d, "xr-log-xr-kbdir-%s.docx.txt" % lang)
+    log = open(lg, encoding="utf-8", errors="replace").read() if os.path.exists(lg) else ""
+    res = {}
+    for m in re.finditer(r"^touch-gate %s kbdir-([\w-]+): (PASS|FAIL|KNOWN|INFO)\s*(.*)$" % lang, log, re.M):
+        res[m.group(1)] = (m.group(2), m.group(3))
+    QA.setdefault(os.path.basename(d), {}).setdefault(lang, {}).setdefault("checks", {}).update(
+        {"kbdir-" + k: list(v) for k, v in res.items()})
+    print("Keyboard direction gate C1 (%s):" % lang.upper())
+    for name in KBDIR_CHECKS + tuple(k for k in res if k not in KBDIR_CHECKS):
+        st, why = res.get(name, ("NOT LOGGED", ""))
+        print("  %-30s %-10s %s" % ("kbdir-" + name, st, why[:160]))
+        if (name in KBDIR_CHECKS and st != "PASS") or st == "FAIL":
+            good = False
+    p = os.path.join(d, "xr-kbdir-%s.docx" % lang)
+    if not os.path.exists(p):
+        print("  xr-kbdir-%s.docx: MISSING" % lang)
+        return False
+    try:
+        ar, ar_src = para_bidi(p, "سلام")       # سلام
+        en, en_src = para_bidi(p, "Hello")
+    except Exception as e:
+        print("  xr-kbdir-%s.docx: cannot read: %s" % (lang, e))
+        return False
+    saved = ar is True and en is False
+    print("  xr-kbdir-%s.docx: Arabic paragraph rtl=%s (%s)  English paragraph rtl=%s (%s) -> %s"
+          % (lang, ar, ar_src, en, en_src, "OK" if saved else "WRONG"))
+    return good and saved
+
+
 def doc_menu(d):
     """The ⋯ document menu (plan M7b, EditorUITests.testDocumentMenu + testSpreadsheetAndPresentationOpen): every
     Export ▸ copy is a real file of its format holding what was on screen; the File menu (opened through ⋯ > All tools,
@@ -280,6 +342,8 @@ for dev in sorted(os.listdir(root)) if os.path.isdir(root) else []:
         print("xr-clip.docx: MISSING (clipboard copy/paste + save)"); ok = False
     for lang in ("en", "ar"):                     # touch / typing gate (plan M14 + F1)
         ok &= touch_gate(d, lang)
+    for lang in ("en", "ar"):                     # paragraph direction follows the keyboard (plan C1)
+        ok &= kbdir_gate(d, lang)
     for ext in ("docx", "xlsx", "pptx"):          # Arabic-first blanks (EditorUITests.testArabicBlanksStartRightToLeft)
         b = os.path.join(d, "xr-test-ar." + ext)
         if not os.path.exists(b):

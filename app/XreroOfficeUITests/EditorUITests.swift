@@ -1601,6 +1601,106 @@ final class EditorUITests: XCTestCase {
         shot(app, "59-touch-\(lang)-reopened")
     }
 
+    /// Plan C1 gate (touch gate family): the paragraph direction follows a keyboard switch, in a new Word document with
+    /// the app in English and in Arabic. An EMPTY paragraph turns right-to-left when Arabic input starts and back to
+    /// left-to-right for English; a paragraph that has text is left alone; the saved xr-kbdir-<lang>.docx keeps both
+    /// directions (check_saved.py kbdir_gate). The switch itself goes through the app's own keyboard-switch handler
+    /// (EditorWebView.Coordinator.keyboardLanguageChanged, the notification's path) with the language given by the
+    /// test: the simulator's keyboard list cannot be changed from a test. Results: "touch-gate <lang> kbdir-*" lines.
+    func testZZKeyboardDirectionFollowsKeyboard() {
+        for lang in ["en", "ar"] { kbDirGate(lang) }
+    }
+
+    private func kbDirGate(_ lang: String) {
+        let arWord = "\u{0633}\u{0644}\u{0627}\u{0645}"            // سلام
+        let enWord = "Hello"
+        let app = XCUIApplication()
+        app.launchArguments = ["-xr.lang", lang, "-xr.kbDirection", "YES", "-xr.keyboardBar", "NO"]
+        try? FileManager.default.removeItem(atPath: probeFile)
+        try? FileManager.default.removeItem(atPath: probeFile + ".kblang")
+        pauseProbe(false)
+        app.launchEnvironment = ["XR_KIND": "word", "XR_NEW_NAME": "xr-kbdir-\(lang).docx", "XR_PROBE": "1", "XR_PROBE_FILE": probeFile]
+        app.launch()
+        let keep = continueAfterFailure
+        continueAfterFailure = true
+        var notes: [String] = []
+        func gate(_ name: String, _ ok: Bool, _ detail: String) {
+            let line = "touch-gate \(lang) kbdir-\(name): \(ok ? "PASS" : "FAIL") \(detail)"
+            print("XR " + line)
+            notes.append(line.replacingOccurrences(of: "\n", with: " "))
+            XCTAssertTrue(ok, line)
+        }
+        func info(_ name: String, _ detail: String) {
+            let line = "touch-gate \(lang) kbdir-\(name): INFO \(detail)"
+            print("XR " + line)
+            notes.append(line)
+        }
+        defer {
+            autotest("note", notes.joined(separator: "\n"))
+            app.terminate()
+            continueAfterFailure = keep
+        }
+        let ready = waitState(app, prefix: "ready", timeout: 120)
+        gate("editor-ready", ready == "ready", ready)
+        guard ready == "ready" else { return }
+        XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 10))
+        sleep(2)
+        tapFirstLine(app, fallback: CGVector(dx: lang == "ar" ? 0.65 : 0.35, dy: UIDevice.current.userInterfaceIdiom == .pad ? 0.19 : 0.3))
+        var p = probe(app)
+        if !focused(p) { sleep(2); p = probe(app) }
+        gate("keyboard-up", focused(p), focusInfo(p))
+        info("start", "blank paragraph dir=\(str(p, "dir")) globe key on this simulator: \(app.keyboards.buttons["Next keyboard"].exists)")
+
+        // one keyboard switch: the language tag into <probe file>.kblang (the app's probe poll hands it to the
+        // keyboard-switch handler), then the handler's answer and the direction at the caret from the probe
+        var step = 0
+        func switchKeyboard(_ base: String, wantDir: String) -> (answer: String, dir: String) {
+            step += 1
+            let tag = "\(base)-x-s\(step)"                        // unique per step: the answer names its own switch
+            FileManager.default.createFile(atPath: probeFile + ".kblang", contents: Data(tag.utf8))
+            var q = probe(app)
+            for _ in 0..<10 where !str(q, "kbd").hasPrefix(tag + ":") { q = probe(app) }
+            // the direction reaches EditorState through the coalesced state channel: give it a moment
+            for _ in 0..<4 where str(q, "dir") != wantDir { q = probe(app) }
+            let answer = str(q, "kbd").hasPrefix(tag + ":") ? String(str(q, "kbd").dropFirst(tag.count + 1)) : "no answer (\(str(q, "kbd")))"
+            return (answer, str(q, "dir"))
+        }
+
+        // 1) empty paragraph: Arabic keyboard -> right-to-left (the Arabic blank already is: 'same')
+        let s1 = switchKeyboard("ar", wantDir: "rtl")
+        gate("empty-arabic-rtl", s1.dir == "rtl" && (s1.answer == "ok rtl" || (lang == "ar" && s1.answer == "same")),
+             "answer=\(s1.answer) dir=\(s1.dir)")
+        // 2) still empty: English keyboard -> back to left-to-right
+        let s2 = switchKeyboard("en", wantDir: "ltr")
+        gate("empty-english-ltr", s2.dir == "ltr" && s2.answer == "ok ltr", "answer=\(s2.answer) dir=\(s2.dir)")
+        shot(app, "60-kbdir-\(lang)-empty-ltr")
+        // 3) Arabic again, then Arabic text: the paragraph is right-to-left and has text
+        let s3 = switchKeyboard("ar", wantDir: "rtl")
+        gate("empty-arabic-rtl-again", s3.dir == "rtl" && s3.answer == "ok rtl", "answer=\(s3.answer) dir=\(s3.dir)")
+        typeSlowly(app, arWord)
+        let p3 = probe(app)
+        gate("arabic-typed", plain(p3).contains(arWord), "text=\(plain(p3).prefix(60))")
+        // 4) a paragraph with text is left alone by an English switch
+        let s4 = switchKeyboard("en", wantDir: "rtl")
+        gate("text-paragraph-kept", s4.dir == "rtl" && s4.answer == "skip: has text", "answer=\(s4.answer) dir=\(s4.dir)")
+        shot(app, "61-kbdir-\(lang)-text-kept")
+        // 5) Enter: a new, empty paragraph (it inherits right-to-left) follows the English switch; English text in it
+        app.typeText("\n")
+        sleep(1)
+        let s5 = switchKeyboard("en", wantDir: "ltr")
+        gate("new-empty-english-ltr", s5.dir == "ltr" && s5.answer == "ok ltr", "answer=\(s5.answer) dir=\(s5.dir)")
+        typeSlowly(app, enWord)
+        // 6) ... and that paragraph, now with text, is left alone by an Arabic switch
+        let s6 = switchKeyboard("ar", wantDir: "ltr")
+        gate("english-text-kept", s6.dir == "ltr" && s6.answer == "skip: has text", "answer=\(s6.answer) dir=\(s6.dir)")
+        let p6 = probe(app)
+        gate("both-typed", plain(p6).contains(arWord) && plain(p6).contains(enWord), "text=\(plain(p6).prefix(60))")
+        shot(app, "62-kbdir-\(lang)-done")
+        // 7) saved through the engine: check_saved.py reads both paragraphs' directions in xr-kbdir-<lang>.docx
+        let saved = save(app)
+        gate("save", saved.hasPrefix("saved"), saved)
+    }
+
     /// New spreadsheet and presentation open in their editors (also in Arabic, where the spreadsheet's status bar
     /// mirrors its absolutely placed boxes and, on phones, the overflowing tab row scrolls right-to-left), and pass
     /// the iPad layout gate and the chrome gate.

@@ -44,6 +44,15 @@ struct EditorWebView: UIViewRepresentable {
         // flips are ignored (syncTheme only acts while active) and the real appearance is checked on return
         c.activeObserver = NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification,
                                                                   object: nil, queue: .main) { [weak c] _ in c?.syncTheme() }
+        // plan C1: an empty paragraph's direction follows a keyboard switch (Word first; KeyboardDirection.swift)
+        if document.kind == .word && KeyboardDirection.enabled(lang: lang) {
+            c.inputModeObserver = NotificationCenter.default.addObserver(
+                forName: UITextInputMode.currentInputModeDidChangeNotification, object: nil, queue: .main) { [weak c] _ in
+                c?.keyboardLanguageChanged()
+            }
+        }
+        let kbOn = c.inputModeObserver != nil
+        DispatchQueue.main.async { log("log", "keyboard direction: " + (kbOn ? "on" : "off")) }
         web.scrollView.contentInsetAdjustmentBehavior = .never
         web.scrollView.bounces = false
         web.scrollView.isScrollEnabled = false        // the editors scroll their own canvas
@@ -92,7 +101,12 @@ struct EditorWebView: UIViewRepresentable {
         /// the live switch sent to the editor and not answered yet (no second refresh for the same change)
         private var themeInFlight = ""
         var activeObserver: NSObjectProtocol?
-        deinit { if let o = activeObserver { NotificationCenter.default.removeObserver(o) } }
+        /// plan C1: UITextInputMode.currentInputModeDidChangeNotification (Word, flag on), nil otherwise
+        var inputModeObserver: NSObjectProtocol?
+        deinit {
+            if let o = activeObserver { NotificationCenter.default.removeObserver(o) }
+            if let o = inputModeObserver { NotificationCenter.default.removeObserver(o) }
+        }
         private var pickReply: ((Any?, String?) -> Void)?
         var onSaved: (() -> Void)?
 
@@ -276,6 +290,30 @@ struct EditorWebView: UIViewRepresentable {
                 if let e = o?["e"] as? String { done?(nil, e); return }
                 let v = o?["v"]
                 done?(v is NSNull ? nil : v, nil)
+            }
+        }
+
+        /// Plan C1: the keyboard language changed. Only while the editor is ready and holds the keyboard (a switch in
+        /// another text field - the rename field, a search box - is not the document's), and never while a word is
+        /// being composed (marked text): then ONE bridge call, which changes the paragraph at the caret only when it
+        /// is empty (__xrKbDirection). `language` replaces the keyboard's own language (CI gate only: the simulator's
+        /// keyboard list cannot be changed from a test). The answer goes to the editor log and controller.kbDirLast.
+        func keyboardLanguageChanged(language: String? = nil) {
+            guard ready, let web, let owner = XRWebView.firstResponder(in: web) else { return }
+            if let input = owner as? UITextInput, input.markedTextRange != nil {
+                parent.onCommand("log", "keyboard direction: skip (marked text)")
+                parent.controller.kbDirLast = "skip: marked text"
+                return
+            }
+            let tag = language ?? owner.textInputMode?.primaryLanguage
+            guard let rtl = KeyboardDirection.rightToLeft(tag) else {
+                parent.onCommand("log", "keyboard direction \(tag ?? "none"): no text language")
+                return
+            }
+            call("return window.__xrKbDirection ? __xrKbDirection(\(rtl)) : 'no bridge';") { [weak self] r, e in
+                let res = (r as? String) ?? e ?? "?"
+                self?.parent.controller.kbDirLast = "\(tag ?? "?"):\(res)"
+                self?.parent.onCommand("log", "keyboard direction \(tag ?? "?") -> \(rtl ? "rtl" : "ltr"): \(res)")
             }
         }
 
@@ -481,6 +519,8 @@ final class EditorController: ObservableObject {
     /// the touch-gate probe. Plain values (not published): nothing on screen shows them.
     var editMenuShown = 0
     var editMenuLast = ""
+    /// Plan C1: the last keyboard switch's answer ("ar:ok rtl", "en:skip: has text"), read by the CI probe.
+    var kbDirLast = ""
 
     /// Runs a JavaScript function body in the editor frame (see Coordinator.call) - the one way native controls
     /// reach the engine, e.g. `call("__xrApi.put_TextPrBold(true)")`. On a tap only, never per keystroke.

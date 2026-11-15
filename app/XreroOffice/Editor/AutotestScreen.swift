@@ -527,6 +527,13 @@ private struct ProbeLabel: View {
 
     private func poll() {
         guard !probing, let web = controller.coordinator?.web else { return }
+        // plan C1 gate: a keyboard switch the test asks for (<probe file>.kblang holds the language tag) takes the
+        // keyboard notification's own path; a file, not a hook URL, so the keyboard focus it depends on is not moved
+        if let f = ProcessInfo.processInfo.environment["XR_PROBE_FILE"],
+           let tag = try? String(contentsOfFile: f + ".kblang", encoding: .utf8) {
+            try? FileManager.default.removeItem(atPath: f + ".kblang")
+            controller.coordinator?.keyboardLanguageChanged(language: tag.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
         // the test pauses the probe while it types (<probe file>.pause): its full-document read on the main thread
         // would otherwise sit inside the keypress-latency samples it collects
         if let f = ProcessInfo.processInfo.environment["XR_PROBE_FILE"], FileManager.default.fileExists(atPath: f + ".pause") { return }
@@ -540,6 +547,9 @@ private struct ProbeLabel: View {
             // the native edit menu (plan S5): presentations so far and the last action's answer
             o["em"] = controller.editMenuShown
             o["ema"] = controller.editMenuLast
+            // plan C1: the paragraph direction at the caret (state channel) and the last keyboard switch's answer
+            o["dir"] = controller.state.direction.rawValue
+            o["kbd"] = controller.kbDirLast
             let line = "t=\(Int64(Date().timeIntervalSince1970 * 1000))|"
                 + ((try? JSONSerialization.data(withJSONObject: o)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}")
             // the simulator shares the Mac's file system: a file the test reads costs no accessibility query (each one
