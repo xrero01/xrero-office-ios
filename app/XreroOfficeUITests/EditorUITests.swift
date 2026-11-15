@@ -753,11 +753,22 @@ final class EditorUITests: XCTestCase {
                 // word is never typed into another) and above where the keyboard comes up; a right-to-left blank
                 // (Arabic interface) starts at the right edge
                 let point = web.coordinate(withNormalizedOffset: CGVector(dx: ar ? 0.65 : 0.35, dy: 0.45))
+                let word = text.trimmingCharacters(in: .whitespaces)
                 point.tap()
-                if !app.keyboards.firstMatch.waitForExistence(timeout: 4) { point.tap(); _ = app.keyboards.firstMatch.waitForExistence(timeout: 4) }
+                if !app.keyboards.firstMatch.waitForExistence(timeout: 4) {
+                    // a lost simulator tap: tapped once more, and said so
+                    print("XR title menu \(run.lang) \(word)-first-tap-ignored: INFO no keyboard 4 s after the tap on the page - tapped again")
+                    point.tap(); _ = app.keyboards.firstMatch.waitForExistence(timeout: 4)
+                }
                 sleep(1)
+                // a tap on blank paper gives the caret only. The edit menu here means the tap was taken for a long press
+                // (CI runs 136 / 138: the word before was selected and the typing replaced it - fixed in xr-host.js's
+                // edit menu). Recorded; the strict check is the saved file's words (check_saved.py title_menu)
+                let menu = app.menuItems.count
+                if menu > 0 { print("XR title menu \(run.lang) \(word)-tap-menu: INFO the tap on blank paper showed the edit menu (\(menu) items)") }
                 typeSlowly(app, text)
                 sleep(1)
+                shot(app, "66-ren-\(run.lang)-typed-\(word)")
             }
             func saveNow(_ what: String) -> Bool {
                 app.buttons["xr-bar-more"].tap()
@@ -840,7 +851,12 @@ final class EditorUITests: XCTestCase {
                 // any element type (the capsule's text may surface as other than a static text); the notice stays 4 s
                 let toast = app.descendants(matching: .any).matching(identifier: "xr-toast").firstMatch
                 XCTAssertTrue(toast.waitForExistence(timeout: 15), "no notice after Duplicate (\(run.lang))")
-                print("XR title menu \(run.lang): duplicate notice = \(toast.exists ? toast.label : "-")")
+                // its words from ONE snapshot, never a second query: the notice leaves by itself, and reading .label
+                // after it had gone failed to resolve the element, which ends the whole test in XCUITest - the rest of
+                // that language and the Arabic half never ran (CI runs 135, 136, 138, 139: "Sigma" / Gamma / the
+                // Arabic file missing). The copy itself is checked in the saved files (check_saved.py title_menu).
+                let notice = (try? toast.snapshot())?.label ?? "(gone before it was read)"
+                print("XR title menu \(run.lang): duplicate notice = \(notice)")
                 shot(app, "64-ren-\(run.lang)-duplicated")
             }
             sleep(2)
@@ -1276,7 +1292,8 @@ final class EditorUITests: XCTestCase {
 
     /// The editor's latest probe (AutotestScreen polls it every 0.5 s with XR_PROBE=1): one taken after this call.
     /// Reading a label opens no hook URL, so the probe never moves the keyboard focus it measures. The label carries
-    /// the time it was taken (the simulator shares this Mac's clock), so one read is normally enough: every
+    /// the time its read started (the simulator shares this Mac's clock; a read already running when the action
+    /// happened does not count), so one read is normally enough: every
     /// accessibility query walks the editor page and can take seconds, on the iPad most of all.
     private func probe(_ app: XCUIApplication) -> [String: Any] {
         let asked = Int64(Date().timeIntervalSince1970 * 1000)
