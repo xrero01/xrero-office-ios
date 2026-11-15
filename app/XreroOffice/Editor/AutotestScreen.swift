@@ -120,7 +120,7 @@ struct AutotestScreen: View {
             if url.host == "about" { showAbout = true }      // About & Licences over the open editor
             if url.host == "doctext" {          // template test (S8): the document's text after a reopen (Word only)
                 controller.call("var a=(this.Asc&&this.Asc.editor)||this.editor;var d=a&&a.WordControl&&a.WordControl.m_oLogicDocument;"
-                                + "return d&&d.GetText?String(d.GetText()).replace(/[\\s]+/g,' ').slice(0,500):'none';") { r, e in
+                                + "return d&&d.GetText?String(d.GetText()).replace(/[\\s]+/g,' ').slice(0,4000):'none';") { r, e in
                     state = "doctext:" + ((r as? String) ?? (e ?? "none"))
                 }
             }
