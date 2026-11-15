@@ -1656,6 +1656,11 @@ final class EditorUITests: XCTestCase {
         func n(_ p: [String: Any], _ k: String) -> Int { (p[k] as? NSNumber)?.intValue ?? -1 }
         func s(_ p: [String: Any], _ k: String) -> String { (p[k] as? String) ?? String(describing: p[k] ?? "nil") }
         func btn(_ id: String) -> XCUIElement { app.buttons[id] }
+        /// the selected picture's width x height in mm (__xrPdfState "selmm"); -1 when nothing is selected
+        func mm(_ p: [String: Any]) -> (Double, Double) {
+            let a = (p["selmm"] as? [Any])?.compactMap { ($0 as? NSNumber)?.doubleValue } ?? []
+            return a.count == 2 ? (a[0], a[1]) : (-1, -1)
+        }
         /// taps a bar control once it is there; false when it never showed
         func tap(_ id: String) -> Bool {
             let b = btn(id)
@@ -1739,10 +1744,16 @@ final class EditorUITests: XCTestCase {
             let before = n(pdfState(app), "drawings")
             let tapped = tap("xr-pdf-" + what)
             let r = waitState(app, prefix: "placed:", timeout: 20)
-            let after = n(pdfState(app), "drawings")
+            let pA = pdfState(app)
+            let after = n(pA, "drawings")
             if r == "placed:ok:" + what { placed += 1 }
             gate("\(what)-placed", tapped && r == "placed:ok:" + what && after == before + 1,
                  "tapped=\(tapped) \(r) drawings \(before)->\(after)")
+            // the mark comes out at its own size (6 mm wide), not the editor's inserted size (its pixels at 96 dpi)
+            if what == "check" {
+                let w = mm(pA)
+                gate("check-sized", w.0 >= 5 && w.0 <= 7 && w.1 >= 5 && w.1 <= 7, "selected=\(w.0)x\(w.1) mm (want 6x6)")
+            }
         }
         shot(app, "62-pdf-\(lang)-marks")
 
@@ -1792,11 +1803,14 @@ final class EditorUITests: XCTestCase {
             let can = insert.waitForExistence(timeout: 5) && insert.isEnabled
             if can { insert.tap() } else if btn("xr-sig-cancel").exists { btn("xr-sig-cancel").tap() }
             let r = waitState(app, prefix: "placed:", timeout: 20)
-            let after = n(pdfState(app), "drawings")
+            let pS = pdfState(app)
+            let after = n(pS, "drawings")
             if r == "placed:ok:signature" { placed += 1 }
             gate(ar ? "signature-typed-arabic-placed" : "signature-drawn-placed",
                  can && r == "placed:ok:signature" && after == before6 + 1,
                  "insert enabled=\(can) \(r) drawings \(before6)->\(after)")
+            let w = mm(pS)
+            gate("signature-sized", abs(w.0 - 45) <= 1, "selected=\(w.0)x\(w.1) mm (want 45 mm wide)")
         }
         shot(app, "64-pdf-\(lang)-signed")
 

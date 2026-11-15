@@ -1014,13 +1014,42 @@
         var n = pdfCount(api).drawings;
         if (n <= before && ++tries < 40) return;
         clearInterval(t);
-        if (n > before && wmm > 0 && hmm > 0) { try { api.ImgApply({ Width: +wmm, Height: +hmm }); } catch (e) { log('pdf bar: resize', e && e.message || e); } }
-        log('pdf bar: placed ' + what + (n > before ? '' : ' - NOT added'));
+        var size = n > before && wmm > 0 && hmm > 0 ? pdfSize(api, +wmm, +hmm) : '';
+        log('pdf bar: placed ' + what + (n > before ? ' ' + size : ' - NOT added'));
         if (H.command) H.command('pdf-placed', (n > before ? 'ok:' : 'fail:') + what);
       }, 100);
       return 'ok';
     } catch (e) { return 'error: ' + (e && e.message || e); }
   };
+  // the picture just added (selected by the editor) to wmm x hmm millimetres, kept on its centre. ImgApply first (the
+  // editor's own Image settings call); when the picture still has the size the editor gave it (its pixels at 96 dpi:
+  // a check mark came out 68 mm wide), the same size step ImgApply makes, done on the picture itself as one undo step.
+  function pdfSel(api) {
+    try { var c = api.getPDFDoc().GetController(), sel = (c && c.selectedObjects) || []; return sel[sel.length - 1] || null; }
+    catch (e) { return null; }
+  }
+  function pdfSize(api, wmm, hmm) {
+    var o = pdfSel(api), x = o && o.spPr && o.spPr.xfrm;
+    if (!x) return 'size: no picture selected';
+    var w0 = x.extX, h0 = x.extY, cx = x.offX + w0 / 2, cy = x.offY + h0 / 2, how = 'ImgApply';
+    try { api.ImgApply({ Width: wmm, Height: hmm }); } catch (e) { how = 'ImgApply error ' + (e && e.message || e); }
+    x = o.spPr.xfrm;
+    if (Math.abs(x.extX - wmm) > 0.5 || Math.abs(x.extY - hmm) > 0.5) {
+      var d = api.getPDFDoc();
+      try {
+        d.StartAction(AscDFH.historydescription_Presentation_SetImageProps);
+        o.applyDrawingSize({ Width: wmm, Height: hmm });
+        x = o.spPr.xfrm;
+        x.setOffX(cx - wmm / 2); x.setOffY(cy - hmm / 2);
+        if (o.recalculate) o.recalculate();
+        d.Recalculate();
+        d.FinalizeAction(true);
+        how = 'direct';
+      } catch (e) { how = 'direct error ' + (e && e.message || e); try { d.FinalizeAction(true); } catch (e2) {} }
+    }
+    x = o.spPr.xfrm;
+    return 'size ' + w0.toFixed(1) + 'x' + h0.toFixed(1) + ' -> ' + x.extX.toFixed(1) + 'x' + x.extY.toFixed(1) + ' mm (' + how + ')';
+  }
   function pdfCount(api) {
     var r = { annots: 0, drawings: 0, inks: 0 };
     try {
@@ -1040,6 +1069,7 @@
     if (!api) return JSON.stringify({ error: 'no pdf editor' });
     var o = pdfCount(api);
     o.tool = pdfTool;
+    try { var sx = pdfSel(api); sx = sx && sx.spPr && sx.spPr.xfrm; if (sx) o.selmm = [+sx.extX.toFixed(1), +sx.extY.toFixed(1)]; } catch (e) {}
     try { o.marker = api.isMarkerFormat ? (api.curMarkerType == null ? -1 : api.curMarkerType) : null; } catch (e) {}
     try { o.ink = api.isInkDrawerOn() ? (api.isDrawInkMode() ? 'draw' : 'erase') : 'off'; } catch (e) {}
     return JSON.stringify(o);

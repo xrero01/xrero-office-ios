@@ -29,6 +29,11 @@ struct PDFToolBar: View {
     @State private var signing = false
     @State private var placing: String?                     // a picture on its way into the page
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    /// iPhone (compact width): the switch shows its two symbols (labels stay for VoiceOver), the Eraser shows only
+    /// while the pen is on and the Note only while no tool is on, so every tool fits on a 6.3" phone without scrolling
+    /// (the signature and the colour dot stay one tap away). iPad: words and every tool.
+    private var compact: Bool { sizeClass == .compact }
 
     var body: some View {
         HStack(spacing: 6) {
@@ -47,11 +52,18 @@ struct PDFToolBar: View {
                 .accessibilityIdentifier("xr-pdf-done")
             } else {
                 Picker("", selection: Binding(get: { model.mode }, set: { model.setMode($0) })) {
-                    Text(ar ? "تعليق" : "Annotate").tag(PDFToolModel.Mode.annotate)
-                    Text(ar ? "تعبئة وتوقيع" : "Fill & Sign").tag(PDFToolModel.Mode.fill)
+                    if compact {
+                        Image(systemName: "pencil.and.outline")
+                            .accessibilityLabel(Text(ar ? "تعليق" : "Annotate")).tag(PDFToolModel.Mode.annotate)
+                        Image(systemName: "signature")
+                            .accessibilityLabel(Text(ar ? "تعبئة وتوقيع" : "Fill & Sign")).tag(PDFToolModel.Mode.fill)
+                    } else {
+                        Text(ar ? "تعليق" : "Annotate").tag(PDFToolModel.Mode.annotate)
+                        Text(ar ? "تعبئة وتوقيع" : "Fill & Sign").tag(PDFToolModel.Mode.fill)
+                    }
                 }
                 .pickerStyle(.segmented)
-                .frame(width: ar ? 170 : 176)
+                .frame(width: compact ? 88 : (ar ? 170 : 176))
                 .accessibilityLabel(ar ? "مجموعة الأدوات" : "Tool set")
                 .accessibilityIdentifier("xr-pdf-mode")
             }
@@ -73,18 +85,21 @@ struct PDFToolBar: View {
         .padding(.horizontal, 8)
         .frame(height: Self.height)
         .frame(maxWidth: .infinity)
+        // direction and the accessibility container on the 50 pt bar itself, before the material that runs on under
+        // the home indicator: the bar's frame is the bar (in Arabic the container took in the safe-area background)
+        .environment(\.layoutDirection, ar ? .rightToLeft : .leftToRight)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("xr-pdf-bar")
         .background {
             if reduceTransparency { Color(uiColor: .secondarySystemBackground).ignoresSafeArea(edges: .bottom) }
             else { Rectangle().fill(.bar).ignoresSafeArea(edges: .bottom) }
         }
         .overlay(alignment: .top) { Rectangle().fill(Color(uiColor: .separator)).frame(height: 0.5) }
         .dynamicTypeSize(...DynamicTypeSize.accessibility1)
-        .environment(\.layoutDirection, ar ? .rightToLeft : .leftToRight)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("xr-pdf-bar")
         .sheet(isPresented: $signing) {
             SignatureSheet(ar: ar) { png, aspect in
                 signing = false
+                model.refreshSignature()            // "My signature" was just kept: the button becomes the 2-tap menu
                 place("signature", png, widthMM: 45, aspect: aspect)
             } cancel: { signing = false }
         }
@@ -97,10 +112,14 @@ struct PDFToolBar: View {
         toolButton(.underline, "underline", en: "Underline", arLabel: "تسطير")
         toolButton(.strike, "strikethrough", en: "Strike out", arLabel: "يتوسطه خط")
         toolButton(.pen, "pencil.tip", en: "Pen", arLabel: "قلم")
-        toolButton(.eraser, "eraser", en: "Eraser", arLabel: "ممحاة")
-        action("text.bubble", en: "Note", arLabel: "ملاحظة", id: "xr-pdf-note") {
-            model.select(.none, controller)
-            run("note", "return window.__xrPdfAdd ? __xrPdfAdd('note') : 'no pdf bar';")
+        if !compact || model.tool == .pen || model.tool == .eraser {
+            toolButton(.eraser, "eraser", en: "Eraser", arLabel: "ممحاة")
+        }
+        if !compact || model.tool == .none {
+            action("text.bubble", en: "Note", arLabel: "ملاحظة", id: "xr-pdf-note") {
+                model.select(.none, controller)
+                run("note", "return window.__xrPdfAdd ? __xrPdfAdd('note') : 'no pdf bar';")
+            }
         }
         colorMenu
     }
@@ -253,7 +272,13 @@ final class PDFToolModel: ObservableObject {
         color = PDFToolModel.swatches.contains { $0.hex == c } ? c : "FFD60A"
         let o = d.integer(forKey: "xr.pdf.opacity")
         opacity = [25, 50, 75, 100].contains(o) ? o : 100
+        // kept or deleted anywhere (the sheet, the menu, the test hook): the signature button follows at once
+        signatureObserver = NotificationCenter.default.addObserver(forName: SignatureStore.changed, object: nil, queue: .main) { [weak self] _ in
+            self?.refreshSignature()
+        }
     }
+    private var signatureObserver: NSObjectProtocol?
+    deinit { if let o = signatureObserver { NotificationCenter.default.removeObserver(o) } }
 
     /// Marks (check, cross, date) in the chosen colour, except yellow, which is unreadable on paper: black then.
     var inkColor: UIColor { color == "FFD60A" ? .black : UIColor(Color(hex: color)) }
@@ -317,8 +342,14 @@ enum SignatureStore {
         try? png.write(to: u, options: [.atomic, .completeFileProtection])
         var v = URLResourceValues(); v.isExcludedFromBackup = true
         try? u.setResourceValues(v)
+        NotificationCenter.default.post(name: changed, object: nil)
     }
-    static func delete() { if let u = url { try? FileManager.default.removeItem(at: u) } }
+    static func delete() {
+        if let u = url { try? FileManager.default.removeItem(at: u) }
+        NotificationCenter.default.post(name: changed, object: nil)
+    }
+    /// Posted after a save or a delete.
+    static let changed = Notification.Name("xr.mySignatureChanged")
 }
 
 /// Pictures for the page, as PNG with a transparent background.
@@ -431,7 +462,6 @@ struct SignatureSheet: View {
     @State private var photo: PhotosPickerItem?
     @State private var picked: UIImage?
     @State private var mine = true
-    @State private var canvasSize = CGSize(width: 340, height: 200)
 
     var body: some View {
         NavigationStack {
@@ -508,7 +538,6 @@ struct SignatureSheet: View {
                         .allowsHitTesting(false)
                 }
                 .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color(uiColor: .separator)))
-                .background(GeometryReader { g in Color.clear.onAppear { canvasSize = g.size } })
                 .environment(\.layoutDirection, .leftToRight)
                 .accessibilityLabel(ar ? "ارسم توقيعك هنا" : "Draw your signature here")
                 .accessibilityIdentifier("xr-sig-canvas")
@@ -559,9 +588,14 @@ struct SignatureSheet: View {
         switch source {
         case .draw:
             guard !drawing.strokes.isEmpty else { return nil }
-            let r = CGRect(origin: .zero, size: canvasSize)
+            // the strokes' own bounds (plus the pen's width), not the canvas size read at onAppear: on the iPhone the
+            // sheet was still animating in then, the size came back empty and Insert did nothing
+            let r = drawing.bounds.insetBy(dx: -8, dy: -8)
+            guard r.width > 1, r.height > 1 else { return nil }
             let img = drawing.image(from: r, scale: 3)
-            return PDFPicture.trimmed(img)
+            if let t = PDFPicture.trimmed(img) { return t }
+            guard let png = img.pngData() else { return nil }
+            return (png, Double(r.width / r.height))
         case .type:
             return PDFPicture.text(name, font: PDFPicture.scriptFont(arabic: arabicFont, size: 120), color: .black)
         case .image:

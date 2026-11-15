@@ -145,18 +145,20 @@ def touch_gate(d, lang):
 PDF_CHECKS = {
     "en": ("editor-ready", "bar-shown", "mode-switch", "opens-reading", "highlight-on", "underline-on", "strike-on",
            "done-ends-tool", "pen-on", "eraser-on", "pen-stroke-makes-ink", "colour-picked", "note-reachable",
-           "fill-shown", "check-placed", "cross-placed", "date-placed", "signature-sheet", "signature-honest-label",
-           "signature-drawn-placed", "my-signature-2-taps", "save", "reopen"),
+           "fill-shown", "check-placed", "check-sized", "cross-placed", "date-placed", "signature-sheet", "signature-honest-label",
+           "signature-drawn-placed", "signature-sized", "my-signature-2-taps", "save", "reopen"),
     "ar": ("editor-ready", "bar-shown", "mode-switch", "opens-reading", "ar-labels", "ar-mirrored", "highlight-on",
            "underline-on", "strike-on", "done-ends-tool", "colour-picked", "note-reachable", "fill-shown",
-           "check-placed", "signature-sheet", "signature-honest-label", "signature-typed-arabic-placed",
+           "check-placed", "check-sized", "signature-sheet", "signature-honest-label", "signature-typed-arabic-placed",
+           "signature-sized",
            "my-signature-2-taps", "save", "reopen"),
 }
 PDF_PICTURES = {"en": 5, "ar": 3}       # en: check, cross, date, drawn signature, My signature; ar: check, typed, mine
 
 
 def pdf_images(path):
-    """image XObjects drawn on the PDF's pages (also inside form XObjects and annotation appearances)"""
+    """image XObjects drawn on the PDF's pages (also inside form XObjects, tiling patterns - the converter paints a
+    placed picture as a rectangle filled with an image pattern - and annotation appearances)"""
     from pypdf import PdfReader
     seen, count = set(), 0
     def walk(res):
@@ -176,6 +178,20 @@ def pdf_images(path):
             if o.get("/Subtype") == "/Image":
                 count += 1
             elif o.get("/Subtype") == "/Form":
+                walk(o.get("/Resources"))
+        try:
+            pats = res.get("/Pattern") if res is not None else None
+            pats = pats.get_object() if pats is not None else None
+        except Exception:
+            pats = None
+        for k in (pats or {}):
+            ref = pats.raw_get(k)
+            key = ("pattern", getattr(ref, "idnum", None) or id(ref))
+            if key in seen:
+                continue
+            seen.add(key)
+            o = ref.get_object()
+            if hasattr(o, "get") and o.get("/PatternType") == 1:          # tiling pattern: its own resources
                 walk(o.get("/Resources"))
     r = PdfReader(path)
     for pg in r.pages:

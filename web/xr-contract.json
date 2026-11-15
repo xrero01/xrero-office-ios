@@ -66,6 +66,8 @@
     { "kind": "api", "name": "AddFreeTextAnnot", "editors": ["pdf"], "why": "PDF tool bar (S7): Fill & Sign > Text" },
     { "kind": "api", "name": "asc_addImage", "editors": ["pdf"], "why": "PDF tool bar (S7): signature / marks through Insert > Image" },
     { "kind": "api", "name": "ImgApply", "editors": ["pdf"], "why": "PDF tool bar (S7): signature size" },
+    { "kind": "global", "path": "AscFormat.CGraphicObjectBase.prototype.applyDrawingSize", "editors": ["pdf"], "why": "PDF tool bar (S7): picture size when ImgApply leaves the inserted size" },
+    { "kind": "global", "path": "AscDFH.historydescription_Presentation_SetImageProps", "editors": ["pdf"], "why": "PDF tool bar (S7): picture size as one undo step" },
     { "kind": "api", "name": "getCountPages", "editors": ["pdf"], "why": "PDF tool bar (S7): page objects count" },
     { "kind": "api", "name": "getPDFDoc", "editors": ["pdf"], "why": "PDF tool bar (S7): page objects count (gate)" },
     { "kind": "api", "name": "isInkDrawerOn", "editors": ["pdf"], "why": "PDF tool bar (S7): tool read back (gate)" },
