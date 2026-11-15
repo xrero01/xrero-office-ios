@@ -67,9 +67,7 @@ struct RecentThumbnail: View {
                     .scaledToFill()
             } else {
                 Color(.tertiarySystemGroupedBackground)
-                Image(systemName: t.symbol)
-                    .font(.system(size: width * 0.45, weight: .semibold))
-                    .foregroundStyle(t.color)
+                t.icon
             }
         }
         .frame(width: width, height: height)
