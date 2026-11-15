@@ -1644,12 +1644,24 @@ final class EditorUITests: XCTestCase {
         let ax5 = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
         func arabic(_ s: String) -> Bool { s.unicodeScalars.contains { (0x0600...0x06FF).contains($0.value) } }
         func latin(_ s: String) -> Bool { s.unicodeScalars.contains { $0.isASCII && CharacterSet.letters.contains($0) } }
-        var failures: [String] = []
+        var failures: [String] = [], lines: [String] = []
+        // scrolls the Home list by a slow drag on the list itself (app.swipeUp did not move it at AX5 on CI)
+        func scrollTo(_ app: XCUIApplication, _ e: XCUIElement) -> Bool {
+            let list = app.collectionViews["xr-home-list"].firstMatch
+            for _ in 0..<12 {
+                if e.exists && e.isHittable { return true }
+                guard list.exists else { break }
+                list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8))
+                    .press(forDuration: 0.05, thenDragTo: list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35)))
+                usleep(700_000)
+            }
+            return e.exists && e.isHittable
+        }
         func check(_ app: XCUIApplication, _ id: String, _ where_: String, bar: Bool = false, hittable: Bool = true,
                    lang: String) -> XCUIElement {
             var e = app.buttons[id].firstMatch
             if !e.exists { e = app.descendants(matching: .any)[id].firstMatch }
-            let found = e.waitForExistence(timeout: 10) && (bar || reveal(app, e))
+            let found = (bar ? e.waitForExistence(timeout: 10) : scrollTo(app, e)) && e.exists
             let f = found ? e.frame : .zero
             let label = found ? e.label : ""
             let minH: CGFloat = bar ? 35.5 : 43.5
@@ -1662,6 +1674,7 @@ final class EditorUITests: XCTestCase {
             if found && lang == "en" && (arabic(label) || !latin(label)) { bad.append("label not English") }
             let line = "XR a11y \(where_) \(lang) \(id): \(bad.isEmpty ? "ok" : bad.joined(separator: ", ")) frame=\(f) label=\(label)"
             print(line)
+            lines.append(line)
             if !bad.isEmpty { failures.append(line) }
             XCTAssertTrue(bad.isEmpty, line)
             return e
@@ -1670,12 +1683,15 @@ final class EditorUITests: XCTestCase {
             // Home (the real start screen; XR_HOME=1 in the Autotest build)
             let home = XCUIApplication()
             home.launchEnvironment = ["XR_HOME": "1"]
-            home.launchArguments = ["-xr.lang", lang] + ax5
+            home.launchArguments = ["-xr.lang", lang, "-xr.welcomeShown", "NO"] + ax5
             home.launch()
             XCTAssertTrue(home.descendants(matching: .any)["xr-home-list"].waitForExistence(timeout: 30), "Home did not open (\(lang))")
             sleep(1)
             shot(home, "60-a11y-home-\(lang)-ax5")
             _ = check(home, "xr-home-more", "home", bar: true, lang: lang)
+            // the account card's two buttons (stacked at AX5); not tapped, so nothing is stored in the simulator
+            _ = check(home, "xr-home-signin", "home", lang: lang)
+            _ = check(home, "xr-home-signin-later", "home", lang: lang)
             // at accessibility sizes the create tiles stack in one column: the large text really is applied
             // (one column = each tile about the window's width; in a row each is under a third of it)
             let word = check(home, "xr-home-word", "home", lang: lang)
@@ -1721,6 +1737,10 @@ final class EditorUITests: XCTestCase {
             shot(ed, "63-a11y-bar-\(lang)-note-closed")
             ed.terminate()
         }
-        print("XR a11y RESULT \(failures.isEmpty ? "PASS" : "FAIL (\(failures.count))")")
+        let result = "XR a11y RESULT \(failures.isEmpty ? "PASS" : "FAIL (\(failures.count))")"
+        print(result)
+        let summary = XCTAttachment(string: (lines + [result]).joined(separator: "
+"))
+        summary.name = "a11y-summary"; summary.lifetime = .keepAlways; add(summary)
     }
 }

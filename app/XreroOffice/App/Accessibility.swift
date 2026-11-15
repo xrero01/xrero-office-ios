@@ -73,7 +73,7 @@ struct CanvasAccessibilityNote: ViewModifier {
                                       lineWidth: contrast == .increased ? 1 : 0.5))
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
-                    .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+                    .dynamicTypeSize(...DynamicTypeSize.xxxLarge)      // a note, not the page: kept compact over the ribbon
                     .environment(\.layoutDirection, ar ? .rightToLeft : .leftToRight)
                     .accessibilityElement(children: .contain)
                     .onAppear {
