@@ -567,7 +567,10 @@
       return H.saveFile(opened.name, opened.bin.slice(0)).then(function () { done(0); }, function (e) { log('save failed', e); done(2); });
     }
     var ch = changes.slice(0);                       // own copy (transferable)
-    x2t('origin.pdf', opened.bin.slice(0), 'out.pdf', [], { changes: [{ name: 'changes0.bin', data: ch.buffer }], fromChanges: true, fonts: fontUrls() })
+    // pictures inserted in this session (the PDF bar's signature, check mark, cross, date; Insert > Image): the
+    // changes name them by file, so the converter needs them in its media folder (plan S7)
+    var pics = Object.keys(media).map(function (n) { return { name: n, data: media[n].slice(0) }; });
+    x2t('origin.pdf', opened.bin.slice(0), 'out.pdf', pics, { changes: [{ name: 'changes0.bin', data: ch.buffer }], fromChanges: true, fonts: fontUrls() })
       .then(function (r) {
         if (r.data.byteLength < 8) throw new Error('empty pdf');
         return H.saveFile(opened.name, r.data).then(function () {
@@ -794,6 +797,115 @@
       api.startGetDocInfo();
       return 'ok';
     } catch (e) { docInfoPending = false; post({}); return 'error: ' + (e && e.message || e); }
+  };
+
+  // ---------------------------------------------------------------- PDF tool bar (plan S7)
+  // The app's native PDF bar (PDFToolBar.swift) drives the PDF editor through these, one call per tap, through
+  // EditorController.call. They make the same engine calls as the editor's own Comment tab (pdfeditor Toolbar.js /
+  // common Draw.js): SetMarkerFormat(type, on, opacity, r, g, b) for highlight / underline / strikeout over text,
+  // asc_StartDrawInk(stroke) / asc_StartInkEraser / asc_StopInkDrawer for the pen, AddFreeTextAnnot for typed text,
+  // the comment command for a note. Pictures (signature, check mark, cross, date) are inserted the way the editor's
+  // own Insert > Image does on the desktop (asc_addImage -> OpenFilenameDialog -> LocalFileGetImageUrl): the app
+  // answers that picker request with the picture it has just drawn, so the document stores it as its own media and
+  // saving passes it to the converter. Engine names are listed in xr-contract.json.
+  var pdfTool = 'none';                         // what the app's bar last switched on (the engine has no single read)
+  function pdfOnly() { return /pdfeditor/.test(location.pathname) && window.__xrApi; }
+  function rgb(hex) {
+    var h = String(hex || 'FFD60A').replace(/[^0-9a-fA-F]/g, '');
+    if (h.length !== 6) h = 'FFD60A';
+    return [parseInt(h.substr(0, 2), 16), parseInt(h.substr(2, 2), 16), parseInt(h.substr(4, 2), 16)];
+  }
+  function pdfStop(api) {
+    try { api.asc_StopInkDrawer(); } catch (e) {}
+    try { api.SetMarkerFormat(null, false); } catch (e) {}
+  }
+  // tool: none | highlight | underline | strike | pen | eraser; hex 'RRGGBB'; opacity 0...100
+  window.__xrPdfTool = function (tool, hex, opacity) {
+    var api = pdfOnly();
+    if (!api) return 'no pdf editor';
+    var c = rgb(hex), op = Math.max(10, Math.min(100, +opacity || 100)), T = window.AscPDF && AscPDF.ANNOTATIONS_TYPES;
+    try {
+      pdfStop(api);
+      if (tool === 'highlight' || tool === 'underline' || tool === 'strike') {
+        if (!T) return 'no annotation types';
+        var type = tool === 'highlight' ? T.Highlight : tool === 'underline' ? T.Underline : T.Strikeout;
+        api.SetMarkerFormat(type, true, op, c[0], c[1], c[2]);
+      } else if (tool === 'pen') {
+        var s = new Asc.asc_CStroke();
+        s.put_type(Asc.c_oAscStrokeType.STROKE_COLOR);
+        s.put_color(new Asc.asc_CColor(c[0], c[1], c[2]));
+        s.asc_putPrstDash(Asc.c_oDashType.solid);
+        s.put_width(1);                         // mm, the Draw tab's middle pen size
+        s.put_transparent(Math.round(op * 2.55));
+        api.asc_StartDrawInk(s, 0);
+      } else if (tool === 'eraser') {
+        api.asc_StartInkEraser();
+      } else tool = 'none';
+      pdfTool = tool;
+      log('pdf bar: tool ' + tool + (tool === 'none' || tool === 'eraser' ? '' : ' #' + c.map(function (v) { return (v < 16 ? '0' : '') + v.toString(16); }).join('') + ' ' + op + '%'));
+      return 'ok';
+    } catch (e) { pdfTool = 'none'; return 'error: ' + (e && e.message || e); }
+  };
+  // a text box where the user types (Fill & Sign > Text: the typewriter kind, no border) or a note (the editor's
+  // own comment, Annotate > Note)
+  window.__xrPdfAdd = function (what) {
+    var api = pdfOnly();
+    if (!api) return 'no pdf editor';
+    try {
+      pdfStop(api); pdfTool = 'none';
+      if (what === 'text') {
+        var I = window.AscPDF && AscPDF.FREE_TEXT_INTENT_TYPE;
+        api.AddFreeTextAnnot(I ? I.freeTextTypeWriter : 2);
+      } else if (what === 'note') {
+        if (!(window.Common && Common.NotificationCenter)) return 'no comments';
+        Common.NotificationCenter.trigger('app:comment:add', 'toolbar');
+      } else return 'unknown';
+      log('pdf bar: add ' + what);
+      return 'ok';
+    } catch (e) { return 'error: ' + (e && e.message || e); }
+  };
+  // a picture the app has staged as the next picker answer (EditorWebView: "pick"), as a page object at `wmm` x `hmm`
+  // millimetres in the middle of the visible page, selected so it can be dragged and resized at once
+  window.__xrPdfPlace = function (what, wmm, hmm) {
+    var api = pdfOnly();
+    if (!api) return 'no pdf editor';
+    try {
+      pdfStop(api); pdfTool = 'none';
+      var before = pdfCount(api).drawings, tries = 0;
+      api.asc_addImage();
+      var t = setInterval(function () {
+        var n = pdfCount(api).drawings;
+        if (n <= before && ++tries < 40) return;
+        clearInterval(t);
+        if (n > before && wmm > 0 && hmm > 0) { try { api.ImgApply({ Width: +wmm, Height: +hmm }); } catch (e) { log('pdf bar: resize', e && e.message || e); } }
+        log('pdf bar: placed ' + what + (n > before ? '' : ' - NOT added'));
+        if (H.command) H.command('pdf-placed', (n > before ? 'ok:' : 'fail:') + what);
+      }, 100);
+      return 'ok';
+    } catch (e) { return 'error: ' + (e && e.message || e); }
+  };
+  function pdfCount(api) {
+    var r = { annots: 0, drawings: 0, inks: 0 };
+    try {
+      var d = api.getPDFDoc(), n = api.getCountPages();
+      for (var p = 0; p < n; p++) {
+        var pi = d.GetPageInfo(p);
+        if (!pi) continue;
+        r.drawings += (pi.drawings || []).length;
+        (pi.annots || []).forEach(function (a) { r.annots++; try { if (a.IsInk && a.IsInk()) r.inks++; } catch (e) {} });
+      }
+    } catch (e) { r.error = String(e && e.message || e); }
+    return r;
+  }
+  // CI / diagnostics: what the bar switched on, what the engine says is on, and the page objects
+  window.__xrPdfState = function () {
+    var api = pdfOnly();
+    if (!api) return JSON.stringify({ error: 'no pdf editor' });
+    var o = pdfCount(api);
+    o.tool = pdfTool;
+    try { o.marker = api.isMarkerFormat ? (api.curMarkerType == null ? -1 : api.curMarkerType) : null; } catch (e) {}
+    try { o.ink = api.isInkDrawerOn() ? (api.isDrawInkMode() ? 'draw' : 'erase') : 'off'; } catch (e) {}
+    return JSON.stringify(o);
   };
 
   var A = {

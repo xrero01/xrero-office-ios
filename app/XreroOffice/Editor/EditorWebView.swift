@@ -219,6 +219,8 @@ struct EditorWebView: UIViewRepresentable {
                 }
                 replyHandler(true, nil)
             case "pick":
+                // the PDF bar's signature / mark (PDFToolBar.swift), staged just before it asked for an image
+                if let s = PDFStagedPick.take() { replyHandler(["name": s.name, "data": s.data.base64EncodedString()], nil); return }
                 pickReply = replyHandler
                 presentPhotoPicker()
             case "ui":

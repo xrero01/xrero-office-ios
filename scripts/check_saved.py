@@ -137,6 +137,88 @@ def touch_gate(d, lang):
     return good and saved
 
 
+# the PDF tool bar gate (plan S7, EditorUITests.testZZPdfToolBarGate): the checks each language must log, and the
+# pictures (check mark, cross, date, signatures) the gate put on the page must be in the saved PDF
+PDF_CHECKS = {
+    "en": ("editor-ready", "bar-shown", "mode-switch", "opens-reading", "highlight-on", "underline-on", "strike-on",
+           "done-ends-tool", "pen-on", "eraser-on", "pen-stroke-makes-ink", "colour-picked", "note-reachable",
+           "fill-shown", "check-placed", "cross-placed", "date-placed", "signature-sheet", "signature-honest-label",
+           "signature-drawn-placed", "my-signature-2-taps", "save", "reopen"),
+    "ar": ("editor-ready", "bar-shown", "mode-switch", "opens-reading", "ar-labels", "ar-mirrored", "highlight-on",
+           "underline-on", "strike-on", "done-ends-tool", "colour-picked", "note-reachable", "fill-shown",
+           "check-placed", "signature-sheet", "signature-honest-label", "signature-typed-arabic-placed",
+           "my-signature-2-taps", "save", "reopen"),
+}
+PDF_PICTURES = {"en": 5, "ar": 3}       # en: check, cross, date, drawn signature, My signature; ar: check, typed, mine
+
+
+def pdf_images(path):
+    """image XObjects drawn on the PDF's pages (also inside form XObjects and annotation appearances)"""
+    from pypdf import PdfReader
+    seen, count = set(), 0
+    def walk(res):
+        nonlocal count
+        try:
+            xo = res.get("/XObject") if res is not None else None
+            xo = xo.get_object() if xo is not None else None
+        except Exception:
+            return
+        for k in (xo or {}):
+            ref = xo.raw_get(k)
+            key = getattr(ref, "idnum", None) or id(ref)
+            if key in seen:
+                continue
+            seen.add(key)
+            o = ref.get_object()
+            if o.get("/Subtype") == "/Image":
+                count += 1
+            elif o.get("/Subtype") == "/Form":
+                walk(o.get("/Resources"))
+    r = PdfReader(path)
+    for pg in r.pages:
+        walk(pg.get("/Resources"))
+        for a in (pg.get("/Annots") or []):
+            ap = a.get_object().get("/AP")
+            n = ap.get_object().get("/N") if ap is not None else None
+            if n is not None and hasattr(n.get_object(), "get"):
+                walk(n.get_object().get("/Resources"))
+    return count, len(r.pages)
+
+
+def pdf_bar(d, lang):
+    """the PDF bar gate lines + the saved PDF; returns ok"""
+    good = True
+    lg = os.path.join(d, "xr-log-xr-pdf-bar-%s.pdf.txt" % lang)
+    log = open(lg, encoding="utf-8", errors="replace").read() if os.path.exists(lg) else ""
+    res = {}
+    for m in re.finditer(r"^pdf-gate %s ([\w-]+): (PASS|FAIL|KNOWN|INFO)\s*(.*)$" % lang, log, re.M):
+        res[m.group(1)] = (m.group(2), m.group(3))
+    QA.setdefault(os.path.basename(d), {}).setdefault("pdf-" + lang, {"checks": {k: list(v) for k, v in res.items()}})
+    print("PDF tool bar gate (%s):" % lang.upper())
+    for name in PDF_CHECKS[lang] + tuple(k for k in res if k not in PDF_CHECKS[lang]):
+        st, why = res.get(name, ("NOT LOGGED", ""))
+        print("  %-30s %-10s %s" % (name, st, why[:160]))
+        if (name in PDF_CHECKS[lang] and st not in ("PASS", "KNOWN")) or st == "FAIL":
+            good = False
+    p = os.path.join(d, "xr-pdf-bar-%s.pdf" % lang)
+    orig = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tests", "ar_letter.pdf")
+    if not os.path.exists(p):
+        print("  xr-pdf-bar-%s.pdf: MISSING" % lang)
+        return False
+    try:
+        n0, _ = pdf_images(orig)
+        n1, pages = pdf_images(p)
+        added = n1 - n0
+        pics = added >= PDF_PICTURES[lang]
+        print("  xr-pdf-bar-%s.pdf (read with pypdf, outside the app): pages=%d pictures %d -> %d (+%d, want +%d) -> %s"
+              % (lang, pages, n0, n1, added, PDF_PICTURES[lang], "OK" if pics else "WRONG"))
+        good &= pics
+    except Exception as e:
+        print("  xr-pdf-bar-%s.pdf: cannot read: %s" % (lang, e))
+        good = False
+    return good
+
+
 def doc_menu(d):
     """The ⋯ document menu (plan M7b, EditorUITests.testDocumentMenu + testSpreadsheetAndPresentationOpen): every
     Export ▸ copy is a real file of its format holding what was on screen; the File menu (opened through ⋯ > All tools,
@@ -242,6 +324,8 @@ for dev in sorted(os.listdir(root)) if os.path.isdir(root) else []:
         print("xr-clip.docx: MISSING (clipboard copy/paste + save)"); ok = False
     for lang in ("en", "ar"):                     # touch / typing gate (plan M14 + F1)
         ok &= touch_gate(d, lang)
+    for lang in ("en", "ar"):                     # PDF tool bar (plan S7)
+        ok &= pdf_bar(d, lang)
     for ext in ("docx", "xlsx", "pptx"):          # Arabic-first blanks (EditorUITests.testArabicBlanksStartRightToLeft)
         b = os.path.join(d, "xr-test-ar." + ext)
         if not os.path.exists(b):

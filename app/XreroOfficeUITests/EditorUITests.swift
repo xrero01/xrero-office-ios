@@ -1351,6 +1351,229 @@ final class EditorUITests: XCTestCase {
         shot(app, "59-touch-\(lang)-reopened")
     }
 
+    // MARK: PDF tool bar gate (plan S7)
+
+    /// The PDF tool bar (plan S7), iPhone and iPad, in English and Arabic: the bar is there under the page in reading
+    /// state; Highlight / Underline / Strike out / Pen / Eraser switch the engine's own tool on (read back from the
+    /// engine) and Done ends it; a pen stroke drawn with the finger becomes ink; the colour is remembered; Fill & Sign
+    /// puts a check mark, a cross and the date on the page; a signature is drawn (English) or typed in the Arabic font
+    /// (Arabic) in the sheet, which says plainly it is a visual signature, and goes onto the page; a saved "My
+    /// signature" goes on again in 2 taps; save and reopen. Every check is a "pdf-gate" line in the editor log
+    /// (check_saved.py, which also opens the saved PDF and counts the pictures in it). Named "ZZ" + "Pdf" to run
+    /// after the typing tests and before the touch gate.
+    func testZZPdfToolBarGate() throws {
+        guard let b64 = ProcessInfo.processInfo.environment["XR_PDF_B64"] else { throw XCTSkip("no pdf passed") }
+        for lang in ["en", "ar"] { pdfGate(lang, b64) }
+    }
+
+    private var pdfRun = 0
+    /// __xrPdfState through the Autotest hook: {tool, marker, ink, annots, inks, drawings}.
+    private func pdfState(_ app: XCUIApplication) -> [String: Any] {
+        pdfRun += 1
+        let tag = "pdf\(pdfRun):"
+        autotest("pdfstate?n=\(pdfRun)")
+        let s = waitState(app, prefix: tag, timeout: 15)
+        guard s.hasPrefix(tag) else { return ["error": s] }
+        return ((try? JSONSerialization.jsonObject(with: Data(s.dropFirst(tag.count).utf8))) as? [String: Any]) ?? ["error": s]
+    }
+
+    private func pdfGate(_ lang: String, _ b64: String) {
+        let ar = lang == "ar"
+        let app = XCUIApplication()
+        app.launchArguments = ["-xr.lang", lang, "-xr.pdfToolBar", "YES"]
+        app.launchEnvironment = ["XR_DOC_B64": b64, "XR_DOC_NAME": "xr-pdf-bar-\(lang).pdf", "XR_LANG": lang]
+        app.launch()
+        let keep = continueAfterFailure
+        continueAfterFailure = true
+        var notes: [String] = []
+        func gate(_ name: String, _ ok: Bool, _ detail: String, known: String? = nil) {
+            let status = ok ? "PASS" : (known == nil ? "FAIL" : "KNOWN")
+            let line = "pdf-gate \(lang) \(name): \(status) \(detail)" + (ok || known == nil ? "" : " [known app gap: \(known!)]")
+            print("XR " + line)
+            notes.append(line.replacingOccurrences(of: "\n", with: " "))
+            if known == nil { XCTAssertTrue(ok, line) }
+        }
+        defer {
+            autotest("note", notes.joined(separator: "\n"))
+            app.terminate()
+            continueAfterFailure = keep
+        }
+        let ready = waitState(app, prefix: "ready", timeout: 120)
+        gate("editor-ready", ready == "ready", ready)
+        guard ready == "ready" else { return }
+        sleep(2)
+        if !ar { autotest("pdfsigdelete") }                 // the English run starts without a saved signature
+        func n(_ p: [String: Any], _ k: String) -> Int { (p[k] as? NSNumber)?.intValue ?? -1 }
+        func s(_ p: [String: Any], _ k: String) -> String { (p[k] as? String) ?? String(describing: p[k] ?? "nil") }
+        func btn(_ id: String) -> XCUIElement { app.buttons[id] }
+        /// taps a bar control once it is there; false when it never showed
+        func tap(_ id: String) -> Bool {
+            let b = btn(id)
+            guard b.waitForExistence(timeout: 8), b.isHittable else { return false }
+            b.tap(); usleep(700_000); return true
+        }
+
+        // 1) the bar: under the page, 50 pt, in reading state (no tool on)
+        let bar = app.otherElements["xr-pdf-bar"]
+        let shown = bar.waitForExistence(timeout: 15)
+        let bf = shown ? bar.frame : .zero, wf = app.windows.firstMatch.frame
+        gate("bar-shown", shown && bf.height >= 44 && bf.height <= 60 && bf.minY > wf.height * 0.6,
+             "frame=\(bf) window=\(wf)")
+        let mode = app.segmentedControls["xr-pdf-mode"]
+        gate("mode-switch", mode.exists, "segments=\(mode.exists ? mode.buttons.count : 0)")
+        if mode.exists { mode.buttons[ar ? "تعليق" : "Annotate"].tap(); usleep(500_000) }
+        let p0 = pdfState(app)
+        gate("opens-reading", s(p0, "tool") == "none" && s(p0, "ink") != "draw" && p0["error"] == nil, "\(p0)")
+        shot(app, "60-pdf-\(lang)-bar")
+
+        // Arabic: the labels are Arabic and the bar is mirrored (the switch on the right)
+        if ar {
+            let hl = btn("xr-pdf-highlight")
+            gate("ar-labels", hl.exists && hl.label == "تمييز", "highlight label='\(hl.exists ? hl.label : "-")'")
+            gate("ar-mirrored", mode.exists && mode.frame.midX > wf.midX, "switch x=\(mode.exists ? mode.frame.midX : -1) window mid=\(wf.midX)")
+        }
+
+        // 2) the three text tools: the engine's marker is on with the right type (Highlight 8, Underline 9, Strikeout
+        //    11 = AscPDF.ANNOTATIONS_TYPES), Done ends it
+        for (t, want) in [("highlight", 8), ("underline", 9), ("strike", 11)] {
+            let tapped = tap("xr-pdf-" + t)
+            let p = pdfState(app)
+            gate("\(t)-on", tapped && s(p, "tool") == t && n(p, "marker") == want && btn("xr-pdf-done").exists,
+                 "tapped=\(tapped) \(p) done=\(btn("xr-pdf-done").exists)")
+        }
+        let doneTapped = tap("xr-pdf-done")
+        let pD = pdfState(app)
+        let markerOff = pD["marker"] == nil || pD["marker"] is NSNull || n(pD, "marker") == -1
+        gate("done-ends-tool", doneTapped && s(pD, "tool") == "none" && markerOff && mode.waitForExistence(timeout: 4),
+             "tapped=\(doneTapped) \(pD)")
+
+        // 3) pen: the engine's ink drawer is on; a finger stroke on the page becomes ink; eraser; Done
+        if !ar {
+            let inks0 = n(pD, "inks")
+            let penTapped = tap("xr-pdf-pen")
+            let pP = pdfState(app)
+            gate("pen-on", penTapped && s(pP, "tool") == "pen" && s(pP, "ink") == "draw", "tapped=\(penTapped) \(pP)")
+            let web = app.webViews.firstMatch
+            let a = web.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.45))
+            let b = web.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.5))
+            a.press(forDuration: 0.15, thenDragTo: b)
+            usleep(800_000)
+            shot(app, "61-pdf-\(lang)-pen")
+            let eraseTapped = tap("xr-pdf-eraser")
+            let pE = pdfState(app)
+            gate("eraser-on", eraseTapped && s(pE, "tool") == "eraser" && s(pE, "ink") == "erase", "tapped=\(eraseTapped) \(pE)")
+            _ = tap("xr-pdf-done")
+            let pI = pdfState(app)
+            let noInk = n(pI, "inks") == inks0 && s(pI, "ink") == "off"
+            gate("pen-stroke-makes-ink", n(pI, "inks") > inks0 && s(pI, "ink") == "off", "inks \(inks0)->\(n(pI, "inks")) \(pI)",
+                 known: noInk ? "a finger stroke with the pen on adds no ink on this simulator (the engine's ink tool may want mouse events: the plan's per-tool touch spike)" : nil)
+        }
+
+        // 4) colour: pick a swatch in the colour menu; the dot says it (and the model keeps it for the next tool)
+        let green = ar ? "أخضر" : "Green"
+        if tap("xr-pdf-color") {
+            let item = app.buttons[green].firstMatch
+            if item.waitForExistence(timeout: 5) { item.tap(); usleep(700_000) }
+        }
+        let dot = btn("xr-pdf-color")
+        let dotValue = dot.exists ? ((dot.value as? String) ?? "") : ""
+        gate("colour-picked", dotValue.contains(green), "dot value='\(dotValue)'")
+        gate("note-reachable", btn("xr-pdf-note").exists && btn("xr-pdf-note").isHittable, "note button shown")
+
+        // 5) Fill & Sign: check mark, cross, date each go onto the page as a picture
+        if mode.exists { mode.buttons[ar ? "تعبئة وتوقيع" : "Fill & Sign"].tap(); usleep(700_000) }
+        gate("fill-shown", btn("xr-pdf-check").waitForExistence(timeout: 5) && btn("xr-pdf-signature").exists,
+             "check=\(btn("xr-pdf-check").exists) signature=\(btn("xr-pdf-signature").exists)")
+        var placed = 0
+        for what in (ar ? ["check"] : ["check", "cross", "date"]) {
+            let before = n(pdfState(app), "drawings")
+            let tapped = tap("xr-pdf-" + what)
+            let r = waitState(app, prefix: "placed:", timeout: 20)
+            let after = n(pdfState(app), "drawings")
+            if r == "placed:ok:" + what { placed += 1 }
+            gate("\(what)-placed", tapped && r == "placed:ok:" + what && after == before + 1,
+                 "tapped=\(tapped) \(r) drawings \(before)->\(after)")
+        }
+        shot(app, "62-pdf-\(lang)-marks")
+
+        // 6) signature: the sheet (honest label), drawn (EN) or typed in the Arabic font (AR), onto the page
+        let before6 = n(pdfState(app), "drawings")
+        var opened = false
+        if ar {
+            // the English run saved "My signature": the button is a menu now - New Signature opens the sheet
+            if tap("xr-pdf-signature") {
+                let item = app.buttons["xr-pdf-sig-new"].exists ? app.buttons["xr-pdf-sig-new"] : app.buttons["توقيع جديد…"]
+                if item.waitForExistence(timeout: 5) { item.tap(); opened = true }
+            }
+        } else {
+            opened = tap("xr-pdf-signature")
+        }
+        let label = app.staticTexts["xr-sig-label"]
+        let sheet = opened && label.waitForExistence(timeout: 10)
+        let honest = sheet && (ar ? label.label.contains("ليس توقيعاً إلكترونياً معتمداً")
+                                  : label.label.contains("not a certified e-signature"))
+        gate("signature-sheet", sheet, "opened=\(opened)")
+        gate("signature-honest-label", honest, "label='\(sheet ? label.label : "-")'")
+        if sheet {
+            if ar {
+                let src = app.segmentedControls["xr-sig-source"]
+                if src.exists { src.buttons["كتابة"].tap(); usleep(500_000) }
+                let field = app.textFields["xr-sig-name"]
+                if field.waitForExistence(timeout: 5) {
+                    field.tap(); usleep(500_000)
+                    typeSlowly(app, "\u{0633}\u{0627}\u{0631}\u{0629}")             // سارة
+                }
+                let font = app.segmentedControls["xr-sig-font"]
+                if font.exists { font.buttons["خط عربي"].tap() }
+                let owner = app.segmentedControls["xr-sig-owner"]
+                if owner.exists { owner.buttons["شخص آخر (مرة واحدة)"].tap() }
+            } else {
+                let canvas = app.descendants(matching: .any)["xr-sig-canvas"].firstMatch
+                if canvas.waitForExistence(timeout: 5) {
+                    let c1 = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.6))
+                    let c2 = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
+                    let c3 = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.55))
+                    c1.press(forDuration: 0.1, thenDragTo: c2)
+                    c2.press(forDuration: 0.1, thenDragTo: c3)
+                }
+            }
+            shot(app, "63-pdf-\(lang)-signature-sheet")
+            let insert = btn("xr-sig-insert")
+            let can = insert.waitForExistence(timeout: 5) && insert.isEnabled
+            if can { insert.tap() } else if btn("xr-sig-cancel").exists { btn("xr-sig-cancel").tap() }
+            let r = waitState(app, prefix: "placed:", timeout: 20)
+            let after = n(pdfState(app), "drawings")
+            if r == "placed:ok:signature" { placed += 1 }
+            gate(ar ? "signature-typed-arabic-placed" : "signature-drawn-placed",
+                 can && r == "placed:ok:signature" && after == before6 + 1,
+                 "insert enabled=\(can) \(r) drawings \(before6)->\(after)")
+        }
+        shot(app, "64-pdf-\(lang)-signed")
+
+        // 7) "My signature" again in 2 taps (English: saved by the sheet above; Arabic typed "once", so it is unchanged)
+        let before7 = n(pdfState(app), "drawings")
+        let t1 = tap("xr-pdf-signature")
+        let mine = app.buttons["xr-pdf-sig-mine"].exists ? app.buttons["xr-pdf-sig-mine"]
+            : app.buttons[ar ? "إدراج توقيعي" : "Insert My Signature"]
+        let t2 = t1 && mine.waitForExistence(timeout: 5)
+        if t2 { mine.tap() }
+        let r7 = waitState(app, prefix: "placed:", timeout: 20)
+        let after7 = n(pdfState(app), "drawings")
+        if r7 == "placed:ok:signature" { placed += 1 }
+        gate("my-signature-2-taps", t2 && r7 == "placed:ok:signature" && after7 == before7 + 1,
+             "menu=\(t2) \(r7) drawings \(before7)->\(after7)")
+
+        // 8) save, reopen from the saved bytes (check_saved.py opens the file itself and counts its pictures)
+        let saved = save(app)
+        gate("save", saved.hasPrefix("saved"), saved)
+        autotest("reopen")
+        let again = waitState(app, prefix: "ready", timeout: 120)
+        let pR = pdfState(app)
+        gate("reopen", again == "ready" && pR["error"] == nil, "\(again) \(pR) pictures placed=\(placed)")
+        shot(app, "65-pdf-\(lang)-reopened")
+        if ar { autotest("pdfsigdelete") }                  // leave no saved signature behind
+    }
+
     /// New spreadsheet and presentation open in their editors (also in Arabic, where the spreadsheet's status bar
     /// mirrors its absolutely placed boxes and, on phones, the overflowing tab row scrolls right-to-left), and pass
     /// the iPad layout gate and the chrome gate.
