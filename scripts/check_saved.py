@@ -473,6 +473,16 @@ def files_gate(d):
     "Document N.docx" (an untouched file left behind). Arabic: the same on the right-to-left blank - مستند.docx holds
     the typed Arabic word in a right-to-left paragraph, and no "مستند N.docx" is left."""
     good = True
+    # Stage 6: a later test makes a new file in the same app folder - ScanQuickActionUITests' New Document quick action
+    # opens a new "Document N" and the test then ends the app with it open, so it is never closed (nor tidied). Only the
+    # file that test names in its own line ("XR quick new-document <lang>: title=<name>", out/ui-<device>.log) is set
+    # aside here; any other "Document N" is still an untouched file left behind.
+    ui = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(d))),
+                      "ui-%s.log" % os.path.basename(os.path.normpath(d)))
+    later = []
+    if os.path.exists(ui):
+        later = [t.strip() + ".docx" for t in re.findall(r"XR quick new-document \w+: title=([^\n]+)",
+                                                           open(ui, encoding="utf-8", errors="replace").read())]
     for name, word, rtl in (("Document", "Kept", False),
                             ("مستند", "محفوظ", True)):
         p = os.path.join(d, name + ".docx")
@@ -489,11 +499,14 @@ def files_gate(d):
             continue
         # English: Document 2.docx is the one kept for the other window (asserted by the test); nothing beyond it
         held = ["Document 2.docx"] if name == "Document" else []
-        left = sorted(f for f in os.listdir(d) if re.match(re.escape(name) + r" \d+\.docx$", f) and f not in held)
+        left = sorted(f for f in os.listdir(d)
+                      if re.match(re.escape(name) + r" \d+\.docx$", f) and f not in held and f not in later)
+        aside = sorted(f for f in os.listdir(d) if f in later and f.startswith(name))
         held_ok = all(os.path.exists(os.path.join(d, h)) and word not in text(os.path.join(d, h)) for h in held)
         one = word in s and not left and held_ok and bidi[0]
-        print("%s.docx (Files: new, typed into, kept): %r inside=%s  untouched new files left=%s%s%s  text=%r -> %s"
+        print("%s.docx (Files: new, typed into, kept): %r inside=%s  untouched new files left=%s%s%s%s  text=%r -> %s"
               % (name, word, word in s, left or "none",
+                 ("  (the quick-action test's own new file: %s)" % ", ".join(aside)) if aside else "",
                  ("  kept for another window: %s=%s" % (held[0], held_ok)) if held else "",
                  ("  right-to-left: " + bidi[1]) if rtl else "", s[:80], "OK" if one else "WRONG"))
         good &= one
@@ -872,7 +885,7 @@ def run_notes(out):
         skipped = [re.sub(r"^.*Test Case '-\[XreroOfficeUITests\.", "", l).split("]")[0]
                    for l in lines if re.search(r"Test Case '.*' skipped", l)]
         retries = [l.strip() for l in lines if "first-tap-ignored: INFO" in l or "first-tap-missed: INFO" in l]
-        infos = [l.strip() for l in lines if re.search(r"XR springboard\b.*: INFO", l)]
+        infos = [l.strip() for l in lines if re.search(r"XR (springboard|crash)\b.*: INFO", l)]
         print("  %s: %d skipped, %d retried tap(s)" % (os.path.basename(lg), len(skipped), len(retries)))
         for t in skipped:
             print("    skipped:", t)

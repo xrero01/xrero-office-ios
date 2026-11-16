@@ -94,7 +94,7 @@ jobs:
             ( while true; do xcrun simctl io $DEV screenshot "out/shots/$DEV-$(date +%H%M%S).png" >/dev/null 2>&1; sleep 6; done ) & SHOOT=$!
             # out/ui-<device>.log: the whole filtered output (check_saved.py lists every skipped test and retried tap)
             xcodebuild test-without-building -project app/XreroOffice.xcodeproj -scheme XreroOffice -configuration Autotest \
-              -destination "id=$DEV" -derivedDataPath dd -resultBundlePath "out/ui-$DEV.xcresult"               $TESTS 2>&1 | grep -E "Test Case|error|passed|failed|XCTAssert|XR save path|XR save-as path|XR web buttons|XR geom|XR rotate|XR bridge|XR contract|XR chrome|XR touch|XR bar|XR menu|XR title menu|XR sheet|XR template|XR pdf-gate|XR quick|XR scan|XR springboard|XR open-in|XR a11y|XR first line|XR files|XR read|XR window" | tee "out/ui-$DEV.log" | tail -1000
+              -destination "id=$DEV" -derivedDataPath dd -resultBundlePath "out/ui-$DEV.xcresult"               $TESTS 2>&1 | grep -E "Test Case|error|passed|failed|XCTAssert|XR save path|XR save-as path|XR web buttons|XR geom|XR rotate|XR bridge|XR contract|XR chrome|XR touch|XR bar|XR menu|XR title menu|XR sheet|XR template|XR pdf-gate|XR quick|XR scan|XR springboard|XR open-in|XR a11y|XR first line|XR files|XR read|XR window|XR crash" | tee "out/ui-$DEV.log" | tail -1000
             R=${PIPESTATUS[0]}; [ $R -ne 0 ] && RC=$R
             # the tail above keeps only the last tests of a full run: every test's result (and the Files gate, plan S9)
             # once more, in one short list - the whole filtered output is in the evidence zip (out/ui-<device>.log)

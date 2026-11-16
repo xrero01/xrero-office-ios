@@ -1762,6 +1762,7 @@ final class EditorUITests: XCTestCase {
         }
         XCTAssertEqual(edited, "modified:1", "typing did not mark the document edited")
 
+        let firstEnd = Date()
         XCUIDevice.shared.system.open(URL(string: "xrero-autotest://crash")!)
         let first = waitLabel(app, "xr-recovery", prefix: "recovered", timeout: 90)
         let capsule = app.staticTexts["xr-recovered"]
@@ -1776,8 +1777,19 @@ final class EditorUITests: XCTestCase {
         let hidden = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: gone, object: capsule)], timeout: 25) == .completed
         XCTAssertTrue(hidden, "capsule should hide by itself")
 
+        let sinceFirst = Date().timeIntervalSince(firstEnd)
         XCUIDevice.shared.system.open(URL(string: "xrero-autotest://crash")!)   // second end within 60 s
-        let second = waitLabel(app, "xr-recovery", prefix: "too-large", timeout: 30)
+        var second = waitLabel(app, "xr-recovery", prefix: "too-large", timeout: 30)
+        if second != "too-large" && sinceFirst >= 60 {
+            // CI run 173, iPhone: the first reopening took 54 s (the first page load after the end never started; the
+            // editor's 40 s watchdog loaded it again), so this end came more than 60 s after the first one and was
+            // rightly reopened - no loop. The loop guard is then checked with one more end at once (two ends within
+            // 60 s): said as an INFO line. An end within 60 s that reopens still fails below.
+            print("XR crash second-end-outside-window: INFO the second end came \(Int(sinceFirst)) s after the first " +
+                  "(a slow first reopening) and was reopened (\(second)) - ending the process once more within 60 s")
+            XCUIDevice.shared.system.open(URL(string: "xrero-autotest://crash")!)
+            second = waitLabel(app, "xr-recovery", prefix: "too-large", timeout: 30)
+        }
         sleep(1)
         shot(app, "41-crash-too-large")
         XCTAssertEqual(second, "too-large", "a second end within 60 s must not reload in a loop")
