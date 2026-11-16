@@ -13,8 +13,9 @@ jobs:
   ios:
     runs-on: macos-15
     # 120: the document-menu test (M7b) adds ~6 min per device; a slow shared runner cut the iPad half at 90.
-    # 150: stage 4 (S3/S4/S7/S8 gates) already took 114 min of UI tests; the reading-view gate (S2) adds ~5 per device
-    timeout-minutes: 150
+    # 210: iPhone then iPad: the stage-4 gates (sheet, slides, PDF, templates) take ~2 h together; the reading-view
+    # gate (S2) adds ~5-8 min per device
+    timeout-minutes: 210
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
