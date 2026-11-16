@@ -840,7 +840,12 @@ final class EditorUITests: XCTestCase {
                 // any element type (the capsule's text may surface as other than a static text); the notice stays 4 s
                 let toast = app.descendants(matching: .any).matching(identifier: "xr-toast").firstMatch
                 XCTAssertTrue(toast.waitForExistence(timeout: 15), "no notice after Duplicate (\(run.lang))")
-                print("XR title menu \(run.lang): duplicate notice = \(toast.exists ? toast.label : "-")")
+                // its words from ONE snapshot, never a second query: the notice leaves by itself, and reading .label
+                // after it had gone failed to resolve the element, which ends the whole test in XCUITest - the rest of
+                // that language and the Arabic half never ran (CI runs 135, 136, 138, 139: "Sigma" / Gamma / the
+                // Arabic file missing). The copy itself is checked in the saved files (check_saved.py title_menu).
+                let notice = (try? toast.snapshot())?.label ?? "(gone before it was read)"
+                print("XR title menu \(run.lang): duplicate notice = \(notice)")
                 shot(app, "64-ren-\(run.lang)-duplicated")
             }
             sleep(2)
@@ -1429,8 +1434,10 @@ final class EditorUITests: XCTestCase {
     /// the "Recovered your document" capsule (+ "changes may be missing" once edited); a second end within 60 s
     /// does not reload in a loop but shows "too large" with Share and Back.
     func testCrashRecovery() {
-        // the capsule holds 12 s here instead of 3: one accessibility query of the editor page can take seconds
-        let app = launch(["XR_KIND": "word", "XR_DOC_NAME": "xr-crash.docx", "XR_RECOVERY_HOLD": "12"])
+        // the capsule holds 18 s here instead of 3: one accessibility query of the editor page can take seconds, and
+        // the wait below makes two per poll before it looks for the capsule (CI run 167, iPad: the reload took 12.7 s
+        // and the 12 s capsule had gone before the test looked for it). The second end still comes well within 60 s.
+        let app = launch(["XR_KIND": "word", "XR_DOC_NAME": "xr-crash.docx", "XR_RECOVERY_HOLD": "18"])
         XCTAssertEqual(waitState(app, prefix: "ready", timeout: 120), "ready", "editor did not become ready")
         let web = app.webViews.firstMatch
         XCTAssertTrue(web.waitForExistence(timeout: 10))
@@ -1455,7 +1462,7 @@ final class EditorUITests: XCTestCase {
         XCTAssertTrue(capsule.label.contains("Recovered") || capsule.label.contains("\u{0627}\u{0633}\u{062A}\u{0631}\u{062F}\u{0627}\u{062F}"),
                       "capsule text: \(capsule.label)")
         let gone = NSPredicate(format: "exists == false")
-        let hidden = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: gone, object: capsule)], timeout: 20) == .completed
+        let hidden = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: gone, object: capsule)], timeout: 25) == .completed
         XCTAssertTrue(hidden, "capsule should hide by itself")
 
         XCUIDevice.shared.system.open(URL(string: "xrero-autotest://crash")!)   // second end within 60 s
