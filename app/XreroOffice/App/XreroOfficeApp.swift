@@ -103,11 +103,13 @@ final class MenuBarTargets: ObservableObject {
         changed()
     }
 
-    /// The window in front: the one that last became key, else the scene holding the key window, else the only scene.
+    /// The window in front: the only one (every iPhone, most iPads - no guess to make), else the one whose window last
+    /// became key, else the one holding a key window.
     private var front: UIWindowScene? {
-        if let s = keyScene { return s }
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-        return scenes.first { s in s.windows.contains { $0.isKeyWindow } } ?? (scenes.count == 1 ? scenes.first : nil)
+        if scenes.count == 1 { return scenes.first }
+        if let s = keyScene, scenes.contains(where: { $0 === s }) { return s }
+        return scenes.first { s in s.windows.contains { $0.isKeyWindow } }
     }
 
     /// The open editor of the window in front; nil when that window shows none.
