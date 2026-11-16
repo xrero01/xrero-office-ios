@@ -840,7 +840,12 @@ final class EditorUITests: XCTestCase {
                 // any element type (the capsule's text may surface as other than a static text); the notice stays 4 s
                 let toast = app.descendants(matching: .any).matching(identifier: "xr-toast").firstMatch
                 XCTAssertTrue(toast.waitForExistence(timeout: 15), "no notice after Duplicate (\(run.lang))")
-                print("XR title menu \(run.lang): duplicate notice = \(toast.exists ? toast.label : "-")")
+                // its words from ONE snapshot, never a second query: the notice leaves by itself, and reading .label
+                // after it had gone failed to resolve the element, which ends the whole test in XCUITest - the rest of
+                // that language and the Arabic half never ran (CI runs 135, 136, 138, 139: "Sigma" / Gamma / the
+                // Arabic file missing). The copy itself is checked in the saved files (check_saved.py title_menu).
+                let notice = (try? toast.snapshot())?.label ?? "(gone before it was read)"
+                print("XR title menu \(run.lang): duplicate notice = \(notice)")
                 shot(app, "64-ren-\(run.lang)-duplicated")
             }
             sleep(2)
