@@ -2288,9 +2288,9 @@ final class EditorUITests: XCTestCase {
     ///   presses before any handler sees them (CI runs 142 / 152: none reached the page on the iPhone, every other one
     ///   on the iPad): such a press - no handler line, no change - is pressed again, up to 4 times;
     /// - the menu bar's Format > Bold action (XreroCommands -> EditorMenuTarget.bold) toggles it once too;
-    /// - last, recorded only (INFO): a test-only menu command (⌃⌥⌘P) and File > Close ⌘W reaching the editor through
-    ///   the menu bar and focusedSceneValue. Their answers come through a file, never an app query: CI run 142's ⌘W on
-    ///   the iPad left the app unreachable.
+    /// - last, recorded only (INFO): a test-only menu command (⌃⌥⌘P) reaching the editor through the menu bar and
+    ///   focusedSceneValue; its answer comes through a file, never an app query. (⌘W is not pressed any more: CI run
+    ///   142's ⌘W on the iPad left the app unreachable, and File > Close carries no ⌘W - see XreroCommands.)
     func testZZZZWindowLayoutAndKeyCommands() {
         let pad = UIDevice.current.userInterfaceIdiom == .pad
         let keep = continueAfterFailure
@@ -2366,7 +2366,7 @@ final class EditorUITests: XCTestCase {
             }
             return (false, tries.joined(separator: " ") + " (no handler saw any press)")
         }
-        /// last step on the app in front: the test-only menu command and File > Close ⌘W, answers from the menu file
+        /// last step on the app in front: the test-only menu command, its answer from the menu file
         func menuKeys(_ app: XCUIApplication) {
             try? FileManager.default.removeItem(atPath: menuFile)
             for _ in 0..<3 where !menuLines().contains(where: { $0.hasPrefix("probe") }) {
@@ -2374,8 +2374,6 @@ final class EditorUITests: XCTestCase {
                 _ = menuAnswer("probe", 4)
             }
             print("XR window-gate menu-probe: INFO \(menuAnswer("probe", 1))")
-            app.typeKey("w", modifierFlags: .command)
-            print("XR window-gate cmd-w-close: INFO \(menuAnswer("closed", 8))")
             app.terminate()
         }
 

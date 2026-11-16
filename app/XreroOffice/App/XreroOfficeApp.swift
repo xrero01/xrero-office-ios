@@ -67,7 +67,7 @@ extension FocusedValues {
 /// menu key equivalent as well would claim the same key twice. The system's own Format (Font / Text) and Find
 /// entries are replaced for the same reason: they act only on system text views, so here they were always disabled.
 /// CI gate: EditorUITests.testZZZZWindowLayoutAndKeyCommands (⌘B toggles Bold exactly once per press, the menu's
-/// Bold once; whether the menu bar sees the editor and ⌘W are recorded).
+/// Bold once; whether the menu bar sees the editor through focusedSceneValue is recorded by a test-only command).
 struct XreroCommands: Commands {
     @ObservedObject var language: AppLanguage
     @FocusedValue(\.xrHome) private var home: DocumentOpener?
@@ -92,8 +92,10 @@ struct XreroCommands: Commands {
                 .keyboardShortcut("o", modifiers: .command)
                 .disabled(home == nil || editor != nil)
             Divider()
+            // no ⌘W: CI run 155 pressed it with this menu active (the test-only probe proved the menu sees the editor)
+            // and it never reached Close - on the iPhone the key went on to the page, so another (system) ⌘W entry
+            // owns the key. A shortcut shown here that does not work would over-promise.
             Button(ar ? "إغلاق" : "Close") { editor?.close() }
-                .keyboardShortcut("w", modifiers: .command)
                 .disabled(editor == nil)
         }
         CommandGroup(replacing: .textEditing) {
