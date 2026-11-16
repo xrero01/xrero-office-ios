@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <!-- xr-editor.html - Xrero Office (iPhone / iPad / Mac) editor launcher. Lives next to api.js in
      editors/web-apps/apps/api/documents/. Query: doctype=word|cell|slide|pdf, title=<file name>, lang=en|ar,
-     theme=light|dark. The document itself comes from the app through xr-host.js (desktop "local file" mode). -->
+     theme=light|dark, layout=compact|regular (plan S6: from the window width), platform=mac (Mac only). The document
+     itself comes from the app through xr-host.js (desktop "local file" mode). -->
 <html>
 <head>
   <meta charset="utf-8">
@@ -31,7 +32,12 @@
     location.search.replace(/^\?/, '').split('&').forEach(function (kv) {
       var p = kv.split('='); if (p[0]) q[decodeURIComponent(p[0])] = decodeURIComponent((p[1] || '').replace(/\+/g, ' '));
     });
-    var phone = Math.min(screen.width, screen.height) < 600;
+    // plan S6: the design follows the WINDOW the editor opens in. The app passes layout=compact (an iPhone, or a
+    // window under 600 pt wide: iPad Split View / Slide Over, a small Stage Manager or Mac window) or regular
+    // (EditorWebView.Coordinator.layout); compact = the phone design below. Same rule as PHONE in xr-host.js. Without
+    // the parameter (the browser harness) the screen size decides, as before. Chosen once: a later resize never
+    // reloads the editor (that would lose undo and the selection) - xr-host.js adjusts CSS only.
+    var phone = /^(compact|regular)$/.test(q.layout || '') ? q.layout === 'compact' : Math.min(screen.width, screen.height) < 600;
     var lang = q.lang === 'ar' ? 'ar' : 'en';
     var ext = (/\.([a-z0-9]+)$/i.exec(q.title || '') || [0, 'docx'])[1].toLowerCase();
     var key = 'xr' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);

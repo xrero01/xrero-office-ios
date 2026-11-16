@@ -17,8 +17,10 @@ jobs:
     runs-on: macos-15
     # 120: the document-menu test (M7b) adds ~6 min per device; a slow shared runner cut the iPad half at 90.
     # 210: iPhone then iPad: the stage-4 gates (sheet, slides, PDF, templates) take ~2 h together; the reading-view
-    # gate (S2) adds ~5-8 min per device
-    timeout-minutes: 210
+    # gate (S2) adds ~5-8 min per device.
+    # 300: stage 6 = stage 5 (UI tests 159 min, run 161) + S2 reading (+25 min, run 170) + S9 Files (+16 min, run 166)
+    # + S6 window gate: ~205-215 min of UI tests alone - a 210 limit would cancel a passing run near its end
+    timeout-minutes: 300
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -92,7 +94,7 @@ jobs:
             ( while true; do xcrun simctl io $DEV screenshot "out/shots/$DEV-$(date +%H%M%S).png" >/dev/null 2>&1; sleep 6; done ) & SHOOT=$!
             # out/ui-<device>.log: the whole filtered output (check_saved.py lists every skipped test and retried tap)
             xcodebuild test-without-building -project app/XreroOffice.xcodeproj -scheme XreroOffice -configuration Autotest \
-              -destination "id=$DEV" -derivedDataPath dd -resultBundlePath "out/ui-$DEV.xcresult"               $TESTS 2>&1 | grep -E "Test Case|error|passed|failed|XCTAssert|XR save path|XR save-as path|XR web buttons|XR geom|XR rotate|XR bridge|XR contract|XR chrome|XR touch|XR bar|XR menu|XR title menu|XR sheet|XR template|XR pdf-gate|XR quick|XR scan|XR springboard|XR open-in|XR a11y|XR first line|XR files|XR read" | tee "out/ui-$DEV.log" | tail -1000
+              -destination "id=$DEV" -derivedDataPath dd -resultBundlePath "out/ui-$DEV.xcresult"               $TESTS 2>&1 | grep -E "Test Case|error|passed|failed|XCTAssert|XR save path|XR save-as path|XR web buttons|XR geom|XR rotate|XR bridge|XR contract|XR chrome|XR touch|XR bar|XR menu|XR title menu|XR sheet|XR template|XR pdf-gate|XR quick|XR scan|XR springboard|XR open-in|XR a11y|XR first line|XR files|XR read|XR window" | tee "out/ui-$DEV.log" | tail -1000
             R=${PIPESTATUS[0]}; [ $R -ne 0 ] && RC=$R
             # the tail above keeps only the last tests of a full run: every test's result (and the Files gate, plan S9)
             # once more, in one short list - the whole filtered output is in the evidence zip (out/ui-<device>.log)

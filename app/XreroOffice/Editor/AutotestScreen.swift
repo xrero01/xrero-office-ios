@@ -380,6 +380,58 @@ struct AutotestScreen: View {
                     state = res
                 }
             }
+            if url.host == "layout" {           // window gate (plan S6): the design the page opened with (layout= from
+                                                // the app), the live classes xr-host.js keeps on the editor frame
+                                                // (html.xr-compact / xr-narrow) and the tab row's height, which tells
+                                                // the phone design (46 pt) from the tablet one (40 pt)
+                let n = (URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "n" }?.value ?? "")
+                    .filter(\.isNumber)
+                // + the app's window rule itself (no XR_LAYOUT stand-in) for stand-in windows 320 / 599 / 600 / 1032 pt
+                // wide: CI cannot make a Split View window, so the narrow-iPad run alone would only prove that the page
+                // obeys layout=compact, not that a narrow window produces it
+                let rule = [320, 599, 600, 1032].map { w in
+                    "\(w):" + EditorWebView.Coordinator.windowLayout(for: UIWindow(frame: CGRect(x: 0, y: 0, width: w, height: 900)))
+                }.joined(separator: ",")
+                let js = """
+                (function(){var f=document.querySelector('iframe');var w=f&&f.contentWindow;var d=w&&w.document;
+                 if(!d||!d.body)return 'layout\(n):fail no editor';
+                 var m=/[?&]layout=([a-z]+)/.exec(location.search),c=d.documentElement.classList,
+                 t=d.querySelector('#toolbar .toolbar .box-tabs'),tb=d.querySelector('#toolbar .toolbar');
+                 return 'layout\(n):'+(m?m[1]:'none')+' compact='+(c.contains('xr-compact')?1:0)+' narrow='+(c.contains('xr-narrow')?1:0)+
+                  ' tabs='+(t?Math.round(t.getBoundingClientRect().height):0)+' folded='+(tb&&tb.classList.contains('folded')?1:0)+
+                  ' w='+w.innerWidth+' mac='+(/[?&]platform=mac/.test(location.search)?1:0);})()
+                """
+                controller.coordinator?.web?.evaluateJavaScript(js) { r, e in
+                    let res = ((r as? String) ?? "layout\(n):fail " + (e?.localizedDescription ?? "no result")) + " rule=" + rule
+                    handle("log", res)
+                    state = res
+                }
+            }
+            if url.host == "keyspy" {           // window gate (plan S6): which Cmd / Ctrl key presses (and End / Home /
+                                                // arrows) reach the editor page (a capture
+                                                // listener in the editor frame: key, modifiers, target, whether the
+                                                // page took it); "read=1" answers with the record
+                let read = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "read" }?.value == "1"
+                if read {
+                    controller.call("""
+                    var s=window.__xrKeySpy||[],a=window.__xrApi,f='?';try{f=a&&a.asc_IsFocus?(a.asc_IsFocus()?1:0):'?';}catch(e){}
+                    var el=document.activeElement;
+                    return JSON.stringify({keys:s.map(function(r){return r.k+(r.m?'+meta':'')+(r.c?'+ctrl':'')+(r.p?' prevented':'')+' @'+r.t;}),
+                      engineFocus:f,active:el?(el.id||el.tagName):'none'});
+                    """) { r, e in
+                        let res = "keyspy:" + ((r as? String) ?? (e ?? "?"))
+                        handle("log", res)
+                        state = res
+                    }
+                } else {
+                    controller.call("""
+                    if(!window.__xrKeySpy){window.__xrKeySpy=[];document.addEventListener('keydown',function(e){if(!(e.metaKey||e.ctrlKey||/^(Arrow|End$|Home$)/.test(e.key)))return;
+                     var r={k:e.key,m:e.metaKey?1:0,c:e.ctrlKey?1:0,t:(e.target&&(e.target.id||e.target.tagName))||'?'};window.__xrKeySpy.push(r);
+                     setTimeout(function(){r.p=e.defaultPrevented?1:0;
+                      if(window.XreroHost&&XreroHost.log)XreroHost.log('keyspy '+r.k+(r.m?'+meta':'')+(r.c?'+ctrl':'')+(r.p?' prevented':'')+' @'+r.t);},0);},true);}return 'ok';
+                    """) { r, e in handle("log", "keyspy: \((r as? String) ?? e ?? "?")") }
+                }
+            }
         }
         .sheet(isPresented: $showAbout) { AboutSheet() }
         .sheet(isPresented: $showAccount) { AccountView() }
@@ -454,7 +506,8 @@ struct AutotestScreen: View {
         let url = Bundle.main.resourceURL!.appendingPathComponent("web/xr-contract.json")
         guard let manifest = try? String(contentsOf: url, encoding: .utf8) else { state = "contract:fail no xr-contract.json"; return }
         let js = """
-        var M=\(manifest), kind='\(document.kind.rawValue)', device=Math.min(screen.width,screen.height)>=600?'tablet':'phone';
+        var M=\(manifest), kind='\(document.kind.rawValue)', lay=/[?&]layout=(compact|regular)/.exec(top.location.search),
+            device=lay?(lay[1]==='compact'?'phone':'tablet'):(Math.min(screen.width,screen.height)>=600?'tablet':'phone');
         var apps={word:'DE',cell:'SSE',slide:'PE',pdf:'PDFE'}, miss=[], n=0;
         function get(o,p){var a=p.split('.');for(var i=0;i<a.length;i++){if(o==null)return undefined;o=o[a[i]];}return o;}
         M.checks.forEach(function(c){
@@ -510,6 +563,8 @@ struct AutotestScreen: View {
             if let h = try? FileHandle(forWritingTo: url) { h.seekToEndOfFile(); h.write(line); try? h.close() }
             else { try? line.write(to: url) }
             if param.hasPrefix("web process ended") { ended += 1 }
+            // window gate (plan S6): each Cmd / Ctrl press the page saw, beside the native handlers' lines
+            if param.hasPrefix("keyspy ") { AutotestMenuFile.note("page " + param.dropFirst("keyspy ".count)) }
             if param.hasPrefix("open failed") || param.hasPrefix("engine error") { state = "error: " + param }
             // clipboard test: each finished Copy / Paste shows (numbered, so the test sees every new one)
             if param.hasPrefix("copy: ") || param.hasPrefix("paste: ") { clipCount += 1; state = "clip\(clipCount) " + param }
@@ -715,6 +770,7 @@ struct RealDocumentHarness: View {
         // 0 x 0, as on Home: a full-size anchor view was hit-tested above the buttons after a form sheet (iPad)
         .background(PresenterAnchor(opener: opener).frame(width: 0, height: 0))
         .onAppear(perform: start)
+        // one handler for every xrero-autotest:// hook of this harness: hit / pick (plan S9) and note (plan S6)
         .onOpenURL { url in
             guard url.scheme == "xrero-autotest" else { return }
             let q = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
@@ -724,6 +780,15 @@ struct RealDocumentHarness: View {
             case "pick":
                 let n = q.first { $0.name == "name" }?.value ?? name
                 hook = opener.autotestPick(n) ? "hook:pick sent " + n : "hook:pick no picker"
+            case "note":
+                // the menu bar gate (plan S6, EditorUITests.testZZZZZMenuBarOnRealEditor): its results into this
+                // document's log, Documents/xr-log-<name>.txt, for check_saved.py (sent once the editor has closed again)
+                guard let t = q.first(where: { $0.name == "t" })?.value else { return }
+                let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                let log = docs.appendingPathComponent("xr-log-" + name + ".txt")
+                let lines = Data((t.split(separator: "\n").joined(separator: "\n") + "\n").utf8)
+                if let h = try? FileHandle(forWritingTo: log) { h.seekToEndOfFile(); h.write(lines); try? h.close() }
+                else { try? lines.write(to: log) }
             default: break
             }
         }
@@ -845,6 +910,57 @@ struct RealDocumentHarness: View {
         let names = ((try? FileManager.default.contentsOfDirectory(atPath: docs.path)) ?? [])
             .filter { OfficeKind(url: URL(fileURLWithPath: $0)) != nil }.sorted()
         files = "files#\(listed):" + names.joined(separator: "|")
+    }
+}
+
+/// Plan S6 window gate: answers for the UI test through a file (XR_MENU_FILE), never through an app query - a key
+/// that closes or blocks the window must not take the test down with it.
+enum AutotestMenuFile {
+    static func note(_ s: String) {
+        guard let p = ProcessInfo.processInfo.environment["XR_MENU_FILE"] else { return }
+        let line = Data((s + "\n").utf8)
+        if let h = FileHandle(forWritingAtPath: p) { h.seekToEndOfFile(); h.write(line); try? h.close() }
+        else { FileManager.default.createFile(atPath: p, contents: line) }
+    }
+}
+
+/// Plan S6 window gate, test build only: a menu command with a key no other command uses (Ctrl-Option-Cmd-P), pressed
+/// on the hardware keyboard like any menu key. It answers through the menu file what the menu bar sees in the window in
+/// front - "probe editor=1|0 home=1|0 b=<the editor's Bold>" (MenuBarTargets, exactly what XreroCommands reads) - and,
+/// when the test has put a menu item's name into <menu file>.cmd ("bold", "close"...), it then runs that item's own
+/// action (XreroCommands.perform, what the Format > Bold / File > Close items run) once: " ran=bold". The .cmd file
+/// is removed when it is read, so a press that never arrives leaves it for the next one and nothing runs twice.
+/// A letter on purpose: CI run 165 proved this chord reaches the menu on the iPhone and the iPad, while run 168's
+/// Ctrl-Option-Cmd-End never arrived anywhere (no menu answer, no End keydown in the page) - the simulator's
+/// synthesized End is not delivered. The price: a press whose modifiers the simulator drops types a bare "p" into the
+/// document; the UI test allows exactly those letters after its typed word (EditorUITests window gate).
+struct AutotestMenuProbe: Commands {
+    @ObservedObject var targets: MenuBarTargets
+
+    var body: some Commands {
+        CommandMenu("XR Autotest") {
+            Button("Menu probe") { Self.probe(targets) }
+                .keyboardShortcut("p", modifiers: [.command, .option, .control])
+        }
+    }
+
+    static func probe(_ targets: MenuBarTargets) {
+        let editor = targets.editor
+        var line = "probe editor=\(editor == nil ? 0 : 1) home=\(targets.home == nil ? 0 : 1)"
+            + " b=" + (editor.map { $0.controller.state.bold ? "1" : "0" } ?? "-")
+        let file = ProcessInfo.processInfo.environment["XR_MENU_FILE"].map { $0 + ".cmd" }
+        guard let file, let cmd = try? String(contentsOfFile: file, encoding: .utf8) else {
+            AutotestMenuFile.note(line)
+            return
+        }
+        try? FileManager.default.removeItem(atPath: file)
+        let name = cmd.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let action = XreroCommands.Action(rawValue: name) else {
+            AutotestMenuFile.note(line + " unknown=" + name)
+            return
+        }
+        AutotestMenuFile.note(line + " ran=" + name)        // before the action's own lines ("menu bold")
+        XreroCommands.perform(action, targets)
     }
 }
 #endif
