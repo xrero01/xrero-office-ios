@@ -411,7 +411,8 @@ struct AutotestScreen: View {
                     controller.call("""
                     if(!window.__xrKeySpy){window.__xrKeySpy=[];document.addEventListener('keydown',function(e){if(!(e.metaKey||e.ctrlKey))return;
                      var r={k:e.key,m:e.metaKey?1:0,c:e.ctrlKey?1:0,t:(e.target&&(e.target.id||e.target.tagName))||'?'};window.__xrKeySpy.push(r);
-                     setTimeout(function(){r.p=e.defaultPrevented?1:0;},0);},true);}return 'ok';
+                     setTimeout(function(){r.p=e.defaultPrevented?1:0;
+                      if(window.XreroHost&&XreroHost.log)XreroHost.log('keyspy '+r.k+(r.m?'+meta':'')+(r.c?'+ctrl':'')+(r.p?' prevented':'')+' @'+r.t);},0);},true);}return 'ok';
                     """) { r, e in handle("log", "keyspy: \((r as? String) ?? e ?? "?")") }
                 }
             }
@@ -542,6 +543,8 @@ struct AutotestScreen: View {
             if let h = try? FileHandle(forWritingTo: url) { h.seekToEndOfFile(); h.write(line); try? h.close() }
             else { try? line.write(to: url) }
             if param.hasPrefix("web process ended") { ended += 1 }
+            // window gate (plan S6): each Cmd / Ctrl press the page saw, beside the native handlers' lines
+            if param.hasPrefix("keyspy ") { AutotestMenuFile.note("page " + param.dropFirst("keyspy ".count)) }
             if param.hasPrefix("open failed") || param.hasPrefix("engine error") { state = "error: " + param }
             // clipboard test: each finished Copy / Paste shows (numbered, so the test sees every new one)
             if param.hasPrefix("copy: ") || param.hasPrefix("paste: ") { clipCount += 1; state = "clip\(clipCount) " + param }

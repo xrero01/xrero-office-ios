@@ -33,11 +33,11 @@ struct EditorMenuTarget: Equatable {
     /// Bold / Italic / Underline: Word documents, where the keyboard bar and the Aa sheet offer them too.
     var formats: Bool { kind == .word }
 
-    // The keyboard bar's / format sheet's own engine calls, one log line per use ("menu: bold" - CI reads it).
-    // Only on a menu pick, never per keystroke.
-    func bold() { controller.format("menu", "bold", "a.put_TextPrBold(\(!controller.state.bold))") }
-    func italic() { controller.format("menu", "italic", "a.put_TextPrItalic(\(!controller.state.italic))") }
-    func underline() { controller.format("menu", "underline", "a.put_TextPrUnderline(\(!controller.state.underline))") }
+    // The keyboard bar's own engine calls (EditorController.toggleFormat), one log line per use ("menu: bold" - CI
+    // reads it). Only on a menu pick, never per keystroke.
+    func bold() { controller.toggleFormat("bold", source: "menu") }
+    func italic() { controller.toggleFormat("italic", source: "menu") }
+    func underline() { controller.toggleFormat("underline", source: "menu") }
     func find() { controller.find() }
     func close() { controller.close() }
 }
@@ -62,12 +62,12 @@ extension FocusedValues {
 /// commands for the window in front. Each reaches that window's home screen or open editor through focusedSceneValue
 /// (HomeScene / EditorScreen) and is disabled when the window has none. Words in the app's own language (EN / AR).
 ///
-/// Key equivalents only where the web editor has none of its own. Bold / Italic / Underline and Find are listed
-/// WITHOUT one: ⌘B / ⌘I / ⌘U / ⌘F stay with the editor, which handles them itself - a menu key equivalent would take
-/// the key first, and a toggle reached both ways could run twice. The system's own Format (Font / Text) and Find
-/// entries are replaced for the same reason: they act only on system text views, so here they were always disabled,
-/// and a second ⌘B / ⌘F binding is gone. CI gate: EditorUITests.testZZZZWindowLayoutAndKeyCommands (⌘B toggles Bold
-/// exactly once, the menu's Bold once, ⌘W reaches the editor through this menu).
+/// Bold / Italic / Underline and Find are listed WITHOUT a key equivalent: ⌘B / ⌘I / ⌘U belong to the editor view's
+/// own key commands (XRWebView.formatKey - the page does not reliably get them on iOS) and ⌘F to the web editor; a
+/// menu key equivalent as well would claim the same key twice. The system's own Format (Font / Text) and Find
+/// entries are replaced for the same reason: they act only on system text views, so here they were always disabled.
+/// CI gate: EditorUITests.testZZZZWindowLayoutAndKeyCommands (⌘B toggles Bold exactly once per press, the menu's
+/// Bold once; whether the menu bar sees the editor and ⌘W are recorded).
 struct XreroCommands: Commands {
     @ObservedObject var language: AppLanguage
     @FocusedValue(\.xrHome) private var home: DocumentOpener?

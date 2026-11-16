@@ -242,6 +242,35 @@ final class XRWebView: WKWebView {
         if window != nil { onWindow?() }
     }
 
+    /// ⌘B / ⌘I / ⌘U while the editor holds the keyboard (plan S6; Word - EditorWebView sets this). The editor page does
+    /// not reliably get these chords on iOS: CI runs 142 and 152 (a key spy in the page) saw no ⌘B arrive on the
+    /// iPhone at all and only every other one on the iPad - UIKit's text system takes them first. So the editor view
+    /// owns them as key commands: each press runs the engine's Bold / Italic / Underline once (the keyboard bar's own
+    /// call), and a matched key command is not delivered on to the page, so there is no second toggle. The menu bar's
+    /// Format items carry no key equivalent: nothing else claims these keys. Only on a key press - typing never reaches
+    /// this (UIKit asks for the list on a key event; it is built once).
+    var formatKey: ((String) -> Void)? { didSet { formatKeyCommands = nil } }
+    /// The commands' names in the ⌘-hold shortcut list (the editor's language).
+    var formatKeyTitles: [String: String] = [:] { didSet { formatKeyCommands = nil } }
+    private var formatKeyCommands: [UIKeyCommand]?
+
+    override var keyCommands: [UIKeyCommand]? {
+        guard formatKey != nil else { return super.keyCommands }
+        if formatKeyCommands == nil {
+            formatKeyCommands = [("b", "bold"), ("i", "italic"), ("u", "underline")].map { key, name in
+                let c = UIKeyCommand(title: formatKeyTitles[name] ?? name, action: #selector(formatKeyPressed(_:)),
+                                     input: key, modifierFlags: .command, propertyList: name)
+                c.wantsPriorityOverSystemBehavior = true      // ahead of the text system's own handling of the chord
+                return c
+            }
+        }
+        return (super.keyCommands ?? []) + (formatKeyCommands ?? [])
+    }
+
+    @objc private func formatKeyPressed(_ sender: UIKeyCommand) {
+        if let name = sender.propertyList as? String { formatKey?(name) }
+    }
+
     override var inputAccessoryView: UIView? {
         guard let bar = keyboardBar else { return super.inputAccessoryView }
         // iPhone landscape (under 400 pt tall): the document needs every point; WebKit's slim bar keeps its Done

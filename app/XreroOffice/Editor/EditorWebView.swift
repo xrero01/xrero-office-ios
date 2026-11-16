@@ -30,6 +30,12 @@ struct EditorWebView: UIViewRepresentable {
         if document.kind == .cell && KeyboardBar.enabled {
             web.keyboardBar = SheetKeyBarHost(sheetKeyBar(web))
         }
+        // ⌘B / ⌘I / ⌘U (plan S6): the editor view's own key commands, Word only (XRWebView.formatKey)
+        if document.kind == .word {
+            let ctl = controller
+            web.formatKey = { [weak ctl] name in ctl?.toggleFormat(name, source: "key") }
+            web.formatKeyTitles = Self.formatKeyTitles(ar: lang == "ar")
+        }
         let barOn = web.keyboardBar != nil, log = onCommand
         DispatchQueue.main.async { log("log", "keyboard bar: " + (barOn ? "on" : "off")) }     // after this view update
         #if DEBUG
@@ -79,8 +85,15 @@ struct EditorWebView: UIViewRepresentable {
                 host.bar = KeyboardBar(state: controller.state, controller: controller, ar: lang == "ar")
             }
             if let x = web as? XRWebView, let host = x.keyboardBar as? SheetKeyBarHost { host.bar = sheetKeyBar(x) }
+            if let x = web as? XRWebView, x.formatKey != nil { x.formatKeyTitles = Self.formatKeyTitles(ar: lang == "ar") }
             c.load()
         }
+    }
+
+    /// The ⌘B / ⌘I / ⌘U names in the ⌘-hold shortcut list (XRWebView.formatKey), EN / AR.
+    static func formatKeyTitles(ar: Bool) -> [String: String] {
+        ar ? ["bold": "غامق", "italic": "مائل", "underline": "تسطير"]
+           : ["bold": "Bold", "italic": "Italic", "underline": "Underline"]
     }
 
     /// The spreadsheet's keyboard row; a key pressed with no cell open is typed through the web view's keyboard input.
@@ -580,6 +593,23 @@ final class EditorController: ObservableObject {
              ";if(window.XreroHost)XreroHost.log('\(source): \(name)');return 'ok';") { r, e in
             if (r as? String) != "ok" { NSLog("XR %@ %@: %@", source, name, (r as? String) ?? e ?? "?") }
         }
+    }
+
+    /// Bold / Italic / Underline from a native source - the menu bar's Format items or ⌘B / ⌘I / ⌘U (plan S6,
+    /// XRWebView.formatKey): the keyboard bar's own engine call, flipped from the state the editor reported, one log
+    /// line ("key: bold" / "menu: bold"). On a key press or a menu pick only, never per keystroke.
+    func toggleFormat(_ name: String, source: String) {
+        let js: String
+        switch name {
+        case "bold": js = "a.put_TextPrBold(\(!state.bold))"
+        case "italic": js = "a.put_TextPrItalic(\(!state.italic))"
+        case "underline": js = "a.put_TextPrUnderline(\(!state.underline))"
+        default: return
+        }
+        #if XR_AUTOTEST
+        AutotestMenuFile.note("\(source) \(name)")           // the window gate counts the handlers per key press
+        #endif
+        format(source, name, js)
     }
 
     // MARK: the Aa format sheet (plan S1, FormatSheet.swift)
