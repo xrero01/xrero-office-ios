@@ -994,12 +994,20 @@ final class EditorUITests: XCTestCase {
             /// Go to Page from the capsule (shown by a touch first: it fades 1.5 s after the last one), then waits for
             /// the editor to be on that page; returns the probe
             func goToPage(_ n: Int, _ what: String) -> String {
-                let web = app.webViews.firstMatch, capsule = app.buttons["xr-read-page"]
-                web.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-                guard capsule.waitForExistence(timeout: 3) else { XCTFail("no page capsule for Go to Page (\(what))"); return snap("xr-read-probe") }
-                capsule.tap()
-                let alert = app.alerts.firstMatch
-                guard alert.waitForExistence(timeout: 5) else { XCTFail("the page capsule did not open Go to Page (\(what))"); return snap("xr-read-probe") }
+                let web = app.webViews.firstMatch, capsule = app.buttons["xr-read-page"], alert = app.alerts.firstMatch
+                // tapped where its snapshot shows it: capsule.tap() looks it up again, and on the iPad it had already
+                // faded and left the tree by then (CI run 162: "No matches found", the test stopped). A missed tap lands
+                // on the page, which only shows the capsule again.
+                var shown = false, asked = false
+                for _ in 0..<3 where !asked {
+                    web.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+                    guard capsule.waitForExistence(timeout: 3), let s = try? capsule.snapshot() else { continue }
+                    shown = true
+                    app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: s.frame.midX, dy: s.frame.midY)).tap()
+                    asked = alert.waitForExistence(timeout: 5)
+                }
+                guard shown else { XCTFail("no page capsule for Go to Page (\(what))"); return snap("xr-read-probe") }
+                guard asked else { XCTFail("the page capsule did not open Go to Page (\(what))"); return snap("xr-read-probe") }
                 let field = alert.textFields.firstMatch
                 if !app.keyboards.firstMatch.waitForExistence(timeout: 3) { field.tap() }
                 field.typeText("\(n)")
@@ -1041,10 +1049,14 @@ final class EditorUITests: XCTestCase {
             XCTAssertTrue(faded, "the page capsule did not fade by itself while reading (\(lang))")
             // a tap on the page shows the page capsule (it fades 1.5 s after the last touch) and brings no keyboard (the
             // input field is read-only)
+            // (its label read from one snapshot: a second lookup can find it already faded and gone - CI run 162)
             let web = app.webViews.firstMatch
-            web.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)).tap()
-            let capsuleShown = capsule.waitForExistence(timeout: 2)
-            let capsuleLabel = capsuleShown ? capsule.label : "(none)"
+            var capsuleLabel = "(none)"
+            for _ in 0..<3 where capsuleLabel == "(none)" {
+                web.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)).tap()
+                if capsule.waitForExistence(timeout: 2), let s = try? capsule.snapshot() { capsuleLabel = s.label }
+            }
+            let capsuleShown = capsuleLabel != "(none)"
             shot(app, "71-read-\(lang)-tapped")
             let keyboardUp = app.keyboards.firstMatch.waitForExistence(timeout: 3)
             print("XR read \(lang) tap: keyboard=\(keyboardUp) capsule=\(capsuleLabel)")
