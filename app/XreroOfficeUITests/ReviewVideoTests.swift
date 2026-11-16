@@ -186,22 +186,11 @@ final class ReviewVideoTests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "xr-home-empty").firstMatch.exists,
                       "no empty Recent state on a first launch")
         XCTAssertTrue(app.buttons.matching(identifier: "xr-home-more").firstMatch.exists, "no More menu on Home")
-        let tile = find(app.buttons, "identifier == 'xr-home-word'", timeout: 20)
-        if let tile { tile.tap() } else { dump("home") }
+        if let tile = find(app.buttons, "identifier == 'xr-home-word'", timeout: 20) { tile.tap() } else { dump("home") }
         // the editor, or a system alert (e.g. "Unable to Import Document"), whichever comes first
         let barQ = app.staticTexts["xr-bar-title"]
         let end = Date().addingTimeInterval(90)
-        var retapped = false
-        while Date() < end && !barQ.exists && !app.alerts.firstMatch.exists {
-            pause(1)
-            // a tap the simulator dropped (run 55: no "XR open" in the log at all): Home is still on screen, its tile
-            // still hittable, 15 s later - tap it once more (an editor that is opening covers Home, so never twice)
-            if !retapped, let tile, Date() > end.addingTimeInterval(-75), tile.exists, tile.isHittable, !barQ.exists {
-                retapped = true
-                print("XR create: no editor 15 s after the Create tile - tapping it again")
-                tile.tap()
-            }
-        }
+        while Date() < end && !barQ.exists && !app.alerts.firstMatch.exists { pause(1) }
         if dismissAlert("after-create") {
             print("XR create: alert -> opening the created document from Files instead")
             _ = openFromFiles("Untitled.docx")
