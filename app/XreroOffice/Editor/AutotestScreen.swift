@@ -392,6 +392,29 @@ struct AutotestScreen: View {
                     state = res
                 }
             }
+            if url.host == "keyspy" {           // window gate (plan S6): which Cmd / Ctrl key presses reach the editor
+                                                // page (a capture listener in the editor frame: key, modifiers, target,
+                                                // whether the page took it); "read=1" answers with the record
+                let read = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "read" }?.value == "1"
+                if read {
+                    controller.call("""
+                    var s=window.__xrKeySpy||[],a=window.__xrApi,f='?';try{f=a&&a.asc_IsFocus?(a.asc_IsFocus()?1:0):'?';}catch(e){}
+                    var el=document.activeElement;
+                    return JSON.stringify({keys:s.map(function(r){return r.k+(r.m?'+meta':'')+(r.c?'+ctrl':'')+(r.p?' prevented':'')+' @'+r.t;}),
+                      engineFocus:f,active:el?(el.id||el.tagName):'none'});
+                    """) { r, e in
+                        let res = "keyspy:" + ((r as? String) ?? (e ?? "?"))
+                        handle("log", res)
+                        state = res
+                    }
+                } else {
+                    controller.call("""
+                    if(!window.__xrKeySpy){window.__xrKeySpy=[];document.addEventListener('keydown',function(e){if(!(e.metaKey||e.ctrlKey))return;
+                     var r={k:e.key,m:e.metaKey?1:0,c:e.ctrlKey?1:0,t:(e.target&&(e.target.id||e.target.tagName))||'?'};window.__xrKeySpy.push(r);
+                     setTimeout(function(){r.p=e.defaultPrevented?1:0;},0);},true);}return 'ok';
+                    """) { r, e in handle("log", "keyspy: \((r as? String) ?? e ?? "?")") }
+                }
+            }
             if url.host == "menucmd" {          // window gate (plan S6): what the menu bar's Format > Bold / Italic /
                                                 // Underline and Edit > Find run (XreroCommands calls the same methods)
                 let c = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "c" }?.value ?? ""
@@ -488,7 +511,9 @@ struct AutotestScreen: View {
         menu.note(cmd, param)
         switch cmd {
         case "ready": state = "ready"; tooLarge = false
-        case "close": state = "closed"       // the editor asked to close (File > Close in the menu bar, plan S6)
+        case "close":                       // the editor asked to close (File > Close in the menu bar, plan S6)
+            state = "closed"
+            AutotestMenuFile.note("closed")
         case "modified": modified = param
         case "recovered":
             recovery = "recovered:" + param
@@ -669,6 +694,30 @@ struct RealDocumentHarness: View {
         guard let item = recents.items.first, let url = recents.resolve(item) else { state = "no recent"; return }
         state = "reopened " + url.lastPathComponent
         opener.open(url)
+    }
+}
+
+/// Plan S6 window gate: answers for the UI test through a file (XR_MENU_FILE), never through an app query - a key
+/// that closes or blocks the window must not take the test down with it.
+enum AutotestMenuFile {
+    static func note(_ s: String) {
+        guard let p = ProcessInfo.processInfo.environment["XR_MENU_FILE"] else { return }
+        let line = Data((s + "\n").utf8)
+        if let h = FileHandle(forWritingAtPath: p) { h.seekToEndOfFile(); h.write(line); try? h.close() }
+        else { FileManager.default.createFile(atPath: p, contents: line) }
+    }
+}
+
+/// Plan S6 window gate, test build only: a menu command with a key no other command uses (Ctrl-Option-Cmd-P) that
+/// says whether the menu bar sees this window's editor through focusedSceneValue (XreroCommands relies on the same).
+struct AutotestMenuProbe: Commands {
+    @FocusedValue(\.xrEditor) private var editor: EditorMenuTarget?
+
+    var body: some Commands {
+        CommandMenu("XR Autotest") {
+            Button("Menu probe") { AutotestMenuFile.note("probe editor=\(editor == nil ? 0 : 1)") }
+                .keyboardShortcut("p", modifiers: [.command, .option, .control])
+        }
     }
 }
 #endif

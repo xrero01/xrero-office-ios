@@ -9,7 +9,10 @@ struct XreroOfficeApp: App {
         WindowGroup {
             if ProcessInfo.processInfo.environment["XR_GALLERY"] == "1" { TemplateAutotestRoot() } else { AutotestScreen() }
         }
-        .commands { XreroCommands(language: AppLanguage.shared) }   // the same menu bar (EditorUITests: ⌘W, ⌘B)
+        .commands {
+            XreroCommands(language: AppLanguage.shared)             // the same menu bar (EditorUITests window gate)
+            AutotestMenuProbe()                                     // + a test-only probe (AutotestScreen.swift)
+        }
         #else
         WindowGroup { HomeScene().appLanguageEnvironment() }   // start screen; documents open over it (HomeScene.swift, DocumentOpener.swift)
             .commands { XreroCommands(language: AppLanguage.shared) }
