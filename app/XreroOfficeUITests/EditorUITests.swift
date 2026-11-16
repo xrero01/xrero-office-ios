@@ -871,20 +871,26 @@ final class EditorUITests: XCTestCase {
     }
 
     /// Read-first opening (plan S2) on the REAL document path (XR_REAL=1: UIDocument + the app's own editor screen, the
-    /// way Recent / Browse / Open-in open a file), English then Arabic interface, the store letter written as an
-    /// EXISTING file (XR_DOC_B64):
+    /// way Recent / Browse / Open-in open a file), English then Arabic interface, a 6-page document (the store letter
+    /// + 5 pages, tests/reading_6p.docx, scripts/make_reading_fixtures.py) written as an EXISTING file (XR_DOC_B64):
     /// 1. it opens in reading state: the bar shows Edit / تحرير and no Undo / Aa; the editor itself is view-restricted,
     ///    its input field read-only and its tab row + status bar hidden (xr-read-probe, read from the editor every
-    ///    0.5 s); a tap on the page brings no keyboard but the page capsule, which opens Go to Page (English run);
+    ///    0.5 s); the page count reaches 1 / 6 WITHOUT a touch (Word paginates after opening: the capsule follows the
+    ///    engine, not the finger) and the capsule fades by itself; a tap on the page brings no keyboard but the page
+    ///    capsule ("Page 1 of 6"). English run: a long press on the text offers Copy + Select All only (no Cut, Paste,
+    ///    Bold); the capsule's Go to Page 3 lands on page 3 / 6; a swipe in reading state moves to a later page;
     /// 2. Edit / Done 10 times: every switch reaches the editor (restriction, input field, chrome) and the label follows;
     /// 3. Edit once more, type an English and an Arabic line (the input field is healthy after the switches) and save;
     ///    check_saved.py finds both lines in xr-read-<lang>.docx with the letter kept;
     /// 4. (English) the mode is remembered per file: Back + reopen -> editing; Done, Back + reopen -> reading; with the
     ///    setting off (-xr.readingView NO) the file opens for editing;
-    /// 5. (English) a PDF opens in reading state without the PDF tool bar; Edit brings the bar, Done hides it again.
+    /// 5. (English) a 6-page PDF (tests/reading_6p.pdf) opens in reading state without the PDF tool bar, its count
+    ///    1 / 6 without a touch; Go to Page 3 lands on page 3 / 6; Edit brings the bar, Done hides it again.
     /// New documents opening for editing is covered by testTitleMenuRenameSaveReopen (its blank is a new document).
     func testReadingViewEditDoneThenType() throws {
-        guard let b64 = ProcessInfo.processInfo.environment["XR_SAMPLE_B64"] else { throw XCTSkip("no sample passed") }
+        // the multi-page files (S2 review: with the 1-page letter every probe read 1/1 whatever the app did)
+        guard let b64 = ProcessInfo.processInfo.environment["XR_READ_DOCX_B64"] else { throw XCTSkip("no reading document passed") }
+        let pages = 6                                      // make_reading_fixtures.py PAGES (both files)
         continueAfterFailure = true                        // the Arabic half still reports when English fails
         // iPad: Done is in the bar; iPhone: ⋯ > Reading View (the bar keeps the file name)
         let wide = UIDevice.current.userInterfaceIdiom == .pad
@@ -978,6 +984,31 @@ final class EditorUITests: XCTestCase {
                 while Date() < end { if !app.keyboards.firstMatch.exists { return true }; Thread.sleep(forTimeInterval: 0.3) }
                 return !app.keyboards.firstMatch.exists
             }
+            /// the probe's "page=<p>/<n>" (the editor's own page on screen and page count)
+            func pageOf(_ s: String) -> (p: Int, n: Int)? {
+                guard let r = s.range(of: "page=") else { return nil }
+                let parts = s[r.upperBound...].prefix { $0 != " " }.split(separator: "/")
+                guard parts.count == 2, let p = Int(parts[0]), let n = Int(parts[1]) else { return nil }
+                return (p, n)
+            }
+            /// Go to Page from the capsule (shown by a touch first: it fades 1.5 s after the last one), then waits for
+            /// the editor to be on that page; returns the probe
+            func goToPage(_ n: Int, _ what: String) -> String {
+                let web = app.webViews.firstMatch, capsule = app.buttons["xr-read-page"]
+                web.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+                guard capsule.waitForExistence(timeout: 3) else { XCTFail("no page capsule for Go to Page (\(what))"); return snap("xr-read-probe") }
+                capsule.tap()
+                let alert = app.alerts.firstMatch
+                guard alert.waitForExistence(timeout: 5) else { XCTFail("the page capsule did not open Go to Page (\(what))"); return snap("xr-read-probe") }
+                let field = alert.textFields.firstMatch
+                if !app.keyboards.firstMatch.waitForExistence(timeout: 3) { field.tap() }
+                field.typeText("\(n)")
+                shot(app, "72-read-\(what)-go-to-page")
+                let go = alert.buttons.matching(NSPredicate(format: "identifier == 'xr-read-page-go' OR label == 'Go' OR label == 'انتقال'")).firstMatch
+                if go.exists { go.tap() } else { XCTFail("no Go in the Go to Page alert (\(what))") }
+                XCTAssertTrue(noKeyboard(5), "the keyboard stayed up after Go to Page while reading (\(what))")
+                return waitRead(["read=1", "page=\(n)/\(pages)"], 15)
+            }
 
             guard waitEditor("opened") else {
                 XCTFail("the real editor did not open (\(lang))"); app.terminate(); continue
@@ -997,11 +1028,21 @@ final class EditorUITests: XCTestCase {
             let back = app.buttons["xr-bar-back"]
             if ar { XCTAssertGreaterThan(back.frame.midX, editButton().frame.midX, "Arabic bar not mirrored: Back \(back.frame) Edit \(editButton().frame)") }
             else { XCTAssertLessThan(back.frame.midX, editButton().frame.midX, "bar order: Back \(back.frame) Edit \(editButton().frame)") }
+            // the page count without any touch on the page: the capsule follows the engine's own count (Word paginates
+            // after opening - at content-ready the count was still 0, S2 review)
+            let counted = waitRead(["read=1", "page=1/\(pages)"], 45)
+            print("XR read \(lang) count without a touch: \(counted) | \(counted.contains("page=1/\(pages)") ? "PASS" : "FAIL")")
+            XCTAssertTrue(counted.contains("page=1/\(pages)"), "the page count did not reach 1/\(pages) without a touch (\(lang)): \(counted)")
+            // the capsule shows once the count is known and fades 1.5 s later by itself (no VoiceOver here)
+            let capsule = app.buttons["xr-read-page"]
+            var faded = false
+            for _ in 0..<20 where !faded { Thread.sleep(forTimeInterval: 0.5); faded = !capsule.exists }
+            print("XR read \(lang) capsule faded without a touch: \(faded)")
+            XCTAssertTrue(faded, "the page capsule did not fade by itself while reading (\(lang))")
             // a tap on the page shows the page capsule (it fades 1.5 s after the last touch) and brings no keyboard (the
             // input field is read-only)
             let web = app.webViews.firstMatch
             web.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)).tap()
-            let capsule = app.buttons["xr-read-page"]
             let capsuleShown = capsule.waitForExistence(timeout: 2)
             let capsuleLabel = capsuleShown ? capsule.label : "(none)"
             shot(app, "71-read-\(lang)-tapped")
@@ -1010,25 +1051,54 @@ final class EditorUITests: XCTestCase {
             XCTAssertFalse(keyboardUp, "a tap brought the keyboard up while reading (\(lang))")
             XCTAssertTrue(capsuleShown, "no page capsule while reading (\(lang))")
             if capsuleShown {
-                XCTAssertTrue(capsuleLabel.hasPrefix(ar ? "الصفحة 1 من" : "Page 1 of"), "page capsule label (\(lang)): \(capsuleLabel)")
+                XCTAssertEqual(capsuleLabel, ar ? "الصفحة 1 من \(pages)" : "Page 1 of \(pages)", "page capsule label (\(lang))")
             }
-            if !ar && capsuleShown {
-                // Go to Page from the capsule (shown again by a touch first: it fades 1.5 s after the last one)
-                web.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-                if capsule.waitForExistence(timeout: 3) { capsule.tap() }
-                let alert = app.alerts.firstMatch
-                if alert.waitForExistence(timeout: 5) {
-                    let field = alert.textFields.firstMatch
-                    if !app.keyboards.firstMatch.waitForExistence(timeout: 3) { field.tap() }
-                    field.typeText("1")
-                    shot(app, "72-read-en-go-to-page")
-                    let go = alert.buttons.matching(NSPredicate(format: "identifier == 'xr-read-page-go' OR label == 'Go'")).firstMatch
-                    if go.exists { go.tap() } else { XCTFail("no Go in the Go to Page alert") }
-                    XCTAssertTrue(noKeyboard(5), "the keyboard stayed up after Go to Page while reading")
-                    let after = waitRead(["read=1", "page=1/"])
-                    print("XR read en go to page: \(after)")
-                    XCTAssertTrue(after.contains("input=ro") && after.contains("view=1"), "Go to Page left reading state: \(after)")
-                } else { XCTFail("the page capsule did not open Go to Page") }
+            if !ar {
+                // a long press on the letter's text (its second paragraph: about the same place on the iPhone and the
+                // iPad page) selects a word and shows the app's edit menu with only what does not edit
+                func menuLabels() -> [String] {
+                    let known = ["Cut", "Copy", "Paste", "Select All", "Bold", "Italic"]
+                    var l = app.menuItems.allElementsBoundByIndex.map(\.label)
+                    if l.isEmpty { l = known.filter { app.buttons[$0].exists } }
+                    return l
+                }
+                var labels: [String] = []
+                for y in [0.228, 0.215, 0.242] where !labels.contains("Copy") {
+                    app.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: y)).press(forDuration: 1.2)
+                    Thread.sleep(forTimeInterval: 1)
+                    labels = menuLabels()
+                    if !labels.contains("Copy") {
+                        print("XR read en long press at \(y): [\(labels.joined(separator: ","))]")
+                        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8)).tap(); Thread.sleep(forTimeInterval: 0.6)
+                    }
+                }
+                shot(app, "71b-read-en-long-press")
+                let ro = waitRead(["read=1"], 2)
+                print("XR read en long press menu: [\(labels.joined(separator: ","))] keyboard=\(app.keyboards.firstMatch.exists) | \(ro)")
+                XCTAssertTrue(labels.contains("Copy") && labels.contains("Select All"), "reading edit menu without Copy / Select All: \(labels)")
+                XCTAssertTrue(Set(labels).isDisjoint(with: ["Cut", "Paste", "Bold", "Italic"]), "reading edit menu offers editing: \(labels)")
+                XCTAssertFalse(app.keyboards.firstMatch.exists, "a long press brought the keyboard up while reading")
+                app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8)).tap()           // closes the menu
+                Thread.sleep(forTimeInterval: 0.6)
+                // Go to Page 3 from the capsule: the editor lands on page 3 (the count is the real one now)
+                let after = goToPage(3, "en")
+                print("XR read en go to page 3: \(after) | \(after.contains("page=3/\(pages)") ? "PASS" : "FAIL")")
+                XCTAssertTrue(after.contains("page=3/\(pages)"), "Go to Page 3 did not land on page 3 of \(pages): \(after)")
+                XCTAssertTrue(after.contains("input=ro") && after.contains("view=1"), "Go to Page left reading state: \(after)")
+                shot(app, "72b-read-en-page-3")
+                // a swipe in reading state scrolls the document (no pointer event is blocked) and the page follows
+                let before = pageOf(after)?.p ?? 3
+                var moved = after
+                for _ in 0..<2 where (pageOf(moved)?.p ?? before) <= before {
+                    web.swipeUp()
+                    moved = snap("xr-read-probe")
+                    let end = Date().addingTimeInterval(4)
+                    while Date() < end && (pageOf(moved)?.p ?? before) <= before { Thread.sleep(forTimeInterval: 0.3); moved = snap("xr-read-probe") }
+                }
+                print("XR read en swipe: page \(before) -> \(pageOf(moved)?.p ?? -1) keyboard=\(app.keyboards.firstMatch.exists) | \(moved)")
+                shot(app, "72c-read-en-swiped")
+                XCTAssertGreaterThan(pageOf(moved)?.p ?? before, before, "a swipe in reading state did not move to a later page: \(moved)")
+                XCTAssertFalse(app.keyboards.firstMatch.exists, "a swipe brought the keyboard up while reading")
             }
             // 2. Edit / Done 10 times (odd switches: editing, even: reading)
             var switches = 0
@@ -1100,8 +1170,9 @@ final class EditorUITests: XCTestCase {
             } else { XCTFail("the editor did not open with the setting off") }
             app.terminate()
 
-            // 5. a PDF: reading state without the PDF tool bar; Edit brings it, Done hides it again
-            guard let pdf = ProcessInfo.processInfo.environment["XR_PDF_B64"] else { continue }
+            // 5. a 6-page PDF: reading state without the PDF tool bar, its count without a touch, Go to Page 3; Edit
+            // brings the bar, Done hides it again
+            guard let pdf = ProcessInfo.processInfo.environment["XR_READ_PDF_B64"] else { XCTFail("no reading PDF passed"); continue }
             app = launchReal(lang, "xr-read.pdf", pdf)
             guard waitEditor("pdf") else { XCTFail("the PDF did not open"); app.terminate(); continue }
             let bar = app.descendants(matching: .any).matching(identifier: "xr-pdf-bar").firstMatch
@@ -1110,6 +1181,12 @@ final class EditorUITests: XCTestCase {
             shot(app, "79-read-pdf-opened")
             XCTAssertTrue(pr.contains("read=1") && pr.contains("toolbar=0") && pr.contains("status=0"), "the PDF did not open in reading state: \(pr)")
             XCTAssertFalse(bar.exists, "the PDF tool bar is shown while reading")
+            let pc = waitRead(["read=1", "page=1/\(pages)"], 30)
+            print("XR read pdf count without a touch: \(pc)")
+            XCTAssertTrue(pc.contains("page=1/\(pages)"), "the PDF page count did not reach 1/\(pages) without a touch: \(pc)")
+            let pg = goToPage(3, "pdf")
+            print("XR read pdf go to page 3: \(pg)")
+            XCTAssertTrue(pg.contains("page=3/\(pages)"), "Go to Page 3 did not land on PDF page 3 of \(pages): \(pg)")
             let n0 = applied(snap("xr-read-probe"))
             editButton().tap()
             let pe = waitRead(["read=0", "app=0"], after: n0)

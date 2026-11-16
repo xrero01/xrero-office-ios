@@ -157,21 +157,24 @@ struct ReadingChrome: ViewModifier {
                     .keyboardType(.numberPad)
                     .accessibilityIdentifier("xr-read-page-field")
                 Button(BarText.go(ar)) {
-                    // any digits the keyboard typed (Arabic-Indic ones too: wholeNumberValue reads them), at most 6
+                    // any digits the keyboard typed (Arabic-Indic ones too: wholeNumberValue reads them), at most 6.
+                    // Clamped by the editor itself (__xrReadGoTo reads its live page count): the app's count may still
+                    // be 0 while Word paginates, and clamping to that sent every early jump to page 1 (S2 review)
                     let n = pageText.compactMap(\.wholeNumberValue).prefix(6).reduce(0) { $0 * 10 + $1 }
-                    if n >= 1 { controller.goToPage(min(n, max(state.pages, 1)) - 1) }
+                    if n >= 1 { controller.goToPage(state.pages > 0 ? min(n, state.pages) - 1 : n - 1) }
                 }
                 .accessibilityIdentifier("xr-read-page-go")
                 Button(BarText.cancel(ar), role: .cancel) {}
             } message: {
-                Text(BarText.pageRange(max(state.pages, 1), ar))
+                Text(state.pages > 0 ? BarText.pageRange(state.pages, ar) : "")     // no range before the count is known
             }
     }
 }
 
 /// "3 / 12" (13 pt, .regularMaterial - solid under Reduce Transparency), at the bottom of the page while reading. It
-/// shows on opening, while a finger moves the page and when the page changes, and fades 1.5 s after (at once with Reduce
-/// Motion; never with VoiceOver on, so it stays reachable). A tap opens Go to Page. Digits are never mirrored.
+/// shows once the editor has told its page count (never a made-up "1 / 1" while Word is still paginating), while a
+/// finger moves the page and when the page or the count changes, and fades 1.5 s after (at once with Reduce Motion;
+/// never with VoiceOver on, so it stays reachable). A tap opens Go to Page. Digits are never mirrored.
 private struct PageCapsule: View {
     @ObservedObject var state: EditorState
     var ar: Bool
@@ -182,7 +185,7 @@ private struct PageCapsule: View {
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
 
     var body: some View {
-        let n = max(state.pages, 1), p = min(max(state.page + 1, 1), n)
+        let known = state.pages > 0, n = max(state.pages, 1), p = min(max(state.page + 1, 1), n)
         Button(action: tap) {
             Text(verbatim: "\(p) / \(n)")                    // the same digits as its spoken label
                 .font(.system(size: 13, weight: .semibold))
@@ -200,9 +203,9 @@ private struct PageCapsule: View {
         }
         .buttonStyle(.plain)
         .dynamicTypeSize(...DynamicTypeSize.accessibility1)
-        .opacity(visible ? 1 : 0)
-        .allowsHitTesting(visible)
-        .accessibilityHidden(!visible)
+        .opacity(visible && known ? 1 : 0)
+        .allowsHitTesting(visible && known)
+        .accessibilityHidden(!visible || !known)
         .accessibilityLabel(BarText.page(p, n, ar))
         .accessibilityHint(BarText.goToPage(ar))
         .accessibilityIdentifier("xr-read-page")

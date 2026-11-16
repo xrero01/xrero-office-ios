@@ -41,6 +41,10 @@ struct EditorScreen: View {
         fileURL?.lastPathComponent ?? ("Document." + document.kind.fileExtension)
     }
 
+    /// Where the file is now (plan S2's per-file reading memory): the model's URL, which a Rename / Move updates at once,
+    /// read when called - a closure kept by the ⋯ menu still finds the new name.
+    private var currentFile: URL? { files?.fileURL ?? fileURL }
+
     var body: some View {
         EditorWebView(document: $document, title: title, lang: lang, onCommand: handle, controller: controller,
                       reading: reading)
@@ -63,9 +67,10 @@ struct EditorScreen: View {
                           titleMenu: files == nil ? nil : TitleMenuActions(rename: startRename, duplicate: duplicate,
                                                                            move: startMove),
                           format: document.kind == .word,
-                          // plan S2: Edit / Done (Word, PDF)
+                          // plan S2: Edit / Done (Word, PDF). The file is looked up when tapped: the ⋯ menu keeps this
+                          // closure until its key changes, so a captured URL would be the name before a Rename / Move
                           reading: reading,
-                          toggleReading: { reading.toggle(controller, file: fileURL, reduceMotion: reduceMotion) }) {
+                          toggleReading: { reading.toggle(controller, file: currentFile, reduceMotion: reduceMotion) }) {
                 DocumentMenuItems(kind: document.kind, lang: lang, signedIn: account.isSignedIn, model: menu,
                                   controller: controller,
                                   language: { if $0 != lang { pendingLang = $0 } },
@@ -123,7 +128,7 @@ struct EditorScreen: View {
     /// Save (only when something changed: the converter would otherwise rewrite a file that was just looked at),
     /// then back to the documents - after 10 s at the latest, so a stuck save never traps the user in the editor.
     private func close() {
-        reading.remember(fileURL)           // plan S2: the file reopens in the mode it is left in
+        reading.remember(currentFile)       // plan S2: the file reopens in the mode it is left in
         var finished = false
         let finish = {
             if finished { return }

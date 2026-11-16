@@ -1319,20 +1319,31 @@
   //    tap on the page never brings the keyboard up; select, Copy, Find, pinch and scrolling keep working - no pointer
   //    event on the canvas is blocked;
   //  - html.xr-read hiding the edit chrome: the tab row with its ribbon and the status bar (the app shows a floating
-  //    page capsule instead), the layout re-measured so the page gets their height. Edit fades them back in (200 ms;
-  //    at once with Reduce Motion).
+  //    page capsule instead), on iPad also the side icon columns (#left-menu, #right-menu: the insert / settings
+  //    panels) and Word's rulers (the engine's own View > Rulers switch, put back on Edit), the layout re-measured so
+  //    the page gets their room. The text caret is hidden too: a blinking caret says "you can type here" (the engine
+  //    still places it for selection and Copy). Edit fades the chrome back in (200 ms; at once with Reduce Motion).
   // A page loaded in reading state (XreroHost.read '1': a reload after a language switch or a crash keeps the mode)
   // hides the chrome at content-ready, before its first paint; the restriction follows one task later, after the
   // editor's own DocProtection has applied the document's protection (a promise right after content-ready).
-  // Never on the keystroke path: the only per-event cost is the reading check in the touch listeners (O(1)).
+  // The capsule's "page / pages" follows the engine while reading: its page count (asc_onCountPages - Word paginates
+  // after content-ready, so the count at opening is still 0 or 1), its current page (asc_onCurrentPage) and, in Word,
+  // every scroll of the view (asc_onDocumentPlaceChanged, switched on only while reading): a scroll by VoiceOver, a
+  // page jump or momentum after the finger left moves the capsule as a finger does.
+  // Never on the keystroke path: those callbacks return at once while editing, and the touch listeners only check the
+  // reading flag (O(1)).
   var READS = /documenteditor|pdfeditor/.test(location.pathname), PDFED = /pdfeditor/.test(location.pathname);
-  var read = { on: false, want: H.read === '1', ready: false, prev: null, poll: 0, last: 0, setting: false, watching: false };
+  var read = { on: false, want: H.read === '1', ready: false, prev: null, poll: 0, last: 0, setting: false, watching: false,
+               rulers: null, place: false };
   (function readingCss() {
     if (!READS) return;
-    var css = 'html.xr-read #toolbar,html.xr-read #statusbar{display:none!important}' +
+    var chrome = ['#toolbar', '#statusbar', '#left-menu', '#right-menu', '#viewport-hbox-layout>.layout-resizer'];
+    var sel = function (pre) { return chrome.map(function (c) { return pre + ' ' + c; }).join(','); };
+    var css = sel('html.xr-read') + '{display:none!important}' +
+      'html.xr-read #id_target_cursor{visibility:hidden!important}' +
       '@keyframes xr-edit-in{from{opacity:0}to{opacity:1}}' +
-      'html.xr-edit-in #toolbar,html.xr-edit-in #statusbar{animation:xr-edit-in .2s ease-out}' +
-      '@media (prefers-reduced-motion:reduce){html.xr-edit-in #toolbar,html.xr-edit-in #statusbar{animation:none}}';
+      sel('html.xr-edit-in') + '{animation:xr-edit-in .2s ease-out}' +
+      '@media (prefers-reduced-motion:reduce){' + sel('html.xr-edit-in') + '{animation:none}}';
     var add = function () {
       if (document.getElementById('xr-read-css')) return;
       var s = document.createElement('style'); s.id = 'xr-read-css'; s.textContent = css;
@@ -1347,7 +1358,8 @@
     return (ctl && ctl.toolbar) || null;
   }
   // the page count and the page on screen (0-based) for the app's capsule: Word's first visible page, the PDF viewer's
-  // current one. Read only while reading (on entering, while a finger moves, after a page jump).
+  // current one. Read only while reading (on entering, when the engine reports a page / count / scroll change, while a
+  // finger moves, after a page jump).
   function readPage() {
     var api = window.__xrApi;
     if (!api || !READS) return;
@@ -1415,6 +1427,34 @@
         try { if (read.on) readRestriction(); } catch (e) { log('reading view: restriction', e && e.message || e); }
       }, 0);
     });
+    // the capsule's page / count (see above). Word sends asc_onCountPages at the end of every recalculation, so also
+    // after each key while editing: the handler then returns at once (hub.on keeps it in the measured budget)
+    var follow = function () { if (read.on) readPage(); };
+    hub.on(api, 'asc_onCountPages', follow);
+    hub.on(api, 'asc_onCurrentPage', follow);
+    if (!PDFED) hub.on(api, 'asc_onDocumentPlaceChanged', follow);
+  }
+  // Word's view-scroll callback (asc_onDocumentPlaceChanged) on while reading only; off again on Edit, so editing
+  // (where the engine scrolls with the caret) sends none
+  function readScroll(on) {
+    var api = window.__xrApi;
+    if (PDFED || !api || !api.asc_SetDocumentPlaceChangedEnabled || read.place === on) return;
+    read.place = on;
+    api.asc_SetDocumentPlaceChangedEnabled(on);
+  }
+  // Word's rulers (iPad: a strip above and beside the page) go while reading, through the engine's own View > Rulers
+  // switch (no setting is written); on Edit they come back only if they were shown
+  function readRulers(on) {
+    var api = window.__xrApi;
+    if (PDFED || !api || !api.asc_SetViewRulers || !api.asc_GetViewRulers) return;
+    if (on) {
+      if (read.rulers === null) read.rulers = !!api.asc_GetViewRulers();
+      if (api.asc_GetViewRulers()) api.asc_SetViewRulers(false);
+    } else if (read.rulers !== null) {
+      var shown = read.rulers;
+      read.rulers = null;
+      if (shown && !api.asc_GetViewRulers()) api.asc_SetViewRulers(true);
+    }
   }
   // the chrome's height goes to the page (and comes back): the editors' own window-resize path re-lays the viewport
   // out (hidden layout items take no room) and resizes the canvas. iPad: once the ribbon is shown again it is measured
@@ -1440,9 +1480,13 @@
     read.on = on;
     var html = document.documentElement;
     html.classList.toggle('xr-read', on);
+    // the launcher page around this frame (xr-editor.html): the strip under the home indicator takes the canvas grey
+    try { if (window.top !== window) top.document.documentElement.classList.toggle('xr-read', on); } catch (e) {}
     html.classList.toggle('xr-edit-in', !on);
     if (!on) setTimeout(function () { html.classList.remove('xr-edit-in'); }, 260);
     if (!on && read.poll) { clearInterval(read.poll); read.poll = 0; hub.set('moving', false); }
+    try { readRulers(on); } catch (e) { log('reading view: rulers', e && e.message || e); }
+    try { readScroll(on); } catch (e) { log('reading view: scroll', e && e.message || e); }
     readLayout();
     if (on) readPage();
   }
@@ -1487,9 +1531,15 @@
     if (!READS || !read.want) return;
     try { readChrome(true); readKeyboard(true); } catch (e) { log('reading view: open', e && e.message || e); }
     setTimeout(function () {
-      try { if (read.want) readRestriction(); log('reading view at open: ' + window.__xrReadState()); }
-      catch (e) { log('reading view: open', e && e.message || e); }
+      try {
+        if (read.want) { readRestriction(); readRulers(read.on); readPage(); }
+        log('reading view at open: ' + window.__xrReadState());
+      } catch (e) { log('reading view: open', e && e.message || e); }
     }, 0);
+    // the count once the opening has settled (the callbacks above normally have it already; logged for CI)
+    setTimeout(function () {
+      try { if (read.on) { readPage(); log('reading view 3 s after open: ' + window.__xrReadState()); } } catch (e) {}
+    }, 3000);
   }
 
   var A = {

@@ -16,6 +16,10 @@
        bar's colour */
     #wrap { position: absolute; left: env(safe-area-inset-left); right: env(safe-area-inset-right); top: 0;
             bottom: env(safe-area-inset-bottom); }
+    /* reading view (plan S2): no status bar above the strip, so the strip takes the canvas grey around the page
+       (xr-host.js neutralChrome --xr-canvas); the editor frame sets html.xr-read here while reading */
+    html.xr-read, html.xr-read body { background: #F2F2F7; }
+    @media (prefers-color-scheme: dark) { html.xr-read, html.xr-read body { background: #000; } }
   </style>
 </head>
 <body>

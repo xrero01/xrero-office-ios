@@ -36,6 +36,9 @@ jobs:
       - name: Template gallery files are the generated ones (EN + AR, right-to-left Arabic, live formulas)
         run: python3 scripts/make_gallery_templates.py --verify
 
+      - name: Reading-view test files are the generated ones (6-page .docx + .pdf, plan S2)
+        run: python3 scripts/make_reading_fixtures.py --verify
+
       - name: Editors (Xrero payload subset) + app web folder
         run: |
           set -e
@@ -72,6 +75,9 @@ jobs:
           export TEST_RUNNER_XR_SAMPLE_NAME=ar_letter.docx
           export TEST_RUNNER_XR_SAMPLE_B64=$(base64 -i tests/ar_letter.docx | tr -d '\n')
           export TEST_RUNNER_XR_PDF_B64=$(base64 -i tests/ar_letter.pdf | tr -d '\n')
+          # the reading view (plan S2): 6-page files, so its page capsule / Go to Page / scrolling are really exercised
+          export TEST_RUNNER_XR_READ_DOCX_B64=$(base64 -i tests/reading_6p.docx | tr -d '\n')
+          export TEST_RUNNER_XR_READ_PDF_B64=$(base64 -i tests/reading_6p.pdf | tr -d '\n')
           RC=0
           for DEV in $IPHONE $IPAD; do
             xcrun simctl boot $DEV 2>/dev/null; xcrun simctl bootstatus $DEV -b >/dev/null
