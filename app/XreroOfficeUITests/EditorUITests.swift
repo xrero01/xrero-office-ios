@@ -897,6 +897,295 @@ final class EditorUITests: XCTestCase {
         }
     }
 
+    /// Files (plan S9), iPhone and iPad, on the REAL document path (XR_REAL=1 + XR_REAL_IDLE=1: the app's own
+    /// DocumentOpener, called the way Home calls it), English interface then Arabic.
+    /// English: Browse files and Open a PDF present the system document picker as a sheet - a page sheet on iPhone, a
+    /// form sheet on iPad, the screen behind it still in the window - whose standard Cancel closes it; a file picked in
+    /// it opens in the editor where it is and goes to Recent (the picker is up and picks through its delegate, the call
+    /// a tap in its list makes - xrero-autotest://pick - because the remote picker on the CI hosts never hands a file
+    /// over; review-video taps a real one); a new document closed without a change is removed, file and Recent row,
+    /// while the next one, typed into, is kept under the same (free again) name and stays when reopened from Recent and
+    /// closed unchanged; a new document another window also has open (iPad / Mac windows share the process and Recent)
+    /// is kept when this window closes it unchanged. Arabic: the same untouched / typed pair on the right-to-left
+    /// blank (مستند.docx) - opening the Arabic blank must not count as an edit. (The system picker itself follows the
+    /// system language, not the in-app one - as the old browser did.) check_saved.py then reads Document.docx ("Kept"
+    /// inside), Document 2.docx (kept for the other window, never typed into) and مستند.docx (محفوظ inside), and finds
+    /// no other "Document N" / "مستند N" file.
+    func testFilesPickerSheetAndUntouchedNewFile() {
+        continueAfterFailure = true                        // every step still reports when one fails
+        let pad = UIDevice.current.userInterfaceIdiom == .pad
+        for lang in ["en", "ar"] {
+            let ar = lang == "ar"
+            let app = XCUIApplication()
+            app.launchArguments = ["-xr.lang", lang]
+            app.launchEnvironment = ["XR_REAL": "1", "XR_REAL_IDLE": "1", "XR_NEW_NAME": "xr-pick.docx"]
+            app.launch()
+            let listButton = app.buttons["xr-real-list"]
+            XCTAssertTrue(listButton.waitForExistence(timeout: 30), "the harness did not start (\(lang))")
+            let title = app.staticTexts["xr-bar-title"], status = app.staticTexts["xr-bar-status"]
+            func text(_ id: String) -> String { (try? app.staticTexts[id].firstMatch.snapshot())?.label ?? "" }
+            func titleNow() -> String { (try? title.firstMatch.snapshot())?.label ?? "(none)" }
+            func waitEditor(_ what: String) -> Bool {
+                let end = Date().addingTimeInterval(120)
+                while Date() < end {
+                    let s = (try? status.firstMatch.snapshot())?.label ?? ""
+                    // "Opening…" / its Arabic (BarText.opening)
+                    if title.exists && !s.hasPrefix("Opening") && !s.hasPrefix("\u{062C}\u{0627}\u{0631}\u{064D} \u{0627}\u{0644}\u{0641}\u{062A}\u{062D}") {
+                        sleep(3); return true
+                    }
+                    Thread.sleep(forTimeInterval: 0.5)
+                }
+                shot(app, "79-files-\(lang)-\(what)-not-ready")
+                return false
+            }
+            /// Back, then the harness again (the editor and its save on close have finished: 10 s at most, then the
+            /// dismissal). CI run 153, iPhone: one Back tap never reached the editor (still open 80 s later, then closed
+            /// normally by the next Back). So after 20 s with the editor still up, Back is tapped once more, as a person
+            /// would - logged, with what takes a touch there (hit-test, read once the harness is back); the app closes a
+            /// file only once however often Back is tapped.
+            func closeEditor(_ what: String) -> Bool {
+                let back = app.buttons["xr-bar-back"]
+                // a tap on a missing element would end the whole test: say so and go on with the next step instead
+                guard back.waitForExistence(timeout: 5) else { XCTFail("no editor to close (\(lang) \(what))"); return false }
+                back.tap()
+                var ok = listButton.waitForExistence(timeout: 20)
+                if !ok && back.exists && back.isHittable {
+                    let f = back.frame
+                    XCUIDevice.shared.system.open(URL(string: "xrero-autotest://hit?x=\(Int(f.midX))&y=\(Int(f.midY))")!)
+                    sleep(1)
+                    shot(app, "78-files-\(lang)-\(what)-back-lost")
+                    print("XR files Back did not close the editor (\(lang) \(what)) - tapping it again; frame \(f)")
+                    back.tap()
+                    ok = listButton.waitForExistence(timeout: 30)
+                    if ok { print("XR files second Back closed it (\(lang) \(what)); \(text("xr-real-hit"))") }
+                }
+                XCTAssertTrue(ok, "the editor did not close (\(lang) \(what))")
+                sleep(1)
+                return ok
+            }
+            /// how many taps a harness button received (its counter label: "taps:browse=1 pdf=0 new=2 ...")
+            func taps(_ b: String) -> Int {
+                let t = text("xr-real-taps")
+                guard let r = t.range(of: ":" + b + "=") ?? t.range(of: " " + b + "=") else { return -1 }
+                return Int(t[r.upperBound...].prefix { $0.isNumber }) ?? -1
+            }
+            /// Taps a harness button and checks that the tap reached the app (its counter went up). A lost tap is
+            /// diagnosed - which window / view takes a touch at that point (hit-test inside the app), what is presented -
+            /// and tried once more at the button's coordinate; a tap that still never arrives fails the test.
+            @discardableResult
+            func tapHarness(_ b: String) -> Bool {
+                let e = app.buttons["xr-real-" + b]
+                guard e.waitForExistence(timeout: 10) else { XCTFail("no \(b) button on the harness"); return false }
+                let before = taps(b)
+                e.tap()
+                /// The counter went up - or the harness left the screen: the tap opened something over it. New opens
+                /// the editor full screen at once; CI run 160 (iPhone "new", iPad "newheld") had it up before the
+                /// counter was read, and the next query of the gone button ended the whole test. Whether it really
+                /// opened is the caller's next check (waitEditor / the picker's Cancel).
+                func reached() -> Bool {
+                    let end = Date().addingTimeInterval(3)
+                    while Date() < end {
+                        if taps(b) > before { return true }
+                        if !e.exists {
+                            print("XR files tap on \(b): the harness is covered (something opened over it)")
+                            return true
+                        }
+                        Thread.sleep(forTimeInterval: 0.2)
+                    }
+                    return false
+                }
+                if reached() { return true }
+                // gone since the last look: the same as above (never query the frame of a button that is not there)
+                guard e.exists else { print("XR files tap on \(b): the harness is covered (late)"); return true }
+                let f = e.frame
+                XCUIDevice.shared.system.open(URL(string: "xrero-autotest://hit?x=\(Int(f.midX))&y=\(Int(f.midY))")!)
+                Thread.sleep(forTimeInterval: 2)
+                print("XR files tap on \(b) did not reach the app; frame \(f) hittable=\(e.isHittable); \(text("xr-real-hit")); \(text("xr-real-picker"))")
+                shot(app, "78-files-tap-lost-\(b)")
+                app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: f.midX, dy: f.midY)).tap()
+                if reached() { print("XR files tap on \(b): reached the app when tapped at its coordinate"); return true }
+                XCTFail("taps on \(b) never reach the app: \(text("xr-real-hit"))")
+                return false
+            }
+            /// the office files in Documents and what the last picker was (the harness's list button). The files label
+            /// says "files#<n>:", so a stale answer (a tap that never arrived) is told from a fresh one.
+            func list() -> (files: [String], picker: String) {
+                func gen() -> String { String(text("xr-real-files").prefix { $0 != ":" }) }
+                let before = gen()
+                tapHarness("list")
+                let end = Date().addingTimeInterval(5)
+                while Date() < end && gen() == before { Thread.sleep(forTimeInterval: 0.25) }
+                XCTAssertNotEqual(gen(), before, "the harness's list did not refresh")
+                let all = text("xr-real-files")
+                let f = all.drop { $0 != ":" }.dropFirst().split(separator: "|").map(String.init)
+                return (f, text("xr-real-picker"))
+            }
+            /// what the last close decided for a new file (DocumentOpener.lastClosed), once it starts with `want`
+            /// (a removal ends on a background queue), 15 s at most
+            func closedNow(_ want: String) -> String {
+                let end = Date().addingTimeInterval(15)
+                var t = text("xr-real-closed")
+                while Date() < end && !t.hasPrefix("closed:" + want) { Thread.sleep(forTimeInterval: 0.3); t = text("xr-real-closed") }
+                return t
+            }
+            func cancelButton() -> XCUIElement {
+                app.buttons.matching(NSPredicate(format: "label IN {'Cancel', 'Close'}")).firstMatch
+            }
+            /// nothing presented over the screen any more (the harness's live label, read without a tap), 10 s at most
+            func nothingPresented() -> Bool {
+                let end = Date().addingTimeInterval(10)
+                while Date() < end {
+                    if text("xr-real-picker").hasSuffix(" presented:none") { return true }
+                    Thread.sleep(forTimeInterval: 0.3)
+                }
+                return false
+            }
+            /// a word typed into the open editor's page, below its text (a right-to-left blank starts at the right edge)
+            func typeInPage(_ word: String) {
+                let point = app.webViews.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: ar ? 0.65 : 0.35, dy: 0.45))
+                point.tap()
+                if !app.keyboards.firstMatch.waitForExistence(timeout: 4) { point.tap(); _ = app.keyboards.firstMatch.waitForExistence(timeout: 4) }
+                sleep(1)
+                typeSlowly(app, word)
+                sleep(2)
+            }
+
+            if !ar {
+                // 1. Browse files and Open a PDF: the system picker as a sheet over the screen, closed by its Cancel
+                for (button, kind) in [("browse", "files"), ("pdf", "pdf")] {
+                    tapHarness(button)
+                    let cancel = cancelButton()
+                    let up = cancel.waitForExistence(timeout: 20)
+                    sleep(2)
+                    shot(app, "70-files-\(kind)-picker")
+                    XCTAssertTrue(up, "no Cancel in the document picker (\(kind))")
+                    if up { cancel.tap() } else { app.swipeDown() }
+                    let end = Date().addingTimeInterval(10)
+                    while Date() < end && (cancel.exists || !(listButton.exists && listButton.isHittable)) { Thread.sleep(forTimeInterval: 0.3) }
+                    XCTAssertFalse(cancel.exists, "the picker did not close on Cancel (\(kind))")
+                    // gone for real: nothing left presented over the screen (an invisible leftover would swallow every tap)
+                    XCTAssertTrue(nothingPresented(), "something is still presented after Cancel (\(kind)): \(text("xr-real-picker"))")
+                    XCTAssertTrue(listButton.exists && listButton.isHittable, "the screen behind the picker is not usable again (\(kind))")
+                    let r = list()
+                    print("XR files picker \(kind): \(r.picker)")
+                    let want = "picker:UIDocumentPickerViewController \(pad ? "formSheet" : "pageSheet") presenter=1"
+                    XCTAssertTrue(r.picker.hasPrefix(want), "not the document picker as a sheet (\(kind)): \(r.picker), want \(want)")
+                    XCTAssertTrue(r.picker.contains(" cancelled"), "Cancel did not end the picker through its delegate (\(kind)): \(r.picker)")
+                    if kind == "pdf" { XCTAssertTrue(r.picker.contains("types=pdf"), "Open a PDF offers more than PDFs: \(r.picker)") }
+                    shot(app, "71-files-\(kind)-cancelled")
+                }
+
+                // 2. A file picked in the picker opens where it is and is listed in Recent (its bookmark): the picker is
+                //    up and picks xr-pick.docx through its delegate, then afterDismissal closes it and open() opens the file
+                tapHarness("browse")
+                let pickerUp = cancelButton().waitForExistence(timeout: 20)
+                XCTAssertTrue(pickerUp, "no document picker for the pick")
+                sleep(2)
+                shot(app, "72-files-picker-for-pick")
+                XCUIDevice.shared.system.open(URL(string: "xrero-autotest://pick?name=xr-pick.docx")!)
+                let end = Date().addingTimeInterval(60)
+                while Date() < end && !title.exists { Thread.sleep(forTimeInterval: 0.5) }
+                let opened = title.exists && waitEditor("picked")
+                XCTAssertTrue(opened, "the picked file did not open in the editor")
+                if opened {
+                    XCTAssertEqual(titleNow(), "xr-pick", "the picked file is not the one open")
+                    shot(app, "73-files-picked-open")
+                    if closeEditor("picked") {
+                        let r = list()
+                        print("XR files pick: \(text("xr-real-hook")); \(r.picker); recent \(text("xr-real-recent")); \(text("xr-real-closed"))")
+                        XCTAssertEqual(text("xr-real-hook"), "hook:pick sent xr-pick.docx", "the pick did not go through the presented picker")
+                        XCTAssertTrue(r.picker.contains(" picked"), "the picker did not report the pick: \(r.picker)")
+                        XCTAssertTrue(r.picker.hasSuffix(" presented:none"), "the picker is still presented after the pick: \(r.picker)")
+                        XCTAssertEqual(text("xr-real-recent"), "xr-pick.docx", "the picked file is not in Recent")
+                        // a file the user brought is never removed by the app
+                        XCTAssertEqual(text("xr-real-closed"), "closed:not-new xr-pick.docx", "the picked file was treated as a new one")
+                        XCTAssertTrue(r.files.contains("xr-pick.docx"), "the picked file is gone: \(r.files)")
+                    }
+                } else {
+                    shot(app, "73-files-pick-not-opened")
+                    let c = cancelButton()
+                    if c.exists { c.tap() } else if !listButton.exists { app.swipeDown() }
+                    _ = listButton.waitForExistence(timeout: 10)
+                    print("XR files pick: nothing opened; \(text("xr-real-hook")); \(text("xr-real-picker"))")
+                }
+            }
+
+            // 3. New, closed without a change: the file and its Recent row are gone
+            tapHarness("new")
+            guard waitEditor("new-untouched") else { XCTFail("the new document did not open (\(lang))"); app.terminate(); continue }
+            let made = titleNow()
+            XCTAssertEqual(made, ar ? "\u{0645}\u{0633}\u{062A}\u{0646}\u{062F}" : "Document", "a new document's name (\(lang))")
+            shot(app, "74-files-\(lang)-new-untouched")
+            _ = closeEditor("new-untouched")
+            let removed = closedNow("removed")
+            var files = list().files
+            print("XR files \(lang) untouched new \(made).docx -> \(removed); files \(files) recent \(text("xr-real-recent"))")
+            XCTAssertEqual(removed, "closed:removed \(made).docx", "an untouched new file was not removed on close (\(lang))")
+            XCTAssertFalse(files.contains(made + ".docx"), "an untouched new file is still in Documents (\(lang)): \(files)")
+            XCTAssertNotEqual(text("xr-real-recent"), made + ".docx", "the removed file is still in Recent (\(lang))")
+            shot(app, "75-files-\(lang)-untouched-removed")
+
+            // 4. New, typed into, closed: kept (under the name that was free again), in Recent
+            tapHarness("new")
+            guard waitEditor("new-typed") else { XCTFail("the second new document did not open (\(lang))"); app.terminate(); continue }
+            let kept = titleNow()
+            XCTAssertEqual(kept, made, "the second new file did not get the removed file's free name (\(lang))")
+            typeInPage(ar ? "\u{0645}\u{062D}\u{0641}\u{0648}\u{0638}" : "Kept")        // Arabic: "kept"
+            shot(app, "76-files-\(lang)-new-typed")
+            if closeEditor("new-typed") {
+                files = list().files
+                print("XR files \(lang) typed new \(kept).docx -> \(text("xr-real-closed")); files \(files) recent \(text("xr-real-recent"))")
+                XCTAssertTrue(files.contains(kept + ".docx"), "a new file typed into was removed on close (\(lang)): \(files)")
+                XCTAssertEqual(text("xr-real-closed"), "closed:kept \(kept).docx touched", "the typed new file was not kept as edited (\(lang))")
+                XCTAssertEqual(text("xr-real-recent"), kept + ".docx", "the kept new file is not first in Recent (\(lang))")
+            }
+
+            if !ar {
+                // 5. That kept file reopened from Recent and closed unchanged: never removed
+                app.buttons["xr-real-reopen"].tap()
+                if waitEditor("reopened") {
+                    XCTAssertEqual(titleNow(), kept, "Recent reopened another file")
+                    if closeEditor("reopened") {
+                        sleep(2)
+                        files = list().files
+                        print("XR files reopened \(kept).docx -> \(text("xr-real-closed")); files \(files)")
+                        XCTAssertTrue(files.contains(kept + ".docx"), "a kept file was removed after reopening it unchanged: \(files)")
+                        XCTAssertEqual(text("xr-real-closed"), "closed:not-new \(kept).docx", "a reopened file was treated as a new one")
+                    }
+                } else { XCTFail("the kept file did not reopen from Recent") }
+
+                // 6. New, and another window opens it too (iPad / Mac windows share the process and Recent; that window
+                //    may hold unsaved typing in it): this window closes it unchanged and it is KEPT, file and Recent row
+                tapHarness("newheld")
+                if waitEditor("new-held") {
+                    let both = titleNow()
+                    XCTAssertEqual(both, made + " 2", "the held new file's name")
+                    shot(app, "77-files-new-held")
+                    if closeEditor("new-held") {
+                        let decided = closedNow("kept")
+                        files = list().files
+                        print("XR files held new \(both).docx -> \(decided); \(text("xr-real-hook")); files \(files) recent \(text("xr-real-recent"))")
+                        XCTAssertEqual(text("xr-real-hook"), "hook:hold open \(both).docx", "the other window did not open the new file")
+                        XCTAssertEqual(decided, "closed:kept \(both).docx open-elsewhere",
+                                       "a new file still open in another window was not kept")
+                        XCTAssertTrue(files.contains(both + ".docx"), "a new file open in another window was removed: \(files)")
+                        XCTAssertEqual(text("xr-real-recent"), both + ".docx", "the file open in another window left Recent")
+                        // the other window closes it as well: it stays a normal file
+                        tapHarness("release")
+                        let end = Date().addingTimeInterval(10)
+                        while Date() < end && !text("xr-real-hook").hasPrefix("hook:released") { Thread.sleep(forTimeInterval: 0.3) }
+                        XCTAssertEqual(text("xr-real-hook"), "hook:released \(both).docx", "the other window did not close the file")
+                        sleep(2)
+                        files = list().files
+                        XCTAssertTrue(files.contains(both + ".docx"), "the kept file went when the other window closed it: \(files)")
+                    }
+                } else { XCTFail("the held new document did not open") }
+            }
+            shot(app, "77-files-\(lang)-done")
+            app.terminate()
+        }
+    }
+
     /// Opens the Arabic sample passed by the workflow, adds a word, saves it.
     func testOpenArabicSampleAndSave() throws {
         guard let b64 = ProcessInfo.processInfo.environment["XR_SAMPLE_B64"],

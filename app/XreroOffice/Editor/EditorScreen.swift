@@ -144,6 +144,8 @@ struct EditorScreen: View {
     private func handle(_ cmd: String, _ param: String) {
         barStatus.note(cmd, param)
         menu.note(cmd, param)
+        // an untouched new file is removed on close (plan S9): the first edit marks it kept (a Bool, O(1))
+        if cmd == "modified" && param == "1" { files?.noteEdited() }
         if !barStatus.saving, let op = afterSaveOp {         // the save it waited for has ended: rename / move now
             afterSaveOp = nil
             DispatchQueue.main.async { op() }                // not inside this message's handling

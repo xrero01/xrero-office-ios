@@ -20,6 +20,6 @@ extension Color {
 }
 
 extension UIColor {
-    /// Xrero teal for UIKit controllers (the system document browser).
+    /// Xrero teal for UIKit controllers (the system document picker).
     static let xrTeal = UIColor(named: "AccentColor") ?? UIColor(red: 0.122, green: 0.478, blue: 0.549, alpha: 1)
 }

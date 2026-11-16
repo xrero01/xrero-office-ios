@@ -88,9 +88,12 @@ jobs:
           xcodebuild test-without-building -project app/XreroOffice.xcodeproj -scheme XreroOffice -configuration Debug \
             -destination "id=$DEV" -derivedDataPath dd -resultBundlePath out/review.xcresult \
             -only-testing:XreroOfficeUITests/ReviewVideoTests/testReviewFlow 2>&1 | grep -E "Test Case|error|XCTAssert|failed" | tail -20
+          # xcodebuild's own result, not grep's / tail's: a failed testReviewFlow must fail this job (after the video,
+          # the log and the attachments below are saved), so its checks - the picker pick-and-open (plan S9) - count
+          TEST_RC=${PIPESTATUS[0]}
           sleep 2
           kill -INT $REC; wait $REC
-          # what the system said while the document browser created / imported / opened documents
+          # what the system said while the document picker listed / opened documents
           xcrun simctl spawn $DEV log show --last 15m --style compact --predicate             'process == "XreroOffice" OR subsystem BEGINSWITH "com.apple.DocumentManager" OR subsystem BEGINSWITH "com.apple.FileProvider" OR process == "fileproviderd" OR process == "DocumentManagerUICore"'             > out/sim-log.txt 2>&1
           echo "== app XR log"; grep -a " XR " out/sim-log.txt | cut -c1-260 | tail -60
           grep -i -E "error|fail|import|denied|sandbox" out/sim-log.txt | grep -v -i "No error" | tail -80
@@ -99,6 +102,8 @@ jobs:
           xcrun xcresulttool export attachments --path out/review.xcresult --output-path out/attachments >/dev/null 2>&1
           ls out/attachments | head -60
           xcrun simctl shutdown $DEV
+          if [ "$TEST_RC" != "0" ]; then echo "testReviewFlow FAILED (xcodebuild exit $TEST_RC)"; exit 1; fi
+          echo "testReviewFlow passed"
 
       - name: Publish (release)
         if: ${{ always() }}
