@@ -6,7 +6,7 @@ has more than one page; the store letter (tests/ar_letter.docx / .pdf) has one, 
 app did (S2 review). EditorUITests.testReadingViewEditDoneThenType opens these instead:
 
   tests/reading_6p.docx  the store letter (page 1, kept byte for byte: check_saved.py still finds it) followed by five
-                         more pages, each a paragraph with "page break before" and a few short right-to-left lines, so
+                         more pages, each a paragraph with "page break before" and a few short Arabic + English lines, so
                          the engine lays out exactly 6 pages (none of them is near full, at any font fallback);
   tests/reading_6p.pdf   6 A4 pages written here from scratch (Helvetica, one of the PDF standard fonts: nothing is
                          embedded), "Page k of 6" in large type on each.
@@ -19,13 +19,15 @@ import io, os, sys, zipfile
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 TESTS = os.path.join(ROOT, "tests")
 PAGES = 6
-RPR = '<w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/>%s<w:rtl/></w:rPr>'
 
 
-def para(text, first=False, bold=False):
-    ppr = '<w:pPr>%s<w:bidi/></w:pPr>' % ('<w:pageBreakBefore/>' if first else '')
+def para(text, first=False, bold=False, rtl=True):
+    """One paragraph: Arabic ones right-to-left (bidi), English ones left-to-right - not mixed in one line, where the
+    bidi algorithm reorders "6 Page 2 of - 6 الصفحة 2 من" and the page reads as garbled (CI run 154 shot)."""
+    ppr = '<w:pPr>%s%s</w:pPr>' % ('<w:pageBreakBefore/>' if first else '', '<w:bidi/>' if rtl else '')
     b = '<w:b/><w:bCs/><w:sz w:val="36"/><w:szCs w:val="36"/>' if bold else ''
-    return '<w:p>%s<w:r>%s<w:t xml:space="preserve">%s</w:t></w:r></w:p>' % (ppr, RPR % b, text)
+    rpr = '<w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/>%s%s</w:rPr>' % (b, '<w:rtl/>' if rtl else '')
+    return '<w:p>%s<w:r>%s<w:t xml:space="preserve">%s</w:t></w:r></w:p>' % (ppr, rpr, text)
 
 
 def docx():
@@ -38,12 +40,12 @@ def docx():
                 s = data.decode("utf-8")
                 pages = ""
                 for k in range(2, PAGES + 1):
-                    # "الصفحة k من 6" + the same in English; the digits are plain ASCII (never mirrored)
-                    pages += para("الصفحة %d من %d - Page %d of %d" % (k, PAGES, k, PAGES),
-                                  first=True, bold=True)
+                    # "الصفحة k من 6", then the same in English (the digits are plain ASCII, never mirrored)
+                    pages += para("\u0627\u0644\u0635\u0641\u062d\u0629 %d \u0645\u0646 %d" % (k, PAGES), first=True, bold=True)
+                    pages += para("Page %d of %d" % (k, PAGES), bold=True, rtl=False)
                     for line in range(1, 5):
-                        pages += para("سطر %d في الصفحة %d - line %d on page %d"
-                                      % (line, k, line, k))
+                        pages += para("\u0633\u0637\u0631 %d \u0641\u064a \u0627\u0644\u0635\u0641\u062d\u0629 %d" % (line, k))
+                        pages += para("Line %d on page %d" % (line, k), rtl=False)
                 at = s.rindex("<w:sectPr")                 # the body's own section properties stay last
                 data = (s[:at] + pages + s[at:]).encode("utf-8")
             z.writestr(info, data)

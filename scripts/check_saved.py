@@ -403,7 +403,7 @@ def reading_view(d):
         kept = "السادة أولياء الأمور الكرام" in flat
         # the 6-page reading document (tests/reading_6p.docx): its last page is still there after the save (two of its
         # lines: the typing lands wherever the test's tap put the caret, and it could be inside one of them)
-        pages = "Page 6 of 6" in flat or "line 4 on page 6" in flat
+        pages = "Page 6 of 6" in flat or "Line 4 on page 6" in flat
         g = en and ar and kept and pages
         print("xr-read-%s.docx (reading view, Edit / Done x10 then typing): English typed=%s  Arabic typed=%s  letter kept=%s  6 pages kept=%s -> %s"
               % (lang, en, ar, kept, pages, "OK" if g else "WRONG"))

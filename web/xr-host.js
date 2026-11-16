@@ -1365,9 +1365,26 @@
     if (!api || !READS) return;
     var n = 0, p = 0;
     try { n = api.getCountPages() | 0; } catch (e) {}
-    try { p = (PDFED ? api.getCurrentPage() : api.GetCurrentVisiblePage()) | 0; } catch (e) {}
+    try { p = (PDFED ? api.getCurrentPage() : wordVisiblePage(api)) | 0; } catch (e) {}
     hub.set('pages', n);
     hub.set('page', Math.max(0, Math.min(p, n - 1)));
+  }
+  // Word's page on screen: the drawn page with the most of its height in the view. Not the engine's
+  // GetCurrentVisiblePage: it measures the pages in CSS pixels against the canvas's DEVICE-pixel height, so on a 3x
+  // iPhone the second page "won" while the first filled the screen (CI run 154: page 2/6 at the top of the document,
+  // 4/6 after Go to Page 3). Same rule, one unit.
+  function wordVisiblePage(api) {
+    var wc = api.WordControl, dd = wc && wc.m_oDrawingDocument, el = wc && wc.m_oEditor && wc.m_oEditor.HtmlElement;
+    var pages = dd && dd.m_arrPages, a = dd ? dd.m_lDrawingFirst : -1;
+    if (!pages || !el || !(a >= 0)) return api.GetCurrentVisiblePage();
+    var h = el.clientHeight || el.getBoundingClientRect().height, best = a, most = -Infinity;
+    for (var i = a, b = Math.max(a, dd.m_lDrawingEnd); i <= b && i < pages.length; i++) {
+      var r = pages[i] && pages[i].drawingPage;
+      if (!r) continue;
+      var shown = Math.min(r.bottom, h) - Math.max(r.top, 0);
+      if (shown > most) { most = shown; best = i; }
+    }
+    return best;
   }
   // while reading, a finger on the page (or a trackpad scroll) shows the capsule: 'moving' true, the page read every
   // 200 ms until 1.2 s after the last touch (the engine's own momentum scroll runs on after the finger lifts)

@@ -186,29 +186,35 @@ private struct PageCapsule: View {
 
     var body: some View {
         let known = state.pages > 0, n = max(state.pages, 1), p = min(max(state.page + 1, 1), n)
-        Button(action: tap) {
-            Text(verbatim: "\(p) / \(n)")                    // the same digits as its spoken label
-                .font(.system(size: 13, weight: .semibold))
-                .monospacedDigit()
-                .foregroundStyle(.primary)
-                .padding(.horizontal, 12)
-                .frame(minHeight: 28)
-                .background(.regularMaterial, in: Capsule())
-                // a hairline and a soft shadow: the material alone all but vanished on the grey canvas (CI shot)
-                .overlay(Capsule().strokeBorder(Color(uiColor: .separator), lineWidth: 0.5))
-                .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
-                .environment(\.layoutDirection, .leftToRight)
-                .frame(minWidth: 44, minHeight: 44)
-                .contentShape(Rectangle())
+        // A faded capsule leaves the view tree (it fades out as a transition): an invisible button kept with opacity 0
+        // stayed in the accessibility tree (CI run 154: the test still found it 10 s after it had faded on screen).
+        // The clear dot keeps this view - and its fade timer - alive while the capsule is out.
+        ZStack {
+            Color.clear.frame(width: 1, height: 1).allowsHitTesting(false).accessibilityHidden(true)
+            if visible && known {
+                Button(action: tap) {
+                    Text(verbatim: "\(p) / \(n)")                    // the same digits as its spoken label
+                        .font(.system(size: 13, weight: .semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(.primary)
+                        .padding(.horizontal, 12)
+                        .frame(minHeight: 28)
+                        .background(.regularMaterial, in: Capsule())
+                        // a hairline and a soft shadow: the material alone all but vanished on the grey canvas (CI shot)
+                        .overlay(Capsule().strokeBorder(Color(uiColor: .separator), lineWidth: 0.5))
+                        .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
+                        .environment(\.layoutDirection, .leftToRight)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+                .accessibilityLabel(BarText.page(p, n, ar))
+                .accessibilityHint(BarText.goToPage(ar))
+                .accessibilityIdentifier("xr-read-page")
+                .transition(.opacity)
+            }
         }
-        .buttonStyle(.plain)
-        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
-        .opacity(visible && known ? 1 : 0)
-        .allowsHitTesting(visible && known)
-        .accessibilityHidden(!visible || !known)
-        .accessibilityLabel(BarText.page(p, n, ar))
-        .accessibilityHint(BarText.goToPage(ar))
-        .accessibilityIdentifier("xr-read-page")
         .padding(.bottom, 12)
         .onAppear(perform: show)
         .onChange(of: state.page) { _, _ in show() }
