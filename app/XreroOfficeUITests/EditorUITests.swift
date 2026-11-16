@@ -2311,7 +2311,8 @@ final class EditorUITests: XCTestCase {
     ///   press is pressed again (up to 6 times) only when it never reached the app - no handler, no change AND no ⌘
     ///   keydown in the page. A ⌘B that reached the app and did nothing fails;
     /// - the menu bar sees this window's editor (focusedSceneValue, which XreroCommands' File / Edit / Format items
-    ///   act through): a test-only menu command (⌃⌥⌘P) answers "probe editor=1" through a file, never an app query;
+    ///   act through): a test-only menu command (⌃⌥⌘End, a key that types nothing - run 165's ⌃⌥⌘P typed a "p" when the
+    ///   simulator lost its modifiers) answers "probe editor=1" through a file, never an app query;
     /// - the menu bar's Format > Bold action (XreroCommands -> EditorMenuTarget.bold) toggles it once too.
     ///   (⌘W is not pressed: CI run 142's ⌘W on the iPad left the app unreachable, and File > Close carries no ⌘W -
     ///   see XreroCommands.)
@@ -2396,7 +2397,7 @@ final class EditorUITests: XCTestCase {
         func menuKeys(_ app: XCUIApplication) {
             try? FileManager.default.removeItem(atPath: menuFile)
             for _ in 0..<3 where !menuLines().contains(where: { $0.hasPrefix("probe") }) {
-                app.typeKey("p", modifierFlags: [.command, .option, .control])
+                app.typeKey(.end, modifierFlags: [.command, .option, .control])
                 _ = menuAnswer("probe", 4)
             }
             print("XR window-gate menu-probe: INFO \(menuAnswer("probe", 1))")
@@ -2433,7 +2434,7 @@ final class EditorUITests: XCTestCase {
         var probes = 0
         for _ in 0..<10 where !menuLines().contains(where: { $0.hasPrefix("probe") }) {
             probes += 1
-            app.typeKey("p", modifierFlags: [.command, .option, .control])
+            app.typeKey(.end, modifierFlags: [.command, .option, .control])
             _ = menuAnswer("probe", 4)
         }
         let menuSeen = menuLines().first { $0.hasPrefix("probe") } ?? "(no answer)"

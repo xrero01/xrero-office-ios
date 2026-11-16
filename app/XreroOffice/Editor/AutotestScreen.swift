@@ -392,9 +392,10 @@ struct AutotestScreen: View {
                     state = res
                 }
             }
-            if url.host == "keyspy" {           // window gate (plan S6): which Cmd / Ctrl key presses reach the editor
-                                                // page (a capture listener in the editor frame: key, modifiers, target,
-                                                // whether the page took it); "read=1" answers with the record
+            if url.host == "keyspy" {           // window gate (plan S6): which Cmd / Ctrl key presses (and End / Home /
+                                                // arrows: the menu probe's key) reach the editor page (a capture
+                                                // listener in the editor frame: key, modifiers, target, whether the
+                                                // page took it); "read=1" answers with the record
                 let read = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "read" }?.value == "1"
                 if read {
                     controller.call("""
@@ -409,7 +410,7 @@ struct AutotestScreen: View {
                     }
                 } else {
                     controller.call("""
-                    if(!window.__xrKeySpy){window.__xrKeySpy=[];document.addEventListener('keydown',function(e){if(!(e.metaKey||e.ctrlKey))return;
+                    if(!window.__xrKeySpy){window.__xrKeySpy=[];document.addEventListener('keydown',function(e){if(!(e.metaKey||e.ctrlKey||/^(Arrow|End$|Home$)/.test(e.key)))return;
                      var r={k:e.key,m:e.metaKey?1:0,c:e.ctrlKey?1:0,t:(e.target&&(e.target.id||e.target.tagName))||'?'};window.__xrKeySpy.push(r);
                      setTimeout(function(){r.p=e.defaultPrevented?1:0;
                       if(window.XreroHost&&XreroHost.log)XreroHost.log('keyspy '+r.k+(r.m?'+meta':'')+(r.c?'+ctrl':'')+(r.p?' prevented':'')+' @'+r.t);},0);},true);}return 'ok';
@@ -711,15 +712,18 @@ enum AutotestMenuFile {
     }
 }
 
-/// Plan S6 window gate, test build only: a menu command with a key no other command uses (Ctrl-Option-Cmd-P) that
-/// says whether the menu bar sees this window's editor through focusedSceneValue (XreroCommands relies on the same).
+/// Plan S6 window gate, test build only: a menu command with a key no other command uses (Ctrl-Option-Cmd-End)
+/// that says whether the menu bar sees this window's editor through focusedSceneValue (XreroCommands relies on the
+/// same). A key that types nothing: CI run 165's first press of the old Ctrl-Option-Cmd-P lost its modifiers in the
+/// simulator and typed a "p" into the document; End at the end of the text moves nothing (and, unlike Cmd-arrows,
+/// is no Simulator shortcut).
 struct AutotestMenuProbe: Commands {
     @FocusedValue(\.xrEditor) private var editor: EditorMenuTarget?
 
     var body: some Commands {
         CommandMenu("XR Autotest") {
             Button("Menu probe") { AutotestMenuFile.note("probe editor=\(editor == nil ? 0 : 1)") }
-                .keyboardShortcut("p", modifiers: [.command, .option, .control])
+                .keyboardShortcut(.end, modifiers: [.command, .option, .control])
         }
     }
 }
