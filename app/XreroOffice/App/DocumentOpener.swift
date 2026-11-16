@@ -27,6 +27,9 @@ final class DocumentOpener: NSObject, ObservableObject, UIDocumentBrowserViewCon
 
     func attach(_ vc: UIViewController) {
         anchor = vc
+        // the menu bar on iPad / Mac (plan S6): File > New Document / Spreadsheet / Presentation and Open… act on this
+        // window's opener (MenuBarTargets - the window in front, by UIKit's key window)
+        MenuBarTargets.shared.homeShown(self, scene: vc.view.window?.windowScene)
         if let url = pending { pending = nil; DispatchQueue.main.async { self.open(url) } }
     }
 

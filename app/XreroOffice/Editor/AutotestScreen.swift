@@ -377,6 +377,12 @@ struct AutotestScreen: View {
                                                 // the phone design (46 pt) from the tablet one (40 pt)
                 let n = (URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "n" }?.value ?? "")
                     .filter(\.isNumber)
+                // + the app's window rule itself (no XR_LAYOUT stand-in) for stand-in windows 320 / 599 / 600 / 1032 pt
+                // wide: CI cannot make a Split View window, so the narrow-iPad run alone would only prove that the page
+                // obeys layout=compact, not that a narrow window produces it
+                let rule = [320, 599, 600, 1032].map { w in
+                    "\(w):" + EditorWebView.Coordinator.windowLayout(for: UIWindow(frame: CGRect(x: 0, y: 0, width: w, height: 900)))
+                }.joined(separator: ",")
                 let js = """
                 (function(){var f=document.querySelector('iframe');var w=f&&f.contentWindow;var d=w&&w.document;
                  if(!d||!d.body)return 'layout\(n):fail no editor';
@@ -387,7 +393,7 @@ struct AutotestScreen: View {
                   ' w='+w.innerWidth+' mac='+(/[?&]platform=mac/.test(location.search)?1:0);})()
                 """
                 controller.coordinator?.web?.evaluateJavaScript(js) { r, e in
-                    let res = (r as? String) ?? "layout\(n):fail " + (e?.localizedDescription ?? "no result")
+                    let res = ((r as? String) ?? "layout\(n):fail " + (e?.localizedDescription ?? "no result")) + " rule=" + rule
                     handle("log", res)
                     state = res
                 }
@@ -417,23 +423,9 @@ struct AutotestScreen: View {
                     """) { r, e in handle("log", "keyspy: \((r as? String) ?? e ?? "?")") }
                 }
             }
-            if url.host == "menucmd" {          // window gate (plan S6): what the menu bar's Format > Bold / Italic /
-                                                // Underline and Edit > Find run (XreroCommands calls the same methods)
-                let c = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "c" }?.value ?? ""
-                let target = EditorMenuTarget(controller: controller, kind: document.kind)
-                switch c {
-                case "bold": target.bold()
-                case "italic": target.italic()
-                case "underline": target.underline()
-                case "find": target.find()
-                default: handle("log", "menucmd: unknown \(c)")
-                }
-            }
         }
         .sheet(isPresented: $showAbout) { AboutSheet() }
         .sheet(isPresented: $showAccount) { AccountView() }
-        // the menu bar (plan S6, XreroCommands) reaches this editor the way it reaches EditorScreen's
-        .focusedSceneValue(\.xrEditor, EditorMenuTarget(controller: controller, kind: document.kind))
     }
 
     /// Bridge check (20.3 F0): a native call reaches the engine and the engine's answer comes back through the state
@@ -513,9 +505,6 @@ struct AutotestScreen: View {
         menu.note(cmd, param)
         switch cmd {
         case "ready": state = "ready"; tooLarge = false
-        case "close":                       // the editor asked to close (File > Close in the menu bar, plan S6)
-            state = "closed"
-            AutotestMenuFile.note("closed")
         case "modified": modified = param
         case "recovered":
             recovery = "recovered:" + param
@@ -680,6 +669,18 @@ struct RealDocumentHarness: View {
         }
         .background(PresenterAnchor(opener: opener))
         .onAppear(perform: start)
+        // the menu bar gate (plan S6, EditorUITests.testZZZZZMenuBarOnRealEditor): its results into this document's
+        // log, Documents/xr-log-<name>.txt, for check_saved.py (sent once the editor has closed again)
+        .onOpenURL { url in
+            guard url.scheme == "xrero-autotest", url.host == "note",
+                  let t = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "t" })?.value
+            else { return }
+            let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            let log = docs.appendingPathComponent("xr-log-" + name + ".txt")
+            let lines = Data((t.split(separator: "\n").joined(separator: "\n") + "\n").utf8)
+            if let h = try? FileHandle(forWritingTo: log) { h.seekToEndOfFile(); h.write(lines); try? h.close() }
+            else { try? lines.write(to: log) }
+        }
     }
 
     private func start() {
@@ -712,20 +713,43 @@ enum AutotestMenuFile {
     }
 }
 
-/// Plan S6 window gate, test build only: a menu command with a key no other command uses (Ctrl-Option-Cmd-P) that
-/// says whether the menu bar sees this window's editor through focusedSceneValue (XreroCommands relies on the same).
+/// Plan S6 window gate, test build only: a menu command with a key no other command uses (Ctrl-Option-Cmd-P), pressed
+/// on the hardware keyboard like any menu key. It answers through the menu file what the menu bar sees in the window in
+/// front - "probe editor=1|0 home=1|0 b=<the editor's Bold>" (MenuBarTargets, exactly what XreroCommands reads) - and,
+/// when the test has put a menu item's name into <menu file>.cmd ("bold", "close"...), it then runs that item's own
+/// action (XreroCommands.perform, what the Format > Bold / File > Close items run) once: " ran=bold". The .cmd file
+/// is removed when it is read, so a press that never arrives leaves it for the next one and nothing runs twice.
 /// A letter on purpose: CI run 165 proved this chord reaches the menu on the iPhone and the iPad, while run 168's
 /// Ctrl-Option-Cmd-End never arrived anywhere (no menu answer, no End keydown in the page) - the simulator's
 /// synthesized End is not delivered. The price: a press whose modifiers the simulator drops types a bare "p" into the
 /// document; the UI test allows exactly those letters after its typed word (EditorUITests window gate).
 struct AutotestMenuProbe: Commands {
-    @FocusedValue(\.xrEditor) private var editor: EditorMenuTarget?
+    @ObservedObject var targets: MenuBarTargets
 
     var body: some Commands {
         CommandMenu("XR Autotest") {
-            Button("Menu probe") { AutotestMenuFile.note("probe editor=\(editor == nil ? 0 : 1)") }
+            Button("Menu probe") { Self.probe(targets) }
                 .keyboardShortcut("p", modifiers: [.command, .option, .control])
         }
+    }
+
+    static func probe(_ targets: MenuBarTargets) {
+        let editor = targets.editor
+        var line = "probe editor=\(editor == nil ? 0 : 1) home=\(targets.home == nil ? 0 : 1)"
+            + " b=" + (editor.map { $0.controller.state.bold ? "1" : "0" } ?? "-")
+        let file = ProcessInfo.processInfo.environment["XR_MENU_FILE"].map { $0 + ".cmd" }
+        guard let file, let cmd = try? String(contentsOfFile: file, encoding: .utf8) else {
+            AutotestMenuFile.note(line)
+            return
+        }
+        try? FileManager.default.removeItem(atPath: file)
+        let name = cmd.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let action = XreroCommands.Action(rawValue: name) else {
+            AutotestMenuFile.note(line + " unknown=" + name)
+            return
+        }
+        AutotestMenuFile.note(line + " ran=" + name)        // before the action's own lines ("menu bold")
+        XreroCommands.perform(action, targets)
     }
 }
 #endif

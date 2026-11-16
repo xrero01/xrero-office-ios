@@ -206,6 +206,7 @@
     { "kind": "setting", "name": "pe-mainmenu-width", "why": "portrait iPads: the slide strip starts 160 pt wide" },
 
     { "kind": "id", "name": "box-document-title", "why": "touch title row" },
+    { "kind": "id", "name": "area_id", "why": "the engine's own text input: Cmd+B / Cmd+I / Cmd+U do nothing while another text box of the editor has the focus (__xrToggle, plan S6)" },
     { "kind": "id", "name": "app-title", "why": "title row, hidden: the app's top bar replaces it (M4a)" },
     { "kind": "id", "name": "file-menu-panel", "why": "CI File-menu check" },
     { "kind": "id", "name": "panel-saveas", "why": "Download As tiles limited to working formats" },

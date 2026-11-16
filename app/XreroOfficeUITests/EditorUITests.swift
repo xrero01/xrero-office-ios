@@ -2294,31 +2294,64 @@ final class EditorUITests: XCTestCase {
         gate("save", saved.hasPrefix("saved"), saved)
     }
 
-    /// Plan S6 window gate, iPhone and iPad. Runs last (a hardware-keyboard event must never come before the typing
-    /// tests). Every check is logged as "window-gate <check>: PASS|FAIL|INFO" into the editor log (check_saved.py) and
-    /// printed as "XR window ...":
+    /// Plan S6: the lines the app wrote to a window gate's menu file (AutotestMenuFile).
+    private func menuLines(_ file: String) -> [String] {
+        ((try? String(contentsOfFile: file, encoding: .utf8)) ?? "").split(separator: "\n").map(String.init)
+    }
+
+    /// Plan S6: the test-only menu command (⌃⌥⌘P, AutotestMenuProbe), pressed on the hardware keyboard until it answers
+    /// in the menu file - a new "probe editor=.. home=.. b=.." line; 4 s per press, at most `tries` presses. With
+    /// `run`, that menu item's name ("bold", "close") goes to <menu file>.cmd first, so the press that answers also ran
+    /// the item's own action (XreroCommands.perform) once: the line ends in " ran=<name>". A press that never arrived
+    /// leaves the .cmd file for the next one; none is left behind for a later probe.
+    private func pressMenuProbe(_ app: XCUIApplication, _ file: String, run: String? = nil,
+                                tries: Int = 8) -> (line: String, presses: Int) {
+        try? FileManager.default.removeItem(atPath: file + ".cmd")
+        if let run { try? run.write(toFile: file + ".cmd", atomically: true, encoding: .utf8) }
+        let before = menuLines(file).count
+        var presses = 0
+        while presses < tries {
+            presses += 1
+            app.typeKey("p", modifierFlags: [.command, .option, .control])
+            let end = Date().addingTimeInterval(4)
+            repeat {
+                if let l = menuLines(file).dropFirst(before).first(where: { $0.hasPrefix("probe ") }) { return (l, presses) }
+                usleep(300_000)
+            } while Date() < end
+        }
+        try? FileManager.default.removeItem(atPath: file + ".cmd")
+        return ("(no answer)", presses)
+    }
+
+    /// Plan S6 window gate, part 1, iPhone and iPad (the CI's editor screen). Runs after the typing tests (a
+    /// hardware-keyboard event must never come before them). Every check is logged as "window-gate <check>:
+    /// PASS|FAIL|INFO" into the editor log (check_saved.py) and printed as "XR window ...":
     /// - the design follows the WINDOW the editor opened in: compact (phone design, 46 pt tabs) on the iPhone, regular
     ///   (tablet design, 40 pt tabs) in the full-screen iPad window; html.xr-narrow says whether the window is under
-    ///   600 pt now (the live CSS-level class); on the iPad a narrow window gets the compact design (XR_LAYOUT stands
-    ///   in for a Split View window, which CI cannot make);
+    ///   600 pt now (the live CSS-level class); the app's window rule itself, without the CI stand-in, gives compact
+    ///   for 320 / 599 pt windows and regular for 600 / 1032 pt ones on the iPad (compact for all on the iPhone); and
+    ///   on the iPad a narrow window gets the compact design (XR_LAYOUT stands in for a Split View window, which CI
+    ///   cannot make);
     /// - ⌘B from the hardware keyboard toggles Bold EXACTLY once per press - on and still on 2 s later, then off and
-    ///   still off - and types nothing. Pressed the way a person does: tap in the page, type, ⌘B. Every handler that
-    ///   took a press writes a line to the menu file: the editor view's key command ("key bold") and a key spy in the
-    ///   page ("page b+meta ..."); a press must have exactly ONE handler. The simulator drops the first synthesized ⌘
-    ///   chords after on-screen-keyboard typing before the app gets them at all (CI runs 142-159: 1 to 4 of them, with
-    ///   not even the ⌘ key's own keydown reaching the page - every press that did reach the app logged it). So:
-    ///   first the menu bar check below is pressed until it answers (it changes nothing in the document), and a ⌘B
-    ///   press is pressed again (up to 6 times) only when it never reached the app - no handler, no change AND no ⌘
-    ///   keydown in the page. A ⌘B that reached the app and did nothing fails;
-    /// - the menu bar sees this window's editor (focusedSceneValue, which XreroCommands' File / Edit / Format items
-    ///   act through): a test-only menu command (⌃⌥⌘P) answers "probe editor=1" through a file, never an app query.
-    ///   A letter, because run 168's ⌃⌥⌘End was never delivered by the simulator (no answer, no End in the page) while
-    ///   run 165's ⌃⌥⌘P reached the menu on both devices. A probe press whose modifiers the simulator drops types a
-    ///   bare "p" (run 165: "Keysp"), so the "types nothing" check allows only those probe letters after "Keys" - at
-    ///   most one per probe press - and nothing else: a "b" from ⌘B still fails it;
-    /// - the menu bar's Format > Bold action (XreroCommands -> EditorMenuTarget.bold) toggles it once too.
-    ///   (⌘W is not pressed: CI run 142's ⌘W on the iPad left the app unreachable, and File > Close carries no ⌘W -
-    ///   see XreroCommands.)
+    ///   still off - and ⌘I / ⌘U turn Italic / Underline on once each; none types anything. Pressed the way a person
+    ///   does: tap in the page, type, then the chord. Every handler that took a press writes a line to the menu file:
+    ///   the editor view's key command ("key bold") and a key spy in the page ("page b+meta ..."); a press must have
+    ///   exactly ONE handler. The simulator drops the first synthesized ⌘ chords after on-screen-keyboard typing before
+    ///   the app gets them at all (CI runs 142-159: 1 to 4 of them, with not even the ⌘ key's own keydown reaching the
+    ///   page - every press that did reach the app logged it). So: first the menu bar check below is pressed until it
+    ///   answers (it changes nothing in the document), and a chord is pressed again (up to 6 times) only when it never
+    ///   reached the app - no handler, no change AND no ⌘ keydown in the page. A chord that reached the app and did
+    ///   nothing fails;
+    /// - the menu bar sees this window's editor (MenuBarTargets, which XreroCommands' File / Edit / Format items act
+    ///   through): the test-only menu command (⌃⌥⌘P, pressMenuProbe) answers "probe editor=1" through a file, never an
+    ///   app query. A letter, because run 168's ⌃⌥⌘End was never delivered by the simulator while run 165's ⌃⌥⌘P
+    ///   reached the menu on both devices. A probe press whose modifiers the simulator drops types a bare "p" (run 165:
+    ///   "Keysp"), so the "types nothing" check allows only those probe letters after "Keys" - at most one per probe
+    ///   press - and nothing else: a "b" from ⌘B still fails it;
+    /// - Format > Bold: the same menu command runs that item's own action (XreroCommands.perform), and Bold toggles
+    ///   exactly once per run (on, then off), with one handler line ("menu bold") each.
+    /// The shipped editor path (DocumentOpener -> EditorHost) and File > Close: testZZZZZMenuBarOnRealEditor.
+    /// (⌘W is not pressed: CI run 142's ⌘W on the iPad left the app unreachable, and File > Close carries no ⌘W.)
     func testZZZZWindowLayoutAndKeyCommands() {
         let pad = UIDevice.current.userInterfaceIdiom == .pad
         let keep = continueAfterFailure
@@ -2353,58 +2386,36 @@ final class EditorUITests: XCTestCase {
             let p = app.staticTexts["xr-editor-state"]
             return p.exists ? p.label : "missing"
         }
-        func bold(_ app: XCUIApplication) -> String {
-            editorState(app).components(separatedBy: " ").first { $0.hasPrefix("b:") }.map { String($0.dropFirst(2)) } ?? "?"
+        /// "b" / "i" / "u" (Bold / Italic / Underline at the caret) from the editor's state line: "1", "0" or "?"
+        func caretFlag(_ app: XCUIApplication, _ k: String) -> String {
+            editorState(app).components(separatedBy: " ").first { $0.hasPrefix(k + ":") }.map { String($0.dropFirst(k.count + 1)) } ?? "?"
         }
-        /// Bold reaches `want` within 5 s and is STILL `want` 2 s later (a second, late toggle would flip it back)
-        func boldSettles(_ app: XCUIApplication, _ want: String) -> (reached: Bool, after: String) {
+        /// `k` reaches `want` within 5 s and is STILL `want` 2 s later (a second, late toggle would flip it back)
+        func settles(_ app: XCUIApplication, _ k: String, _ want: String) -> (reached: Bool, after: String) {
             var reached = false
-            for _ in 0..<20 { if bold(app) == want { reached = true; break }; usleep(250_000) }
+            for _ in 0..<20 { if caretFlag(app, k) == want { reached = true; break }; usleep(250_000) }
             sleep(2)
-            return (reached, bold(app))
+            return (reached, caretFlag(app, k))
         }
-        /// what the app wrote to the menu file within `timeout` s (the test-only menu probe, File > Close)
-        func menuAnswer(_ want: String, _ timeout: Double) -> String {
-            let end = Date().addingTimeInterval(timeout)
-            var s = ""
-            while Date() < end {
-                s = (try? String(contentsOfFile: menuFile, encoding: .utf8)) ?? ""
-                if s.contains(want) { break }
-                usleep(300_000)
-            }
-            return s.isEmpty ? "(nothing)" : s.replacingOccurrences(of: "\n", with: " | ")
-        }
-        func menuLines() -> [String] {
-            ((try? String(contentsOfFile: menuFile, encoding: .utf8)) ?? "").split(separator: "\n").map(String.init)
-        }
-        /// ⌘B until a press reaches the app (at most 6): Bold must then reach `want` and stay there, with exactly one
+        /// ⌘<key> until a press reaches the app (at most 6): `k` must then reach `want` and stay there, with exactly one
         /// handler line for that press. A press is pressed again only when it never reached the app: no handler line,
         /// no change, and the page saw no ⌘ keydown either ("page Meta+meta" - logged for every press that arrived)
-        func pressBold(_ app: XCUIApplication, _ want: String) -> (ok: Bool, detail: String) {
+        func pressFormat(_ app: XCUIApplication, _ key: String, _ name: String, _ k: String,
+                         _ want: String) -> (ok: Bool, detail: String) {
             var tries: [String] = []
             for attempt in 1...6 {
-                let before = menuLines().count
-                app.typeKey("b", modifierFlags: .command)
-                let r = boldSettles(app, want)
-                let new = menuLines().dropFirst(before)
-                let native = new.filter { $0 == "key bold" }.count
-                let page = new.filter { $0.hasPrefix("page b+meta") }.count
+                let before = menuLines(menuFile).count
+                app.typeKey(key, modifierFlags: .command)
+                let r = settles(app, k, want)
+                let new = menuLines(menuFile).dropFirst(before)
+                let native = new.filter { $0 == "key \(name)" }.count
+                let page = new.filter { $0.hasPrefix("page \(key)+meta") }.count
                 let arrived = new.contains { $0.hasPrefix("page Meta+meta") }
                 tries.append("#\(attempt) key=\(native) page=\(page) cmd-down=\(arrived ? 1 : 0) reached=\(r.reached) 2s-later=\(r.after)")
                 if native + page == 0 && !arrived && !r.reached && r.after != want { continue }   // dropped before the app
                 return (native + page == 1 && r.reached && r.after == want, tries.joined(separator: " "))
             }
             return (false, tries.joined(separator: " ") + " (no press reached the app)")
-        }
-        /// last step on the app in front: the test-only menu command, its answer from the menu file
-        func menuKeys(_ app: XCUIApplication) {
-            try? FileManager.default.removeItem(atPath: menuFile)
-            for _ in 0..<3 where !menuLines().contains(where: { $0.hasPrefix("probe") }) {
-                app.typeKey("p", modifierFlags: [.command, .option, .control])
-                _ = menuAnswer("probe", 4)
-            }
-            print("XR window-gate menu-probe: INFO \(menuAnswer("probe", 1))")
-            app.terminate()
         }
 
         // 1) the design follows the window
@@ -2423,9 +2434,15 @@ final class EditorUITests: XCTestCase {
              && abs(tabs(l1) - (pad ? 40 : 46)) <= 1, l1)
         let narrowNow = (Int(field(l1, "w")) ?? 0) < 600
         gate("live-narrow-class", field(l1, "narrow") == (narrowNow ? "1" : "0"), l1)
+        // the rule for windows of 320 / 599 / 600 / 1032 pt, computed by the app without the XR_LAYOUT stand-in
+        let rule = field(l1, "rule")
+        let wantRule = pad ? "320:compact,599:compact,600:regular,1032:regular"
+                           : "320:compact,599:compact,600:compact,1032:compact"
+        gate("layout-rule", rule == wantRule, "window widths -> design: \(rule) (want \(wantRule))")
 
         // 2) ⌘B from the hardware keyboard at the caret, the way a person does it: tap in the page, type, ⌘B. Bold on
-        //    exactly once, then off exactly once (the engine reports the caret's Bold; the next letters would be bold)
+        //    exactly once, then off exactly once (the engine reports the caret's Bold; the next letters would be bold);
+        //    then ⌘I and ⌘U once each
         autotest("keyspy")                               // records the ⌘ / Ctrl presses that reach the page (before the tap)
         tapFirstLine(app, fallback: CGVector(dx: 0.35, dy: pad ? 0.19 : 0.3))
         sleep(1)
@@ -2434,48 +2451,58 @@ final class EditorUITests: XCTestCase {
         // the menu bar sees this window's editor - pressed until it answers, which also lets the simulator's dropped
         // first ⌘ chords (see above) fall on a command that changes nothing in the document
         try? FileManager.default.removeItem(atPath: menuFile)
-        var probes = 0
-        for _ in 0..<10 where !menuLines().contains(where: { $0.hasPrefix("probe") }) {
-            probes += 1
-            app.typeKey("p", modifierFlags: [.command, .option, .control])
-            _ = menuAnswer("probe", 4)
-        }
-        let menuSeen = menuLines().first { $0.hasPrefix("probe") } ?? "(no answer)"
-        gate("menu-sees-editor", menuSeen == "probe editor=1",
-             "\(menuSeen) after \(probes) press(es) | \(menuLines().joined(separator: " | "))")
+        let seen = pressMenuProbe(app, menuFile, tries: 10)
+        var probes = seen.presses
+        gate("menu-sees-editor", field(seen.line, "editor") == "1",
+             "\(seen.line) after \(seen.presses) press(es) | \(menuLines(menuFile).joined(separator: " | "))")
         sleep(2)                                         // the page's key-spy lines for that chord land before ⌘B counts
-        let b0 = bold(app)
-        let on = pressBold(app, "1")
+        let b0 = caretFlag(app, "b")
+        let on = pressFormat(app, "b", "bold", "b", "1")
         shot(app, "71-window-cmd-b-on")
         gate("cmd-b-on-once", b0 == "0" && on.ok, "before=\(b0) \(on.detail) | \(editorState(app))")
-        let off = pressBold(app, "0")
+        let off = pressFormat(app, "b", "bold", "b", "0")
         shot(app, "72-window-cmd-b-off")
         gate("cmd-b-off-once", on.ok && off.ok, "\(off.detail) | \(editorState(app))")
-        info("key-handlers", menuLines().joined(separator: " | "))
+        let i0 = caretFlag(app, "i")
+        let italic = pressFormat(app, "i", "italic", "i", "1")
+        gate("cmd-i-on-once", i0 == "0" && italic.ok, "before=\(i0) \(italic.detail) | \(editorState(app))")
+        let u0 = caretFlag(app, "u")
+        let underline = pressFormat(app, "u", "underline", "u", "1")
+        shot(app, "72b-window-cmd-i-u-on")
+        gate("cmd-u-on-once", u0 == "0" && underline.ok, "before=\(u0) \(underline.detail) | \(editorState(app))")
+        info("key-handlers", menuLines(menuFile).joined(separator: " | "))
         XCUIDevice.shared.system.open(URL(string: "xrero-autotest://doctext")!)
         let t = waitState(app, prefix: "doctext:", timeout: 15)
         let text = t.dropFirst("doctext:".count).trimmingCharacters(in: .whitespacesAndNewlines)
         // "Keys", then only the bare "p"s of probe presses that lost their modifiers (at most one per probe press);
-        // anything else - a "b" from ⌘B above all - fails
+        // anything else - a "b", "i" or "u" from the chords above all - fails
         let stray = text.hasPrefix("Keys") ? String(text.dropFirst(4)) : "-"
         let probeLetters = stray.allSatisfy { $0 == "p" } && stray.count <= probes
         if probeLetters && !stray.isEmpty { info("probe-typed", "\(stray.count) bare 'p' from probe presses that lost their modifiers") }
         gate("cmd-b-types-nothing", text.hasPrefix("Keys") && probeLetters, "document text '\(text)' probe presses=\(probes)")
 
-        // 3) the menu bar's Format > Bold: the action XreroCommands runs toggles Bold once (on, then off), from off
-        let m0 = bold(app)
-        autotest("menucmd?c=bold")
-        let m1 = boldSettles(app, m0 == "1" ? "0" : "1")
-        autotest("menucmd?c=bold")
-        let m2 = boldSettles(app, m0 == "1" ? "1" : "0")
-        gate("menu-bold-once", m0 != "?" && m1.reached && m1.after != m0 && m2.reached && m2.after == m0,
-             "start=\(m0) first: reached=\(m1.reached) later=\(m1.after) second: reached=\(m2.reached) later=\(m2.after)")
+        // 3) Format > Bold: the menu command runs that item's own action (XreroCommands.perform): Bold toggles exactly
+        //    once per run - on, then off - with one "menu bold" handler line each
+        let m0 = caretFlag(app, "b")
+        func menuBold(_ want: String) -> (ok: Bool, detail: String) {
+            let n = menuLines(menuFile).count
+            let r = pressMenuProbe(app, menuFile, run: "bold", tries: 6)
+            probes += r.presses
+            let s = settles(app, "b", want)
+            let handlers = menuLines(menuFile).dropFirst(n).filter { $0 == "menu bold" }.count
+            return (r.line.hasSuffix(" ran=bold") && handlers == 1 && s.reached && s.after == want,
+                    "\(r.line) | handlers=\(handlers) reached=\(s.reached) 2s-later=\(s.after)")
+        }
+        let first = menuBold(m0 == "1" ? "0" : "1")
+        let second = menuBold(m0)
+        gate("menu-bold-once", m0 != "?" && first.ok && second.ok,
+             "start=\(m0) first: \(first.detail) second: \(second.detail)")
         autotest("note", notes.joined(separator: "\n"))
         notes = []
 
         // 4) iPad: a narrow window (Split View) gets the compact design on the same iPad screen
-        guard pad else { menuKeys(app); return }
         app.terminate()
+        guard pad else { return }
         let app2 = launch(["XR_KIND": "word", "XR_NEW_NAME": "xr-window-narrow.docx", "XR_LAYOUT": "compact",
                            "XR_MENU_FILE": menuFile])
         let ready2 = waitState(app2, prefix: "ready", timeout: 120)
@@ -2489,6 +2516,123 @@ final class EditorUITests: XCTestCase {
             gate("ipad-narrow-window-compact", false, "editor not ready: \(ready2)")
         }
         autotest("note", notes.joined(separator: "\n"))
-        menuKeys(app2)
+        app2.terminate()
+    }
+
+    /// Plan S6 window gate, part 2, iPhone and iPad: the menu bar on the SHIPPED editor path. XR_REAL=1 opens the
+    /// document the way Home does - DocumentOpener -> UIDocument -> EditorHost, the real EditorScreen in its own
+    /// UIHostingController presented full screen through UIKit, while the home screen's views leave the window - the
+    /// layout where a menu bar fed by SwiftUI's focusedSceneValue was never shown to work. With that editor up, the
+    /// test-only menu command (⌃⌥⌘P, pressMenuProbe) must answer "editor=1" (whether the window's home screen is seen
+    /// as well is logged), then run the menu items' own actions (XreroCommands.perform): Format > Bold toggles Bold
+    /// exactly once, twice over (on, then off - the editor's Bold read back through the same command), and File > Close
+    /// saves the document and returns to the harness. After that the menu sees no editor any more, but the home
+    /// screen's opener (File > New, Open…). check_saved.py: every check PASS, and the saved xr-window-real.docx holds
+    /// the word typed before Close (plus only the bare "p"s of probe presses whose modifiers the simulator dropped).
+    func testZZZZZMenuBarOnRealEditor() {
+        let keep = continueAfterFailure
+        continueAfterFailure = true                      // every check is recorded; one failure must not hide the others
+        defer { continueAfterFailure = keep }
+        let file = NSTemporaryDirectory() + "xr-menu-real.txt"
+        try? FileManager.default.removeItem(atPath: file)
+        var notes: [String] = []
+        func gate(_ name: String, _ ok: Bool, _ detail: String) {
+            let line = "window-gate \(name): \(ok ? "PASS" : "FAIL") \(detail)".replacingOccurrences(of: "\n", with: " ")
+            print("XR " + line)
+            notes.append(line)
+            XCTAssertTrue(ok, line)
+        }
+        func info(_ name: String, _ detail: String) {
+            let line = "window-gate \(name): INFO \(detail)".replacingOccurrences(of: "\n", with: " ")
+            print("XR " + line)
+            notes.append(line)
+        }
+        func field(_ s: String, _ k: String) -> String {
+            guard let m = s.range(of: " " + k + "=") else { return "" }
+            return String(s[m.upperBound...].prefix { $0 != " " })
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["-xr.lang", "en"]
+        app.launchEnvironment = ["XR_REAL": "1", "XR_NEW_NAME": "xr-window-real.docx", "XR_MENU_FILE": file]
+        app.launch()
+        let title = app.staticTexts["xr-bar-title"], status = app.staticTexts["xr-bar-status"]
+        let reopen = app.buttons["xr-real-reopen"]
+        func statusNow() -> String { (try? status.firstMatch.snapshot())?.label ?? "(none)" }
+        // the results into the document's log, Documents/xr-log-xr-window-real.docx.txt (the harness writes it)
+        func finish() {
+            autotest("note", notes.joined(separator: "\n"))
+            app.terminate()
+        }
+
+        // 1) the real editor is up: its title shows and its second line no longer says Opening…
+        var up = false
+        let end = Date().addingTimeInterval(120)
+        while Date() < end {
+            if title.exists && !statusNow().hasPrefix("Opening") { up = true; break }
+            Thread.sleep(forTimeInterval: 0.5)
+        }
+        sleep(3)
+        shot(app, "75-window-real-editor")
+        gate("real-editor-up", up, "title shown=\(title.exists) status='\(statusNow())'")
+        guard up else { finish(); return }
+
+        // 2) a word typed into the page, the way a person starts (Close must save it)
+        let point = app.webViews.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.45))
+        point.tap()
+        if !app.keyboards.firstMatch.waitForExistence(timeout: 4) {
+            info("real-first-tap-ignored", "no keyboard 4 s after the tap on the page - tapped again")
+            point.tap(); _ = app.keyboards.firstMatch.waitForExistence(timeout: 4)
+        }
+        sleep(1)
+        typeSlowly(app, "Menu")
+        sleep(1)
+        shot(app, "76-window-real-typed")
+
+        // 3) the menu bar sees this editor - pressed until it answers, which also lets the simulator's dropped first
+        //    ⌘ chords fall on a command that changes nothing in the document
+        let seen = pressMenuProbe(app, file, tries: 10)
+        var presses = seen.presses
+        gate("real-menu-sees-editor", field(seen.line, "editor") == "1", "\(seen.line) after \(seen.presses) press(es)")
+        info("real-menu-home-under-editor", "home=\(field(seen.line, "home")) (File > New over an open editor closes it first)")
+        sleep(2)
+
+        // 4) Format > Bold, run as the menu item runs it: on exactly once, then off exactly once
+        func menuBold(_ want: String) -> (ok: Bool, detail: String) {
+            let n = menuLines(file).count
+            let r = pressMenuProbe(app, file, run: "bold", tries: 6)
+            presses += r.presses
+            sleep(2)                                     // the editor's state reaches the app (a frame / 250 ms)
+            let handlers = menuLines(file).dropFirst(n).filter { $0 == "menu bold" }.count
+            let after = pressMenuProbe(app, file, tries: 6)
+            presses += after.presses
+            let b = field(after.line, "b")
+            return (r.line.hasSuffix(" ran=bold") && handlers == 1 && b == want,
+                    "\(r.line) | handlers=\(handlers) | then \(after.line) (Bold \(b), want \(want))")
+        }
+        let b0 = field(seen.line, "b")
+        let on = menuBold("1")
+        shot(app, "77-window-real-menu-bold-on")
+        gate("real-menu-bold-on-once", b0 == "0" && on.ok, "before=\(b0) \(on.detail)")
+        let off = menuBold("0")
+        shot(app, "78-window-real-menu-bold-off")
+        gate("real-menu-bold-off-once", on.ok && off.ok, off.detail)
+
+        // 5) File > Close, run as the menu item runs it: the editor saves and goes, the harness is back
+        let close = pressMenuProbe(app, file, run: "close", tries: 6)
+        presses += close.presses
+        let back = reopen.waitForExistence(timeout: 30)
+        sleep(2)
+        shot(app, "79-window-real-closed")
+        gate("real-menu-close-returns", close.line.hasSuffix(" ran=close") && back && !title.exists,
+             "\(close.line) | harness back=\(back) editor title shown=\(title.exists)")
+
+        // 6) now the menu sees no editor (nothing for Close / Bold to act on), but the home screen's opener
+        let after = pressMenuProbe(app, file, tries: 8)
+        presses += after.presses
+        gate("real-menu-after-close", field(after.line, "editor") == "0" && field(after.line, "home") == "1",
+             "\(after.line) after \(after.presses) press(es)")
+        info("real-probe-presses", "\(presses) probe presses in all (one that lost its modifiers types a bare 'p')")
+        info("real-menu-file", menuLines(file).joined(separator: " | "))
+        finish()
     }
 }

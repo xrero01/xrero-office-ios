@@ -36,6 +36,10 @@ struct EditorWebView: UIViewRepresentable {
             web.formatKey = { [weak ctl] name in ctl?.toggleFormat(name, source: "key") }
             web.formatKeyTitles = Self.formatKeyTitles(ar: lang == "ar")
         }
+        // the menu bar (plan S6, MenuBarTargets): File > Close, Edit > Find, Format > Bold ... act on this editor while
+        // its view is in a window - the real EditorScreen and the CI's AutotestScreen alike
+        web.menuController = controller
+        web.menuKind = document.kind
         let barOn = web.keyboardBar != nil, log = onCommand
         DispatchQueue.main.async { log("log", "keyboard bar: " + (barOn ? "on" : "off")) }     // after this view update
         #if DEBUG
@@ -153,11 +157,14 @@ struct EditorWebView: UIViewRepresentable {
 
         /// load() was asked for before the web view had a window (makeUIView): the window decides the layout.
         private var waitingForWindow = false
+        /// ... and with which reload count rule: a crash-recovery reload asked for then keeps its count (the guard
+        /// against a crash-reload loop), as it would have with a window.
+        private var waitingKeepsReloadCount = false
 
-        /// The web view entered a window (XRWebView.onWindow): the first load runs now.
+        /// The web view entered a window (XRWebView.onWindow): the load that waited for it runs now.
         func loadIfWaiting() {
             guard waitingForWindow else { return }
-            load()
+            load(keepReloadCount: waitingKeepsReloadCount)
         }
 
         /// Plan S6: the editor's design follows the WINDOW it opens in, not the device. "compact" (the phone design) on
@@ -170,6 +177,12 @@ struct EditorWebView: UIViewRepresentable {
             // CI cannot make a Split View window: XR_LAYOUT stands in for a narrow iPad window (EditorUITests)
             if let f = ProcessInfo.processInfo.environment["XR_LAYOUT"], f == "compact" || f == "regular" { return f }
             #endif
+            return windowLayout(for: window)
+        }
+
+        /// The rule itself, without the CI stand-in. EditorUITests' window gate checks it with windows of 320, 599, 600
+        /// and 1032 pt (AutotestScreen "layout" hook).
+        static func windowLayout(for window: UIWindow?) -> String {
             if UIDevice.current.userInterfaceIdiom == .phone { return "compact" }
             guard let w = window?.bounds.width, w > 0 else { return "regular" }
             return w < 600 ? "compact" : "regular"
@@ -181,6 +194,7 @@ struct EditorWebView: UIViewRepresentable {
                 // not in a window yet (makeUIView): XRWebView.onWindow brings this back. The language is noted now, so
                 // the view updates in between do not ask for the same load again.
                 waitingForWindow = true
+                waitingKeepsReloadCount = keepReloadCount
                 loadedLang = parent.lang
                 return
             }
@@ -596,20 +610,26 @@ final class EditorController: ObservableObject {
     }
 
     /// Bold / Italic / Underline from a native source - the menu bar's Format items or ⌘B / ⌘I / ⌘U (plan S6,
-    /// XRWebView.formatKey): the keyboard bar's own engine call, flipped from the state the editor reported, one log
-    /// line ("key: bold" / "menu: bold"). On a key press or a menu pick only, never per keystroke.
+    /// XRWebView.formatKey): one call into the editor (xr-host.js __xrToggle), one log line ("key: bold" / "menu:
+    /// bold"). The new value is flipped there from the ENGINE's current one, not from this app's copy of the state:
+    /// that copy arrives a frame (or 250 ms) later, so two quick presses - or a held, repeating key - would both send
+    /// the same value and the second would do nothing. A key press acts only when the focus is not in one of the
+    /// editor's own text boxes (Find & Replace, a comment, the font size): there the chord must not format the
+    /// document behind it ('skip'). On a key press or a menu pick only, never per keystroke.
     func toggleFormat(_ name: String, source: String) {
-        let js: String
-        switch name {
-        case "bold": js = "a.put_TextPrBold(\(!state.bold))"
-        case "italic": js = "a.put_TextPrItalic(\(!state.italic))"
-        case "underline": js = "a.put_TextPrUnderline(\(!state.underline))"
-        default: return
-        }
+        guard ["bold", "italic", "underline"].contains(name) else { return }
         #if XR_AUTOTEST
         AutotestMenuFile.note("\(source) \(name)")           // the window gate counts the handlers per key press
         #endif
-        format(source, name, js)
+        let key = source == "key"
+        call("var r=window.__xrToggle?__xrToggle('\(name)',\(key)):'no toggle';" +
+             "if(r==='ok'&&window.XreroHost)XreroHost.log('\(source): \(name)');return r;") { [weak self] r, e in
+            let res = (r as? String) ?? e ?? "?"
+            if res != "ok" {
+                NSLog("XR %@ %@: %@", source, name, res)
+                self?.coordinator?.parent.onCommand("log", "\(source): \(name) -> \(res)")
+            }
+        }
     }
 
     // MARK: the Aa format sheet (plan S1, FormatSheet.swift)

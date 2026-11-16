@@ -237,8 +237,18 @@ final class XRWebView: WKWebView {
     /// layout (compact / regular, plan S6) is chosen from the window's width.
     var onWindow: (() -> Void)?
 
+    /// The menu bar's view of this editor (plan S6, MenuBarTargets; EditorWebView sets these): registered while this
+    /// view is in a window, so File > Close / Edit > Find / Format > Bold act on the window's open editor - and on
+    /// nothing once it has closed.
+    weak var menuController: EditorController?
+    var menuKind: OfficeKind?
+
     override func didMoveToWindow() {
         super.didMoveToWindow()
+        if let c = menuController, let k = menuKind {
+            if window != nil { MenuBarTargets.shared.editorShown(self, controller: c, kind: k) }
+            else { MenuBarTargets.shared.editorHidden(self) }
+        }
         if window != nil { onWindow?() }
     }
 
@@ -246,9 +256,11 @@ final class XRWebView: WKWebView {
     /// not reliably get these chords on iOS: CI runs 142 and 152 (a key spy in the page) saw no ⌘B arrive on the
     /// iPhone at all and only every other one on the iPad - UIKit's text system takes them first. So the editor view
     /// owns them as key commands: each press runs the engine's Bold / Italic / Underline once (the keyboard bar's own
-    /// call), and a matched key command is not delivered on to the page, so there is no second toggle. The menu bar's
-    /// Format items carry no key equivalent: nothing else claims these keys. Only on a key press - typing never reaches
-    /// this (UIKit asks for the list on a key event; it is built once).
+    /// call), and a matched key command is not delivered on to the page, so there is no second toggle. While the focus
+    /// is in one of the editor's own text boxes (Find & Replace, a comment, the font size) the press does nothing
+    /// (xr-host.js __xrToggle): it must not format the document behind the box. The menu bar's Format items carry no
+    /// key equivalent: nothing else claims these keys. Only on a key press - typing never reaches this (UIKit asks for
+    /// the list on a key event; it is built once).
     var formatKey: ((String) -> Void)? { didSet { formatKeyCommands = nil } }
     /// The commands' names in the ⌘-hold shortcut list (the editor's language).
     var formatKeyTitles: [String: String] = [:] { didSet { formatKeyCommands = nil } }

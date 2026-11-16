@@ -9,10 +9,12 @@ the touch / typing gate (plan M14 + F1, EditorUITests.testZZTouchGateCaretSelect
 PASS (or KNOWN: a reported app gap of the exact shape seen) for EN and AR (results also to out/qa/touch-gate.json), and its saved xr-touch-<lang>.docx must hold the sentence with the tapped-in letter inside it,
 the word typed after the Bold tap and the word typed after the keyboard bar's Bold (plan M5) in bold runs, and the
 5 Enter presses.
-The window gate (plan S6, EditorUITests.testZZZZWindowLayoutAndKeyCommands) must log every check as PASS: the
-design follows the window (compact on the iPhone, regular on the full-screen iPad, compact for a narrow iPad window),
-the menu bar sees the window's editor (focusedSceneValue), Cmd+B from the hardware keyboard and the menu bar's
-Format > Bold each toggle Bold exactly once.
+The window gate (plan S6, EditorUITests.testZZZZWindowLayoutAndKeyCommands + testZZZZZMenuBarOnRealEditor) must log
+every check as PASS: the design follows the window (compact on the iPhone, regular on the full-screen iPad, compact
+for a narrow iPad window, and the app's own rule gives compact under 600 pt on the iPad), the menu bar sees the
+window's editor (MenuBarTargets) in the CI screen AND on the shipped DocumentOpener -> EditorHost path, Cmd+B from
+the hardware keyboard and the menu bar's Format > Bold each toggle Bold exactly once (Cmd+I / Cmd+U once too), and
+the menu bar's File > Close saves and closes the real editor - its xr-window-real.docx holds the word typed before.
 Every editor log must be free of 'missing AscDesktopEditor.*' lines (engine contract: a member the editors ask the
 shell for that xr-host.js does not define). Prints each editor log."""
 import json, os, re, sys, zipfile
@@ -437,20 +439,26 @@ def gallery(d):
     return good
 
 
-WINDOW_CHECKS = ("editor-ready", "layout-follows-window", "live-narrow-class", "menu-sees-editor", "cmd-b-on-once",
-                 "cmd-b-off-once", "cmd-b-types-nothing", "menu-bold-once")
+WINDOW_CHECKS = ("editor-ready", "layout-follows-window", "layout-rule", "live-narrow-class", "menu-sees-editor",
+                 "cmd-b-on-once", "cmd-b-off-once", "cmd-i-on-once", "cmd-u-on-once", "cmd-b-types-nothing",
+                 "menu-bold-once")
+# the shipped editor path (testZZZZZMenuBarOnRealEditor: DocumentOpener -> EditorHost, as from Home), File > Close
+REAL_MENU_CHECKS = ("real-editor-up", "real-menu-sees-editor", "real-menu-bold-on-once", "real-menu-bold-off-once",
+                    "real-menu-close-returns", "real-menu-after-close")
 
 
 def window_gate(d):
     """plan S6: the gate lines testZZZZWindowLayoutAndKeyCommands logged (xr-window.docx, and on the iPad also the
-    narrow-window run xr-window-narrow.docx); every check must be PASS. A missing line = the test stopped early = fail."""
+    narrow-window run xr-window-narrow.docx) and testZZZZZMenuBarOnRealEditor logged (xr-window-real.docx); every check
+    must be PASS. A missing line = the test stopped early = fail. File > Close saved the real document: it holds the
+    word typed before ("Menu"), followed only by bare "p"s of probe presses that lost their modifiers."""
     res = {}
     for f in sorted(os.listdir(d)):
         if f.startswith("xr-log-xr-window") and f.endswith(".txt"):
             log = open(os.path.join(d, f), encoding="utf-8", errors="replace").read()
             for m in re.finditer(r"^window-gate ([\w-]+): (PASS|FAIL|INFO)\s*(.*)$", log, re.M):
                 res[m.group(1)] = (m.group(2), m.group(3))
-    need = list(WINDOW_CHECKS)
+    need = list(WINDOW_CHECKS) + list(REAL_MENU_CHECKS)
     if "layout1:regular" in res.get("layout-follows-window", ("", ""))[1]:   # the iPad: its narrow-window run too
         need.append("ipad-narrow-window-compact")
     good = True
@@ -460,7 +468,14 @@ def window_gate(d):
         print("  %-28s %-10s %s" % (name, st, why[:200]))
         if (name in need and st != "PASS") or st == "FAIL":
             good = False
-    return good
+    p = os.path.join(d, "xr-window-real.docx")
+    try:
+        s = text(p).strip() if os.path.exists(p) else "(missing)"
+    except Exception as e:
+        s = "(cannot read: %s)" % e
+    saved = s.startswith("Menu") and set(s[4:]) <= {"p"}
+    print("  %-28s %-10s %s" % ("real-close-saved", "PASS" if saved else "FAIL", "xr-window-real.docx text %r" % s[:120]))
+    return good and saved
 
 
 root = sys.argv[1]

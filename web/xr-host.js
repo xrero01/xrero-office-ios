@@ -859,6 +859,24 @@
     } catch (e) { return 'error: ' + (e && e.message || e); }
     return 'unknown action';
   };
+  // Plan S6: Bold / Italic / Underline from the app's menu bar (Format) and from ⌘B / ⌘I / ⌘U, which the editor
+  // view owns as key commands (EditorController.toggleFormat; on a key press or a menu pick only, never per
+  // keystroke). The new value is flipped from the ENGINE's current one (hub: the engine's own asc_onBold & co., which
+  // put_TextPrBold fires before it returns), not from the app's copy of the state, which arrives a frame (or 250 ms)
+  // later - two quick presses, or a held key repeating, would otherwise both set the same value. `key`: a key press
+  // does nothing while the focus is in one of the editor's own text boxes (Find & Replace, a comment, the font size -
+  // anything typed into but the engine's own input, #area_id): there the chord must not format the document behind
+  // it. Returns 'ok', 'skip: ...' or why not.
+  window.__xrToggle = function (name, key) {
+    var api = window.__xrApi, el = document.activeElement;
+    var put = { bold: 'put_TextPrBold', italic: 'put_TextPrItalic', underline: 'put_TextPrUnderline' }[name];
+    if (!api) return 'no editor';
+    if (!put || !api[put]) return 'unknown format';
+    if (key && el && el.id !== 'area_id' && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable))
+      return 'skip: focus in ' + (el.id || el.tagName);
+    try { api[put](!hub.get(name)); } catch (e) { return 'error: ' + (e && e.message || e); }
+    return 'ok';
+  };
 
   // ---- Undo / Redo from the app's top bar (plan M4a; EditorController.call on a tap, never per keystroke).
   // A word still being composed (QuickType or a marked-text keyboard: the engine holds it as a "composite input") is

@@ -107,9 +107,6 @@ struct EditorScreen: View {
             .onChange(of: scenePhase) { _, phase in
                 if phase == .background { controller.save() }     // never lose typing when the app is left
             }
-            // the menu bar on iPad / Mac (plan S6, XreroCommands): File > Close, Edit > Find, Format > Bold ... act on
-            // this window's editor
-            .focusedSceneValue(\.xrEditor, EditorMenuTarget(controller: controller, kind: document.kind))
     }
 
     /// Save (only when something changed: the converter would otherwise rewrite a file that was just looked at),
