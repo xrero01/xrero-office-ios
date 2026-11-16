@@ -911,13 +911,27 @@ final class EditorUITests: XCTestCase {
                 shot(app, "79-files-\(lang)-\(what)-not-ready")
                 return false
             }
-            /// Back, then the harness again (the editor and its save on close have finished)
+            /// Back, then the harness again (the editor and its save on close have finished: 10 s at most, then the
+            /// dismissal). CI run 153, iPhone: one Back tap never reached the editor (still open 80 s later, then closed
+            /// normally by the next Back). So after 20 s with the editor still up, Back is tapped once more, as a person
+            /// would - logged, with what takes a touch there (hit-test, read once the harness is back); the app closes a
+            /// file only once however often Back is tapped.
             func closeEditor(_ what: String) -> Bool {
                 let back = app.buttons["xr-bar-back"]
                 // a tap on a missing element would end the whole test: say so and go on with the next step instead
                 guard back.waitForExistence(timeout: 5) else { XCTFail("no editor to close (\(lang) \(what))"); return false }
                 back.tap()
-                let ok = listButton.waitForExistence(timeout: 40)
+                var ok = listButton.waitForExistence(timeout: 20)
+                if !ok && back.exists && back.isHittable {
+                    let f = back.frame
+                    XCUIDevice.shared.system.open(URL(string: "xrero-autotest://hit?x=\(Int(f.midX))&y=\(Int(f.midY))")!)
+                    sleep(1)
+                    shot(app, "78-files-\(lang)-\(what)-back-lost")
+                    print("XR files Back did not close the editor (\(lang) \(what)) - tapping it again; frame \(f)")
+                    back.tap()
+                    ok = listButton.waitForExistence(timeout: 30)
+                    if ok { print("XR files second Back closed it (\(lang) \(what)); \(text("xr-real-hit"))") }
+                }
                 XCTAssertTrue(ok, "the editor did not close (\(lang) \(what))")
                 sleep(1)
                 return ok

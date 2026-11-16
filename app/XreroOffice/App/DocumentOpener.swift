@@ -267,7 +267,12 @@ final class DocumentOpener: NSObject, ObservableObject, UIDocumentPickerDelegate
             }
             RecentFiles.shared.add(url)
             let host = UIHostingController(rootView: AnyView(EmptyView()))
+            var closing = false
             host.rootView = AnyView(EditorHost(model: model) { [weak self] in
+                // once: Back tapped twice (or Back while a stuck save's 10 s fallback also leaves) must not close the
+                // file twice - a second noteClosed would uncount another window's editor
+                if closing { return }
+                closing = true
                 file.close { _ in
                     if scoped { url.stopAccessingSecurityScopedResource() }
                     Self.noteClosed(url)                              // before closed(): only OTHER editors count there
