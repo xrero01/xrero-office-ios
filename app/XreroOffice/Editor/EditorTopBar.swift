@@ -14,6 +14,11 @@ import SwiftUI
 ///
 /// The ⋯ menu (plan M7b) starts with Find, Redo (compact width) and Save; the screen adds the rest of the document
 /// menu (`more` = DocumentMenuItems: Share, Export, Document info, Language, Account, About, All tools).
+///
+/// Reading view (plan S2, ReadingView.swift): Word documents and PDFs get a trailing text button just before ⋯: Edit
+/// while reading, Done while editing. While reading, Undo / Redo and Aa are not shown (nothing can be edited). On a
+/// phone (compact width) Done is the first entry of ⋯ ("Reading View") instead: a fifth item in the bar left no room
+/// for the file name and its Edited / Saved line (CI: the title was dropped by the bar).
 struct EditorTopBar<More: View>: ViewModifier {
     var title: String
     var state: EditorState
@@ -31,6 +36,10 @@ struct EditorTopBar<More: View>: ViewModifier {
     var titleMenu: TitleMenuActions? = nil
     /// Aa (the format sheet, plan S1) in the bar: Word only for now.
     var format: Bool
+    /// The reading view (plan S2): `.off` = no Edit / Done (spreadsheets, presentations, the CI test screens).
+    @ObservedObject var reading: ReadingModel
+    /// Edit / Done tapped.
+    var toggleReading: () -> Void
     @ViewBuilder var more: () -> More
     @Environment(\.horizontalSizeClass) var sizeClass      // not private: that would hide the memberwise init
 
@@ -79,20 +88,25 @@ struct EditorTopBar<More: View>: ViewModifier {
                         }
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
-                    UndoButton(state: state, redo: false, ar: ar) { undo(false) }
-                    if wide { UndoButton(state: state, redo: true, ar: ar) { undo(true) } }
-                    if format {
-                        Button { controller.showFormat() } label: { FormatGlyph() }
-                            .accessibilityLabel(FormatText.format(ar))
-                            .accessibilityHint(A11yText.formatHint(ar))
-                            .accessibilityShowsLargeContentViewer()
-                            .accessibilityIdentifier("xr-bar-format")
+                    if !reading.reading {
+                        UndoButton(state: state, redo: false, ar: ar) { undo(false) }
+                        if wide { UndoButton(state: state, redo: true, ar: ar) { undo(true) } }
+                        if format {
+                            Button { controller.showFormat() } label: { FormatGlyph() }
+                                .accessibilityLabel(FormatText.format(ar))
+                                .accessibilityHint(A11yText.formatHint(ar))
+                                .accessibilityShowsLargeContentViewer()
+                                .accessibilityIdentifier("xr-bar-format")
+                        }
                     }
-                    // equatable: the menu is rebuilt only when what it shows changes (language, width, account...),
-                    // never because the screen redrew - a menu rebuilt while it is open stays on screen with every tap
-                    // ignored (CI: the dead ⋯ menu after Document info / Language)
-                    MoreMenu(key: menuKey, wide: wide, ar: ar, state: state, find: find, save: save,
-                             redo: { undo(true) }, more: more)
+                    if reading.available && (reading.reading || wide) {
+                        ReadingButton(model: reading, ar: ar, action: toggleReading)
+                    }
+                    // equatable: the menu is rebuilt only when what it shows changes (language, width, account,
+                    // reading...), never because the screen redrew - a menu rebuilt while it is open stays on screen
+                    // with every tap ignored (CI: the dead ⋯ menu after Document info / Language)
+                    MoreMenu(key: menuKey, wide: wide, ar: ar, reading: reading.reading, canRead: reading.available,
+                             state: state, find: find, save: save, redo: { undo(true) }, toReading: toggleReading, more: more)
                         .equatable()
                 }
             }
@@ -107,9 +121,11 @@ extension View {
     func editorTopBar<More: View>(title: String, state: EditorState, status: EditorBarStatus, controller: EditorController,
                                   ar: Bool, back: @escaping () -> Void, save: @escaping () -> Void,
                                   find: (() -> Void)? = nil, menuKey: String = "", titleMenu: TitleMenuActions? = nil, format: Bool = false,
+                                  reading: ReadingModel = .off, toggleReading: @escaping () -> Void = {},
                                   @ViewBuilder more: @escaping () -> More) -> some View {
         modifier(EditorTopBar(title: title, state: state, status: status, controller: controller, ar: ar,
-                              back: back, save: save, find: find, menuKey: menuKey, titleMenu: titleMenu, format: format, more: more))
+                              back: back, save: save, find: find, menuKey: menuKey, titleMenu: titleMenu, format: format,
+                              reading: reading, toggleReading: toggleReading, more: more))
     }
 }
 
@@ -175,6 +191,17 @@ enum BarText {
     static func copyName(_ base: String, _ ar: Bool) -> String { ar ? base + " - نسخة" : base + " copy" }
     static func copySaved(_ name: String, _ ar: Bool) -> String { (ar ? "حُفظت نسخة: " : "Copy saved: ") + name }
     static func copyFailed(_ ar: Bool) -> String { ar ? "تعذّر إنشاء نسخة" : "Couldn't duplicate" }
+    // the reading view (plan S2)
+    static func edit(_ ar: Bool) -> String { ar ? "تحرير" : "Edit" }
+    static func done(_ ar: Bool) -> String { ar ? "تم" : "Done" }
+    static func editHint(_ ar: Bool) -> String { ar ? "تحرير هذا المستند" : "Edit this document" }
+    static func doneHint(_ ar: Bool) -> String { ar ? "العودة إلى وضع القراءة" : "Back to reading view" }
+    static func page(_ p: Int, _ n: Int, _ ar: Bool) -> String { ar ? "الصفحة \(p) من \(n)" : "Page \(p) of \(n)" }
+    static func goToPage(_ ar: Bool) -> String { ar ? "الانتقال إلى صفحة" : "Go to Page" }
+    static func pageNumber(_ ar: Bool) -> String { ar ? "رقم الصفحة" : "Page number" }
+    static func go(_ ar: Bool) -> String { ar ? "انتقال" : "Go" }
+    static func pageRange(_ n: Int, _ ar: Bool) -> String { ar ? "من 1 إلى \(n)" : "1 to \(n)" }
+    static func readingView(_ ar: Bool) -> String { ar ? "وضع القراءة" : "Reading View" }
 }
 
 /// What the title menu does (the screen's own actions; plan M4b).
@@ -295,24 +322,34 @@ private struct MoreMenu<More: View>: View, Equatable {
     var key: String
     var wide: Bool
     var ar: Bool
+    /// Reading view (plan S2): no Redo here while reading (nothing can be edited); on a phone, while editing, the
+    /// way back to reading ("Reading View", the bar's Done on wide widths) is the menu's first entry.
+    var reading: Bool
+    var canRead: Bool
     var state: EditorState
     var find: (() -> Void)?
     var save: () -> Void
     var redo: () -> Void
+    var toReading: () -> Void
     var more: () -> More
 
     static func == (a: Self, b: Self) -> Bool {
-        a.key == b.key && a.wide == b.wide && a.ar == b.ar && (a.find == nil) == (b.find == nil) && a.state === b.state
+        a.key == b.key && a.wide == b.wide && a.ar == b.ar && a.reading == b.reading && a.canRead == b.canRead
+            && (a.find == nil) == (b.find == nil) && a.state === b.state
     }
 
     var body: some View {
         Menu {
             Section {
+                if canRead && !reading && !wide {
+                    Button(action: toReading) { Label(BarText.readingView(ar), systemImage: "book") }
+                        .accessibilityIdentifier("xr-menu-reading")
+                }
                 if let find {
                     Button(action: find) { Label(BarText.find(ar), systemImage: "magnifyingglass") }
                         .accessibilityIdentifier("xr-menu-find")
                 }
-                if !wide {
+                if !wide && !reading {
                     RedoMenuItem(state: state, ar: ar, action: redo)
                 }
                 Button(action: save) { Label(BarText.save(ar), systemImage: "square.and.arrow.down") }

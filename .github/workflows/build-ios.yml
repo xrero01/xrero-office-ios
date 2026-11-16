@@ -15,8 +15,10 @@ permissions:
 jobs:
   ios:
     runs-on: macos-15
-    # 120: the document-menu test (M7b) adds ~6 min per device; a slow shared runner cut the iPad half at 90
-    timeout-minutes: 210   # iPhone then iPad: the stage-4 gates (sheet, slides, PDF, templates) take ~2 h together
+    # 120: the document-menu test (M7b) adds ~6 min per device; a slow shared runner cut the iPad half at 90.
+    # 210: iPhone then iPad: the stage-4 gates (sheet, slides, PDF, templates) take ~2 h together; the reading-view
+    # gate (S2) adds ~5-8 min per device
+    timeout-minutes: 210
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -36,6 +38,9 @@ jobs:
 
       - name: Template gallery files are the generated ones (EN + AR, right-to-left Arabic, live formulas)
         run: python3 scripts/make_gallery_templates.py --verify
+
+      - name: Reading-view test files are the generated ones (6-page .docx + .pdf, plan S2)
+        run: python3 scripts/make_reading_fixtures.py --verify
 
       - name: Editors (Xrero payload subset) + app web folder
         run: |
@@ -75,6 +80,9 @@ jobs:
           export TEST_RUNNER_XR_SAMPLE_NAME=ar_letter.docx
           export TEST_RUNNER_XR_SAMPLE_B64=$(base64 -i tests/ar_letter.docx | tr -d '\n')
           export TEST_RUNNER_XR_PDF_B64=$(base64 -i tests/ar_letter.pdf | tr -d '\n')
+          # the reading view (plan S2): 6-page files, so its page capsule / Go to Page / scrolling are really exercised
+          export TEST_RUNNER_XR_READ_DOCX_B64=$(base64 -i tests/reading_6p.docx | tr -d '\n')
+          export TEST_RUNNER_XR_READ_PDF_B64=$(base64 -i tests/reading_6p.pdf | tr -d '\n')
           TESTS="-only-testing:XreroOfficeUITests/EditorUITests -only-testing:XreroOfficeUITests/TemplateGalleryUITests -only-testing:XreroOfficeUITests/ScanQuickActionUITests -only-testing:XreroOfficeUITests/OpenInUITests"
           if [ -n "$ONLY_TESTS" ]; then TESTS=""; for T in $ONLY_TESTS; do TESTS="$TESTS -only-testing:XreroOfficeUITests/$T"; done; fi
           echo "tests: $TESTS"
@@ -84,7 +92,7 @@ jobs:
             ( while true; do xcrun simctl io $DEV screenshot "out/shots/$DEV-$(date +%H%M%S).png" >/dev/null 2>&1; sleep 6; done ) & SHOOT=$!
             # out/ui-<device>.log: the whole filtered output (check_saved.py lists every skipped test and retried tap)
             xcodebuild test-without-building -project app/XreroOffice.xcodeproj -scheme XreroOffice -configuration Autotest \
-              -destination "id=$DEV" -derivedDataPath dd -resultBundlePath "out/ui-$DEV.xcresult"               $TESTS 2>&1 | grep -E "Test Case|error|passed|failed|XCTAssert|XR save path|XR save-as path|XR web buttons|XR geom|XR rotate|XR bridge|XR contract|XR chrome|XR touch|XR bar|XR menu|XR title menu|XR sheet|XR template|XR pdf-gate|XR quick|XR scan|XR springboard|XR open-in|XR a11y|XR first line|XR files" | tee "out/ui-$DEV.log" | tail -1000
+              -destination "id=$DEV" -derivedDataPath dd -resultBundlePath "out/ui-$DEV.xcresult"               $TESTS 2>&1 | grep -E "Test Case|error|passed|failed|XCTAssert|XR save path|XR save-as path|XR web buttons|XR geom|XR rotate|XR bridge|XR contract|XR chrome|XR touch|XR bar|XR menu|XR title menu|XR sheet|XR template|XR pdf-gate|XR quick|XR scan|XR springboard|XR open-in|XR a11y|XR first line|XR files|XR read" | tee "out/ui-$DEV.log" | tail -1000
             R=${PIPESTATUS[0]}; [ $R -ne 0 ] && RC=$R
             # the tail above keeps only the last tests of a full run: every test's result (and the Files gate, plan S9)
             # once more, in one short list - the whole filtered output is in the evidence zip (out/ui-<device>.log)

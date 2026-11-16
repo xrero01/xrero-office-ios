@@ -31,7 +31,9 @@ final class OpenInUITests: XCTestCase {
         let ar = run.lang == "ar"
         let tag = "\(run.mode)-\(run.lang)"
         let app = XCUIApplication()
-        app.launchArguments = ["-xr.lang", run.lang]
+        // plan S2 (stage-6 merge): a handed-over Word file opens in reading view by default; this test types into it
+        // at once, so the setting is off here (the reading view itself: EditorUITests.testReadingViewEditDoneThenType)
+        app.launchArguments = ["-xr.lang", run.lang, "-xr.readingView", "NO"]
         var env = ["XR_REAL": "1", "XR_INCOMING": run.file, "XR_INCOMING_MODE": run.mode]
         if run.clash { env["XR_INCOMING_CLASH"] = "1" }
         app.launchEnvironment = env

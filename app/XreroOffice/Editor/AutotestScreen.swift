@@ -662,6 +662,9 @@ private struct ProbeLabel: View {
 /// (the delegate call a real pick makes); "newheld" is "new" plus another iPad / Mac window opening that new file as
 /// soon as it is open here (a second UIDocument, counted as open by the opener, as that window's editor would be);
 /// "release" closes it in that other window again.
+/// A blank this harness creates is a NEW document (opened for editing, as Home's create tiles do); with XR_DOC_B64
+/// the file is written from those bytes and opened as an EXISTING one (plan S2: read-first, as from Recent / Browse),
+/// as is a file that is already there.
 struct RealDocumentHarness: View {
     @StateObject private var opener = DocumentOpener()
     @ObservedObject private var recents = RecentFiles.shared
@@ -778,12 +781,18 @@ struct RealDocumentHarness: View {
         if let incoming = ProcessInfo.processInfo.environment["XR_INCOMING"] { startIncoming(incoming, docs: docs); return }
         let url = docs.appendingPathComponent(name)
         let kind = OfficeKind(url: url) ?? .word
+        var how = DocumentOpener.OpenAs.existing
         if !FileManager.default.fileExists(atPath: url.path) {
-            try? OfficeDocument.blank(kind).write(to: url, options: .atomic)
+            if let b64 = ProcessInfo.processInfo.environment["XR_DOC_B64"], let d = Data(base64Encoded: b64) {
+                try? d.write(to: url, options: .atomic)
+            } else {
+                try? OfficeDocument.blank(kind).write(to: url, options: .atomic)
+                how = .edit
+            }
         }
         if idle { state = "idle"; list(); return }       // the file is there for the picker to find
         state = "opened " + name
-        opener.open(url)
+        opener.open(url, as: how)
     }
 
     /// Open-in test (plan S11, OpenInUITests): a file handed over by another app, through the app's own

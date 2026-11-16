@@ -494,6 +494,35 @@ def files_gate(d):
     return good
 
 
+def reading_view(d):
+    """The reading view (plan S2, EditorUITests.testReadingViewEditDoneThenType, the real UIDocument path): the 6-page
+    reading document (the store letter + 5 pages) opened as an existing file in reading state, Edit / Done switched 10
+    times, then Edit and an English and an Arabic line typed - both lines must be in the saved xr-read-<lang>.docx (the
+    editor's input field stayed healthy through the switches) with the letter and its last page kept. English and
+    Arabic interface."""
+    good = True
+    for lang in ("en", "ar"):
+        f = os.path.join(d, "xr-read-%s.docx" % lang)
+        if not os.path.exists(f):
+            print("xr-read-%s.docx: MISSING (reading view: Edit / Done x10, then type + save)" % lang); good = False; continue
+        try:
+            s = text(f)
+        except Exception as e:
+            print("xr-read-%s.docx: cannot read: %s" % (lang, e)); good = False; continue
+        flat = re.sub(r"[‎‏]", "", s)
+        en = "Reading view OK." in flat
+        ar = "وضع القراءة" in flat
+        kept = "السادة أولياء الأمور الكرام" in flat
+        # the 6-page reading document (tests/reading_6p.docx): its last page is still there after the save (two of its
+        # lines: the typing lands wherever the test's tap put the caret, and it could be inside one of them)
+        pages = "Page 6 of 6" in flat or "Line 4 on page 6" in flat
+        g = en and ar and kept and pages
+        print("xr-read-%s.docx (reading view, Edit / Done x10 then typing): English typed=%s  Arabic typed=%s  letter kept=%s  6 pages kept=%s -> %s"
+              % (lang, en, ar, kept, pages, "OK" if g else "WRONG"))
+        good &= g
+    return good
+
+
 def gallery(d):
     """The template gallery (plan S8, TemplateGalleryUITests): every template, EN + AR, was made from the gallery,
     opened and saved by the engine (an x2t round trip) under its name in that language; each saved copy still holds its
@@ -775,6 +804,7 @@ for dev in sorted(os.listdir(root)) if os.path.isdir(root) else []:
     ok &= doc_menu(d)
     ok &= title_menu(d)
     ok &= files_gate(d)
+    ok &= reading_view(d)
     ok &= gallery(d)
     ok &= scan_quick(d)
     ok &= open_in(d)

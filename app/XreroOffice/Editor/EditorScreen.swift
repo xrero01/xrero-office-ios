@@ -8,6 +8,9 @@ struct EditorScreen: View {
     var files: OpenDocumentModel? = nil
     /// Back to the documents (after the editor has saved). Without it the screen dismisses itself.
     var onClose: (() -> Void)? = nil
+    /// Read-first opening (plan S2, ReadingView.swift): the mode DocumentOpener chose for this file. Not observed here:
+    /// only the top bar, the PDF bar and the page capsule redraw on Edit / Done, never the whole screen.
+    var reading: ReadingModel = .off
     @StateObject private var controller = EditorController()
     @StateObject private var barStatus = EditorBarStatus()      // the top bar's Opening / Saving / Edited / Saved line
     @State private var lang = AppLanguage.current
@@ -32,17 +35,26 @@ struct EditorScreen: View {
     @ObservedObject private var account = XreroAccount.shared
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var title: String {
         fileURL?.lastPathComponent ?? ("Document." + document.kind.fileExtension)
     }
 
+    /// Where the file is now (plan S2's per-file reading memory): the model's URL, which a Rename / Move updates at once,
+    /// read when called - a closure kept by the ⋯ menu still finds the new name.
+    private var currentFile: URL? { files?.fileURL ?? fileURL }
+
     var body: some View {
-        EditorWebView(document: $document, title: title, lang: lang, onCommand: handle, controller: controller)
+        EditorWebView(document: $document, title: title, lang: lang, onCommand: handle, controller: controller,
+                      reading: reading)
             .ignoresSafeArea(.container, edges: [.bottom])
             // presentations (plan S4): the phone's native slide strip with '+', and native Present
             .slidesChrome(enabled: document.kind == .slide, controller: controller, ar: lang == "ar")
-            .pdfToolBar(kind: document.kind, controller: controller, ar: lang == "ar")     // plan S7: PDF only
+            // plan S7: PDF only (hidden while reading, plan S2)
+            .pdfToolBar(kind: document.kind, controller: controller, ar: lang == "ar", reading: reading)
+            // plan S2: the floating page capsule and Go to Page while reading
+            .readingChrome(reading, state: controller.state, controller: controller, ar: lang == "ar")
             .editorRecovery(notice: $recovered, tooLarge: tooLarge, ar: lang == "ar", share: shareDocument, back: leave)
             // spreadsheets (plan S3): the selection's Sum capsule and its Sum / Average / Min / Max / Count sheet
             .sheetSum(kind: document.kind, state: controller.state, controller: controller, ar: lang == "ar")
@@ -54,7 +66,11 @@ struct EditorScreen: View {
                           menuKey: "\(lang)|\(account.isSignedIn)|\(document.kind.rawValue)",
                           titleMenu: files == nil ? nil : TitleMenuActions(rename: startRename, duplicate: duplicate,
                                                                            move: startMove),
-                          format: document.kind == .word) {
+                          format: document.kind == .word,
+                          // plan S2: Edit / Done (Word, PDF). The file is looked up when tapped: the ⋯ menu keeps this
+                          // closure until its key changes, so a captured URL would be the name before a Rename / Move
+                          reading: reading,
+                          toggleReading: { reading.toggle(controller, file: currentFile, reduceMotion: reduceMotion) }) {
                 DocumentMenuItems(kind: document.kind, lang: lang, signedIn: account.isSignedIn, model: menu,
                                   controller: controller,
                                   language: { if $0 != lang { pendingLang = $0 } },
@@ -119,6 +135,7 @@ struct EditorScreen: View {
     /// Save (only when something changed: the converter would otherwise rewrite a file that was just looked at),
     /// then back to the documents - after 10 s at the latest, so a stuck save never traps the user in the editor.
     private func close() {
+        reading.remember(currentFile)       // plan S2: the file reopens in the mode it is left in
         var finished = false
         let finish = {
             if finished { return }
@@ -159,6 +176,7 @@ struct EditorScreen: View {
             tooLarge = true
         } else if cmd == "ready" {
             tooLarge = false                    // the editor came back after all (e.g. reopened in the other language)
+            reading.apply(controller)           // plan S2: the page (also a reloaded one) takes the current mode
         } else if cmd == "xrero:account" || cmd == "xrero:signin" {
             showAccount = true
         } else if cmd == "paste-failed" {

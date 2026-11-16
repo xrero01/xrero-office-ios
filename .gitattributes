@@ -6,3 +6,4 @@
 *.png binary
 *.bin binary
 fonts-gen/fonts/* binary
+*.pdf binary

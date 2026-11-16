@@ -10,6 +10,9 @@ struct EditorWebView: UIViewRepresentable {
     var lang: String
     var onCommand: (String, String) -> Void
     var controller: EditorController
+    /// Read-first opening (plan S2): a page loaded while reading starts in reading state (XreroHost.read, no flash of
+    /// the edit chrome); read at each load, so a reload (language switch, crash recovery) keeps the mode.
+    var reading: ReadingModel? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -187,7 +190,8 @@ struct EditorWebView: UIViewRepresentable {
         func bridgeScript() -> String {
             let cfg: [String: String] = ["lang": parent.lang, "title": parent.title,
                                          "theme": (web?.traitCollection.userInterfaceStyle == .dark) ? "dark" : "light",
-                                         "editMenu": EditMenu.enabled ? "1" : "0"]
+                                         "editMenu": EditMenu.enabled ? "1" : "0",
+                                         "read": (parent.reading?.reading ?? false) ? "1" : "0"]
             let json = String(data: (try? JSONSerialization.data(withJSONObject: cfg)) ?? Data("{}".utf8), encoding: .utf8) ?? "{}"
             return """
             (function () {
@@ -200,7 +204,7 @@ struct EditorWebView: UIViewRepresentable {
                 for (var i = 0; i < u.length; i += CH) s += String.fromCharCode.apply(null, u.subarray(i, i + CH)); return btoa(s); }
               function unb64(s) { var r = atob(s), u = new Uint8Array(r.length); for (var i = 0; i < r.length; i++) u[i] = r.charCodeAt(i); return u.buffer; }
               window.XreroHost = {
-                lang: cfg.lang, theme: cfg.theme, title: cfg.title, editMenu: cfg.editMenu,
+                lang: cfg.lang, theme: cfg.theme, title: cfg.title, editMenu: cfg.editMenu, read: cfg.read,
                 openFile: function () { return call({ cmd: 'open' }).then(function (r) { return { name: r.name, data: unb64(r.data) }; }); },
                 saveFile: function (name, bytes) { return call({ cmd: 'save', name: name, data: b64(bytes) }); },
                 exportFile: function (name, bytes) { return call({ cmd: 'export', name: name, data: b64(bytes) }); },
@@ -676,6 +680,27 @@ final class EditorController: ObservableObject {
         if XRWebView.firstResponder(in: web) == nil { _ = owner.becomeFirstResponder() }
         coordinator?.parent.onCommand("log", "format sheet: closed (keyboard back: \(XRWebView.firstResponder(in: web) != nil), " +
             "waited \(tries * 100) ms)")
+    }
+
+    // MARK: the reading view (plan S2, ReadingView.swift; xr-host.js __xrReadMode / __xrReadGoTo)
+
+    /// Reading on / off in the editor: its own view restriction, its input field read-only, the edit chrome hidden (on a
+    /// tap or when the page is ready, never per keystroke). Entering reading takes the keyboard down first. `done` gets
+    /// the editor's answer ("ok <state>", "later" while it is still opening).
+    func setReading(_ on: Bool, done: ((String) -> Void)? = nil) {
+        if on { hideKeyboard() }
+        call("return window.__xrReadMode ? __xrReadMode(\(on)) : 'no reading view';") { [weak self] r, e in
+            let res = (r as? String) ?? e ?? "?"
+            self?.coordinator?.parent.onCommand("log", "reading view \(on ? "on" : "off"): " + res)
+            done?(res)
+        }
+    }
+
+    /// The page capsule's Go to Page (0-based page).
+    func goToPage(_ index: Int) {
+        call("return window.__xrReadGoTo ? __xrReadGoTo(\(max(0, index))) : 'no reading view';") { [weak self] r, e in
+            self?.coordinator?.parent.onCommand("log", "reading view: go to page \(index + 1): " + ((r as? String) ?? e ?? "?"))
+        }
     }
 
     // MARK: the ⋯ document menu (plan M7b; xr-host.js __xrFind / __xrAllTools / __xrExport / __xrDocInfo). Each one

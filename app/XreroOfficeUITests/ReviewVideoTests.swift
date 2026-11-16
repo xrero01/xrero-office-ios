@@ -362,6 +362,21 @@ final class ReviewVideoTests: XCTestCase {
         if arabic { XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label ==[c] 'الأخيرة'")).firstMatch.waitForExistence(timeout: 5),
                       "the interface language did not persist across a relaunch") }
         shot("08-relaunched-home")
+
+        // 9. Home's ⋯ menu holds the reading-view setting (plan S2), on by default - only looked at, not changed
+        if let more = find(app.buttons, "identifier == 'xr-home-more'", timeout: 5) {
+            more.tap(); pause(1)
+            let reading = app.descendants(matching: .any).matching(NSPredicate(format:
+                "identifier == 'xr-home-reading' OR label == 'Open Files in Reading View' OR label == 'فتح الملفات في وضع القراءة'")).firstMatch
+            let shown = reading.waitForExistence(timeout: 5)
+            let what = shown ? reading.label + " value=" + String(describing: reading.value) : "missing"
+            print("XR review reading setting: \(what)")
+            XCTAssertTrue(shown, "no reading-view setting in Home's ⋯ menu")
+            shot("09-home-menu-reading-setting")
+            if !shown { dump("home-reading-setting") }
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.45)).tap()      // closes the menu
+            pause(1)
+        } else { dump("home-more") }
     }
 
     /// Home after the first document (plan M8): the file is in Recent; search finds it (and hides the create row);

@@ -15,10 +15,16 @@ import UniformTypeIdentifiers
 /// iPhone - because a large save can hitch the next keystroke. Until then a document is saved by Save, on close and
 /// when the app goes to the background.
 final class DocumentOpener: NSObject, ObservableObject, UIDocumentPickerDelegate {
+    /// How a file opens (plan S2): `.edit` for a document the app has just made (a blank or a template), `.existing`
+    /// for any other file - a Word document or PDF then opens in reading state unless the setting is off or the file
+    /// was last left in editing (ReadingModel.forOpening).
+    enum OpenAs { case edit, existing }
+
     /// Any controller in the home screen's window; documents are presented from the window's root.
     weak var anchor: UIViewController?
-    /// Asked to open while the window or another document was not ready; `copy`: an imported copy (plan S11).
-    private var pending: (url: URL, copy: Bool)?
+    /// Asked to open while the window or another document was not ready; `copy`: an imported copy (plan S11);
+    /// `how`: reading or editing (plan S2).
+    private var pending: (url: URL, copy: Bool, how: OpenAs)?
     private var editorOpen = false
     /// The window's root, kept while it is reachable: under a full-screen editor the home screen's views leave the
     /// window (anchor.view.window becomes nil), so the root must not be looked up through them when closing.
@@ -53,19 +59,19 @@ final class DocumentOpener: NSObject, ObservableObject, UIDocumentPickerDelegate
 
     func attach(_ vc: UIViewController) {
         anchor = vc
-        if let next = pending { pending = nil; DispatchQueue.main.async { self.open(next.url, importedCopy: next.copy) } }
+        if let next = pending { pending = nil; DispatchQueue.main.async { self.open(next.url, importedCopy: next.copy, as: next.how) } }
     }
 
     // MARK: entry points from the home screen
 
     func create(_ kind: OfficeKind) {
-        do { open(remember(try NewDocuments.create(kind))) }
+        do { open(remember(try NewDocuments.create(kind)), as: .edit) }
         catch { alert(L.cannotCreate, error.localizedDescription) }
     }
 
     /// A new file from a gallery template (plan S8), opened in the editor at once.
     func create(from template: TemplateManifest.Template, lang: String) {
-        do { open(remember(try NewDocuments.create(from: template, lang: lang))) }
+        do { open(remember(try NewDocuments.create(from: template, lang: lang)), as: .edit) }
         catch { alert(L.cannotCreate, error.localizedDescription) }
     }
 
@@ -252,14 +258,15 @@ final class DocumentOpener: NSObject, ObservableObject, UIDocumentPickerDelegate
     // MARK: opening
 
     private func openPending() {
-        if let next = pending { pending = nil; open(next.url, importedCopy: next.copy) }
+        if let next = pending { pending = nil; open(next.url, importedCopy: next.copy, as: next.how) }
     }
 
-    /// `importedCopy`: the file is a copy just moved here from the Inbox (openExternal).
-    func open(_ url: URL, importedCopy: Bool = false) {
+    /// `importedCopy`: the file is a copy just moved here from the Inbox (openExternal). `how` (plan S2): `.edit` for a
+    /// file the app has just made, else read-first (ReadingModel.forOpening).
+    func open(_ url: URL, importedCopy: Bool = false, as how: OpenAs = .existing) {
         NSLog("XR open %@ editorOpen=%ld", url.lastPathComponent, editorOpen ? 1 : 0)
-        guard let root, !editorOpen else { pending = (url, importedCopy); return }
-        guard OfficeKind(url: url) != nil else { alert(L.cannotOpen, url.lastPathComponent); return }
+        guard let root, !editorOpen else { pending = (url, importedCopy, how); return }
+        guard let kind = OfficeKind(url: url) else { alert(L.cannotOpen, url.lastPathComponent); return }
         editorOpen = true
         Self.noteOpened(url)                                          // from now until its close: open in this process
         let scoped = url.startAccessingSecurityScopedResource()       // documents outside the app's own folder
@@ -282,9 +289,10 @@ final class DocumentOpener: NSObject, ObservableObject, UIDocumentPickerDelegate
             model.origin = importedCopy ? .importedCopy : IncomingFiles.origin(of: url)
             NSLog("XR open-in origin %@ %@", "\(model.origin)", url.lastPathComponent)
             RecentFiles.shared.add(url)
+            let reading = ReadingModel.forOpening(url, kind: kind, isNew: how == .edit)
             let host = UIHostingController(rootView: AnyView(EmptyView()))
             var closing = false
-            host.rootView = AnyView(EditorHost(model: model) { [weak self] in
+            host.rootView = AnyView(EditorHost(model: model, reading: reading) { [weak self] in
                 // once: Back tapped twice (or Back while a stuck save's 10 s fallback also leaves) must not close the
                 // file twice - a second noteClosed would uncount another window's editor
                 if closing { return }

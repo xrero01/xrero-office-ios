@@ -654,12 +654,14 @@ extension Color {
 }
 
 extension View {
-    /// The PDF bar under a PDF editor (plan S7); any other kind, or the flag off: the view as it is.
-    @ViewBuilder func pdfToolBar(kind: OfficeKind, controller: EditorController, ar: Bool) -> some View {
+    /// The PDF bar under a PDF editor (plan S7); any other kind, or the flag off: the view as it is. Not shown while
+    /// reading (plan S2: the bar is edit chrome; the editor switched its tool off on entering reading).
+    @ViewBuilder func pdfToolBar(kind: OfficeKind, controller: EditorController, ar: Bool,
+                                 reading: ReadingModel = .off) -> some View {
         if kind == .pdf && PDFToolBar.enabled {
             VStack(spacing: 0) {
                 self
-                PDFToolBar(controller: controller, ar: ar)
+                HiddenWhileReading(model: reading) { PDFToolBar(controller: controller, ar: ar) }
             }
         } else {
             self
