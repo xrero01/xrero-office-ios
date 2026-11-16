@@ -9,7 +9,8 @@ the touch / typing gate (plan M14 + F1, EditorUITests.testZZTouchGateCaretSelect
 PASS (or KNOWN: a reported app gap of the exact shape seen) for EN and AR (results also to out/qa/touch-gate.json), and its saved xr-touch-<lang>.docx must hold the sentence with the tapped-in letter inside it,
 the word typed after the Bold tap and the word typed after the keyboard bar's Bold (plan M5) in bold runs, and the
 5 Enter presses.
-The Files gate (plan S9) must find the typed new document kept and no untouched new document left behind.
+The Files gate (plan S9) must find the typed new document kept (English and Arabic), the one another window had
+open kept, and no untouched new document left behind.
 Every editor log must be free of 'missing AscDesktopEditor.*' lines (engine contract: a member the editors ask the
 shell for that xr-host.js does not define). Prints each editor log."""
 import json, os, re, sys, zipfile
@@ -384,22 +385,37 @@ def title_menu(d):
 
 
 def files_gate(d):
-    """Files (plan S9, EditorUITests.testFilesPickerSheetAndUntouchedNewFile, the real UIDocument path): the new
-    document typed into ("Kept") was kept, under the name the untouched new document before it had freed again by being
-    removed on close - so Document.docx holds "Kept" and no "Document 2.docx" (an untouched file left behind) exists."""
-    p = os.path.join(d, "Document.docx")
-    if not os.path.exists(p):
-        print("Document.docx: MISSING (Files: a new document typed into must be kept)")
-        return False
-    try:
-        s = text(p)
-    except Exception as e:
-        print("Document.docx: cannot read:", e)
-        return False
-    left = sorted(f for f in os.listdir(d) if re.match(r"Document \d+\.docx$", f))
-    good = "Kept" in s and not left
-    print("Document.docx (Files: new, typed into, kept): 'Kept' inside=%s  untouched new files left=%s  text=%r -> %s"
-          % ("Kept" in s, left or "none", s[:80], "OK" if good else "WRONG"))
+    """Files (plan S9, EditorUITests.testFilesPickerSheetAndUntouchedNewFile, the real UIDocument path), English then
+    Arabic interface. English: the new document typed into ("Kept") was kept under the name the untouched new document
+    before it had freed again by being removed on close, so Document.docx holds "Kept"; Document 2.docx is the new
+    document another window also had open when this one closed it unchanged - kept, never typed into; no other
+    "Document N.docx" (an untouched file left behind). Arabic: the same on the right-to-left blank - مستند.docx holds
+    the typed Arabic word in a right-to-left paragraph, and no "مستند N.docx" is left."""
+    good = True
+    for name, word, rtl in (("Document", "Kept", False),
+                            ("مستند", "محفوظ", True)):
+        p = os.path.join(d, name + ".docx")
+        if not os.path.exists(p):
+            print("%s.docx: MISSING (Files: a new document typed into must be kept)" % name)
+            good = False
+            continue
+        try:
+            s = text(p)
+            bidi = arabic_blank_docx(p, word) if rtl else (True, "")
+        except Exception as e:
+            print("%s.docx: cannot read:" % name, e)
+            good = False
+            continue
+        # English: Document 2.docx is the one kept for the other window (asserted by the test); nothing beyond it
+        held = ["Document 2.docx"] if name == "Document" else []
+        left = sorted(f for f in os.listdir(d) if re.match(re.escape(name) + r" \d+\.docx$", f) and f not in held)
+        held_ok = all(os.path.exists(os.path.join(d, h)) and word not in text(os.path.join(d, h)) for h in held)
+        one = word in s and not left and held_ok and bidi[0]
+        print("%s.docx (Files: new, typed into, kept): %r inside=%s  untouched new files left=%s%s%s  text=%r -> %s"
+              % (name, word, word in s, left or "none",
+                 ("  kept for another window: %s=%s" % (held[0], held_ok)) if held else "",
+                 ("  right-to-left: " + bidi[1]) if rtl else "", s[:80], "OK" if one else "WRONG"))
+        good &= one
     return good
 
 

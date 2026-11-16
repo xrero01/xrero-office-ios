@@ -605,7 +605,11 @@ private struct ProbeLabel: View {
 /// XR_REAL_IDLE=1 (plan S9): nothing opens at start; the buttons below do what Home's Browse files / Open a PDF /
 /// New document do (the same opener calls), "list" shows the office files in Documents; a label refreshed every 0.5 s
 /// (no tap needed, so it also reports while something swallows taps) says what the last picker was and what is
-/// presented over the screen now.
+/// presented over the screen now, and what the last close decided for a new file (DocumentOpener.lastClosed).
+/// Hooks (plan S9 review): xrero-autotest://pick?name=<file> makes the presented picker pick that file from Documents
+/// (the delegate call a real pick makes); "newheld" is "new" plus another iPad / Mac window opening that new file as
+/// soon as it is open here (a second UIDocument, counted as open by the opener, as that window's editor would be);
+/// "release" closes it in that other window again.
 struct RealDocumentHarness: View {
     @StateObject private var opener = DocumentOpener()
     @ObservedObject private var recents = RecentFiles.shared
@@ -614,6 +618,8 @@ struct RealDocumentHarness: View {
     @State private var listed = 0                   // "files#<n>:": the test sees that its tap refreshed the labels
     @State private var taps = [String: Int]()       // taps each button received (did a tap reach the app at all?)
     @State private var hit = "hit:none"             // xrero-autotest://hit?x=&y=: which window / view gets a touch there
+    @State private var hook = "hook:none"           // what the pick / hold / release hooks did
+    @State private var held: OfficeFile?            // the file "another window" holds open (hold / release)
     private let name = ProcessInfo.processInfo.environment["XR_NEW_NAME"] ?? "xr-real.docx"
     private let idle = ProcessInfo.processInfo.environment["XR_REAL_IDLE"] == "1"
 
@@ -628,25 +634,75 @@ struct RealDocumentHarness: View {
                     Button("pdf") { count("pdf"); opener.browse([.pdf]) }.accessibilityIdentifier("xr-real-pdf")
                     Button("new") { count("new"); opener.create(.word) }.accessibilityIdentifier("xr-real-new")
                     Button("list") { count("list"); list() }.accessibilityIdentifier("xr-real-list")
+                    Button("newheld") {
+                        count("newheld")
+                        let before = recents.items.first?.id
+                        opener.create(.word)
+                        holdWhenOpen(after: before, n: 0)
+                    }.accessibilityIdentifier("xr-real-newheld")
+                    Button("release") { count("release"); release() }.accessibilityIdentifier("xr-real-release")
                 }
                 Text(files).font(.system(size: 9)).accessibilityIdentifier("xr-real-files")
                 TimelineView(.periodic(from: .now, by: 0.5)) { _ in
-                    Text("picker:" + (opener.lastPicker.isEmpty ? "none" : opener.lastPicker) + " presented:" + opener.presentedNow)
-                        .font(.system(size: 9)).accessibilityIdentifier("xr-real-picker")
+                    VStack(spacing: 4) {
+                        Text("picker:" + (opener.lastPicker.isEmpty ? "none" : opener.lastPicker) + " presented:" + opener.presentedNow)
+                            .font(.system(size: 9)).accessibilityIdentifier("xr-real-picker")
+                        Text("closed:" + (opener.lastClosed.isEmpty ? "none" : opener.lastClosed))
+                            .font(.system(size: 9)).accessibilityIdentifier("xr-real-closed")
+                    }
                 }
-                Text("taps:" + ["browse", "pdf", "new", "list"].map { "\($0)=\(taps[$0] ?? 0)" }.joined(separator: " "))
+                Text("taps:" + ["browse", "pdf", "new", "list", "newheld", "release"].map { "\($0)=\(taps[$0] ?? 0)" }.joined(separator: " "))
                     .font(.system(size: 9)).accessibilityIdentifier("xr-real-taps")
                 Text(hit).font(.system(size: 9)).accessibilityIdentifier("xr-real-hit")
+                Text(hook).font(.system(size: 9)).accessibilityIdentifier("xr-real-hook")
             }
         }
         // 0 x 0, as on Home: a full-size anchor view was hit-tested above the buttons after a form sheet (iPad)
         .background(PresenterAnchor(opener: opener).frame(width: 0, height: 0))
         .onAppear(perform: start)
         .onOpenURL { url in
-            guard url.scheme == "xrero-autotest", url.host == "hit" else { return }
+            guard url.scheme == "xrero-autotest" else { return }
             let q = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
             func num(_ k: String) -> CGFloat { CGFloat(Double(q.first { $0.name == k }?.value ?? "") ?? 0) }
-            hit = Self.hitReport(CGPoint(x: num("x"), y: num("y")))
+            switch url.host ?? "" {
+            case "hit": hit = Self.hitReport(CGPoint(x: num("x"), y: num("y")))
+            case "pick":
+                let n = q.first { $0.name == "name" }?.value ?? name
+                hook = opener.autotestPick(n) ? "hook:pick sent " + n : "hook:pick no picker"
+            default: break
+            }
+        }
+    }
+
+    /// Waits (0.25 s steps, 10 s at most; a timer, so it runs under the full-screen editor too) until the new file is
+    /// open here - it is then the newest Recent row - and holds it.
+    private func holdWhenOpen(after before: String?, n: Int) {
+        if let first = recents.items.first?.id, first != before { hold(); return }
+        guard n < 40 else { hook = "hook:hold never opened"; return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { holdWhenOpen(after: before, n: n + 1) }
+    }
+
+    /// Another window opens the file open here: the newest Recent row - the open editor's file - by its bookmark, as
+    /// Home's Recent row in that window would, as a second UIDocument counted by the opener.
+    private func hold() {
+        guard held == nil, let item = recents.items.first, let url = recents.resolve(item) else { hook = "hook:hold nothing"; return }
+        let f = OfficeFile(fileURL: url)
+        DocumentOpener.noteOpened(url)
+        hook = "hook:hold opening " + url.lastPathComponent
+        f.open { ok in
+            if ok { held = f } else { DocumentOpener.noteClosed(url) }
+            hook = (ok ? "hook:hold open " : "hook:hold failed ") + url.lastPathComponent
+        }
+    }
+
+    /// That other window closes the file again.
+    private func release() {
+        guard let f = held else { hook = "hook:release nothing"; return }
+        held = nil
+        let url = f.fileURL
+        f.close { _ in
+            DocumentOpener.noteClosed(url)
+            hook = "hook:released " + url.lastPathComponent
         }
     }
 

@@ -88,6 +88,9 @@ jobs:
           xcodebuild test-without-building -project app/XreroOffice.xcodeproj -scheme XreroOffice -configuration Debug \
             -destination "id=$DEV" -derivedDataPath dd -resultBundlePath out/review.xcresult \
             -only-testing:XreroOfficeUITests/ReviewVideoTests/testReviewFlow 2>&1 | grep -E "Test Case|error|XCTAssert|failed" | tail -20
+          # xcodebuild's own result, not grep's / tail's: a failed testReviewFlow must fail this job (after the video,
+          # the log and the attachments below are saved), so its checks - the picker pick-and-open (plan S9) - count
+          TEST_RC=${PIPESTATUS[0]}
           sleep 2
           kill -INT $REC; wait $REC
           # what the system said while the document picker listed / opened documents
@@ -99,6 +102,8 @@ jobs:
           xcrun xcresulttool export attachments --path out/review.xcresult --output-path out/attachments >/dev/null 2>&1
           ls out/attachments | head -60
           xcrun simctl shutdown $DEV
+          if [ "$TEST_RC" != "0" ]; then echo "testReviewFlow FAILED (xcodebuild exit $TEST_RC)"; exit 1; fi
+          echo "testReviewFlow passed"
 
       - name: Publish (release)
         if: ${{ always() }}

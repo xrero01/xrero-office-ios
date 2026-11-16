@@ -1,3 +1,8 @@
+> Archive: the reply sent for 20.0.9 (build 4) in October 2026. Its HOW TO USE section describes the full-screen
+> document browser that 20.3 removed (plan S9: Home > New tiles, Browse files / Open a PDF as a picker sheet with
+> Cancel, untouched new files not kept). Do not reuse it as is: the current walkthrough is `reviewNotes` in
+> `store/listing.json`.
+
 Hello App Review team,
 
 Thank you for reviewing Xrero Office. Below is the information you requested. It has also been added to the Notes

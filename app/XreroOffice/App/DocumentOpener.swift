@@ -9,6 +9,11 @@ import UniformTypeIdentifiers
 /// create-and-import path failed on the app's very first launch (the system imports the new file, then cannot resolve
 /// the item it just imported: "Unable to Import Document", DocumentManager error 1) - one reason the full-screen
 /// browser is gone (plan S9).
+///
+/// Not built here: plan S9's idle autosave. It is deferred as S9-autosave until its cost is measured - the
+/// asc_nativeGetFile3 + base64 serialisation of a 200-page .docx after 5 s idle, with the Tier-7 typing gate on a real
+/// iPhone - because a large save can hitch the next keystroke. Until then a document is saved by Save, on close and
+/// when the app goes to the background.
 final class DocumentOpener: NSObject, ObservableObject, UIDocumentPickerDelegate {
     /// Any controller in the home screen's window; documents are presented from the window's root.
     weak var anchor: UIViewController?
@@ -25,9 +30,20 @@ final class DocumentOpener: NSObject, ObservableObject, UIDocumentPickerDelegate
     /// template leaves no "Document 3" behind. Only these: a file the user brought (Browse, Recent, Open in, a file
     /// this list once held and that was kept) is never deleted. Blank templates are a few KB.
     private var fresh: [String: Data] = [:]
+    /// Every file open in an editor anywhere in this process, by key, with how many editors hold it now. There is one
+    /// opener per window (HomeScene), but iPad and Mac windows share the process and the Recent list: window B can open
+    /// from Recent the very file window A just made and type into it (unsaved: the editor saves on close, background or
+    /// Save) while A closes it unchanged. Main thread only: open() and UIDocument's completion handlers run there.
+    private static var openCount: [String: Int] = [:]
+    /// Files that more than one editor had open at the same time: never removed by the app (any doubt keeps the file).
+    /// A key leaves when a new file is made at that path again (remember()).
+    private static var sharedOpen: Set<String> = []
     /// What the last picker was, for the Autotest harness (RealDocumentHarness): "<class> <style> presenter=<0|1>
     /// types=<...>", then " picked" / " cancelled". Plain text, not published: nothing on Home shows it.
     private(set) var lastPicker = ""
+    /// What the last close decided for a new file (plan S9), for the same harness: "not-new <name>", "kept <name>
+    /// touched|moved|open-elsewhere|changed", "removing <name>", then "removed <name>" / "not-removed <name>".
+    private(set) var lastClosed = ""
 
     private var root: UIViewController? {
         if let r = anchor?.view.window?.rootViewController { lastRoot = r; return r }
@@ -111,6 +127,22 @@ final class DocumentOpener: NSObject, ObservableObject, UIDocumentPickerDelegate
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { self.watchDismissal(of: vc, n: n + 1, finish) }
     }
 
+    #if XR_AUTOTEST
+    /// Autotest only (RealDocumentHarness, xrero-autotest://pick?name=<file>): the presented picker picks <file> from
+    /// the app's own folder - the delegate call the system makes after a tap in its list - so afterDismissal and open()
+    /// run as after a real pick, on iPhone and iPad and on every CI host (the remote picker on the macOS 15 hosts never
+    /// hands a file over; review-video taps a real one). A real pick dismisses its picker itself; afterDismissal does
+    /// it here. false: no picker is up.
+    func autotestPick(_ name: String) -> Bool {
+        var vc = root?.presentedViewController
+        while let v = vc, !(v is UIDocumentPickerViewController) { vc = v.presentedViewController }
+        guard let picker = vc as? UIDocumentPickerViewController,
+              let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return false }
+        documentPicker(picker, didPickDocumentsAt: [docs.appendingPathComponent(name)])
+        return true
+    }
+    #endif
+
     /// For the Autotest harness: what is presented over the window's root right now - "none", or its class, with
     /// " dismissing" while it goes.
     var presentedNow: String {
@@ -125,22 +157,67 @@ final class DocumentOpener: NSObject, ObservableObject, UIDocumentPickerDelegate
     /// A file just made by create(): remembered with its bytes until its editor closes.
     private func remember(_ url: URL) -> URL {
         fresh[Self.key(url)] = (try? Data(contentsOf: url)) ?? Data()
+        Self.sharedOpen.remove(Self.key(url))           // a new file at this path: what an older one went through is gone
         return url
+    }
+
+    /// An editor (in any window) opened `url`; the second one at the same time marks the file shared.
+    static func noteOpened(_ url: URL) {
+        let k = key(url)
+        let n = (openCount[k] ?? 0) + 1
+        openCount[k] = n
+        if n > 1 { sharedOpen.insert(k) }
+    }
+
+    /// That editor closed (or never opened).
+    static func noteClosed(_ url: URL) {
+        let k = key(url)
+        let n = (openCount[k] ?? 0) - 1
+        openCount[k] = n > 0 ? n : nil
+    }
+
+    /// `urls` (one file, as opened and as it is now) is open somewhere else in the process, or was while this window
+    /// had it: another window's editor (the counts), or any other file presenter on it - another UIDocument, whichever
+    /// code opened it. `own`, the closing window's UIDocument, is left out, whether or not it has unregistered yet.
+    private static func openElsewhere(_ urls: [URL], except own: OfficeFile) -> Bool {
+        let keys = Set(urls.map(key))
+        if keys.contains(where: { (openCount[$0] ?? 0) > 0 || sharedOpen.contains($0) }) { return true }
+        return NSFileCoordinator.filePresenters.contains { p in
+            (p as AnyObject) !== own && (p.presentedItemURL.map { keys.contains(key($0)) } ?? false)
+        }
     }
 
     /// The editor of `url` has closed (its UIDocument too). A file this app made in this session is removed when
     /// nothing happened to it: the engine never reported an edit, nothing was saved into it, it was not renamed,
-    /// moved or duplicated (OpenDocumentModel.touched), it is still where it was made, and its bytes are still the
-    /// ones it was made with. Any doubt keeps the file. Its Recent row goes first, so Home never shows it.
+    /// moved or duplicated (OpenDocumentModel.touched), it is still where it was made, no other window has it open (or
+    /// had it open meanwhile - that window may hold unsaved typing), and its bytes are still the ones it was made with.
+    /// Any doubt keeps the file. Its Recent row goes first, so Home never shows it.
     private func closed(_ url: URL, _ model: OpenDocumentModel) {
-        guard let made = fresh.removeValue(forKey: Self.key(url)) else { return }     // the first close only
-        let here = Self.key(model.fileURL) == Self.key(url)
-        let same = !made.isEmpty && (try? Data(contentsOf: url)) == made
-        guard !model.touched, here, same else {
-            NSLog("XR new file kept: %@ (touched=%ld moved=%ld changed=%ld)", url.lastPathComponent,
-                  model.touched ? 1 : 0, here ? 0 : 1, same ? 0 : 1)
+        let name = url.lastPathComponent
+        guard let made = fresh.removeValue(forKey: Self.key(url)) else {            // the first close only
+            lastClosed = "not-new " + name
             return
         }
+        let here = Self.key(model.fileURL) == Self.key(url)
+        guard !model.touched, here else {               // decided without reading the file (it can be large by now)
+            NSLog("XR new file kept: %@ (touched=%ld moved=%ld)", name, model.touched ? 1 : 0, here ? 0 : 1)
+            lastClosed = "kept " + name + (model.touched ? " touched" : " moved")
+            return
+        }
+        if Self.openElsewhere([url, model.fileURL], except: model.file) {
+            NSLog("XR new file kept: open elsewhere %@", name)
+            lastClosed = "kept " + name + " open-elsewhere"
+            return
+        }
+        // the bytes last, and only when the size matches the blank's (a few KB): a large file is never read here
+        let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.intValue ?? -1
+        let same = !made.isEmpty && size == made.count && (try? Data(contentsOf: url)) == made
+        guard same else {
+            NSLog("XR new file kept: %@ (changed=1)", name)
+            lastClosed = "kept " + name + " changed"
+            return
+        }
+        lastClosed = "removing " + name
         RecentFiles.shared.forget(url)
         DispatchQueue.global(qos: .utility).async {
             var cerr: NSError?
@@ -151,7 +228,8 @@ final class DocumentOpener: NSObject, ObservableObject, UIDocumentPickerDelegate
             }
             let ok = removed && cerr == nil
             DispatchQueue.main.async {
-                NSLog("XR untouched new file %@: %@", url.lastPathComponent, ok ? "removed" : "not removed")
+                NSLog("XR untouched new file %@: %@", name, ok ? "removed" : "not removed")
+                self.lastClosed = (ok ? "removed " : "not-removed ") + name
                 // could not be removed: it stays a normal file, listed in Recent again
                 if !ok && FileManager.default.fileExists(atPath: url.path) { RecentFiles.shared.add(url) }
             }
@@ -169,11 +247,18 @@ final class DocumentOpener: NSObject, ObservableObject, UIDocumentPickerDelegate
         guard let root, !editorOpen else { pending = url; return }
         guard OfficeKind(url: url) != nil else { alert(L.cannotOpen, url.lastPathComponent); return }
         editorOpen = true
+        Self.noteOpened(url)                                          // from now until its close: open in this process
         let scoped = url.startAccessingSecurityScopedResource()       // documents outside the app's own folder
         let file = OfficeFile(fileURL: url)
         file.open { [weak self] ok in
-            guard let self else { return }
+            guard let self else {                                     // the window went meanwhile
+                if ok { file.close(completionHandler: nil) }
+                if scoped { url.stopAccessingSecurityScopedResource() }
+                Self.noteClosed(url)
+                return
+            }
             guard ok, let model = OpenDocumentModel(file: file) else {
+                Self.noteClosed(url)
                 if scoped { url.stopAccessingSecurityScopedResource() }
                 self.editorOpen = false
                 self.fresh.removeValue(forKey: Self.key(url))           // never shown: never removed by the app later
@@ -185,6 +270,7 @@ final class DocumentOpener: NSObject, ObservableObject, UIDocumentPickerDelegate
             host.rootView = AnyView(EditorHost(model: model) { [weak self] in
                 file.close { _ in
                     if scoped { url.stopAccessingSecurityScopedResource() }
+                    Self.noteClosed(url)                              // before closed(): only OTHER editors count there
                     guard let self else { return }
                     // the editor is closed as far as opening the next file goes, whatever the animation does
                     self.editorOpen = false
