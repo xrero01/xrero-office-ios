@@ -56,7 +56,12 @@ final class OpenInUITests: XCTestCase {
             let web = app.webViews.firstMatch
             let point = web.coordinate(withNormalizedOffset: CGVector(dx: ar ? 0.65 : 0.35, dy: 0.45))
             point.tap()
-            if !app.keyboards.firstMatch.waitForExistence(timeout: 4) { point.tap(); _ = app.keyboards.firstMatch.waitForExistence(timeout: 4) }
+            if !app.keyboards.firstMatch.waitForExistence(timeout: 4) {
+                // a lost simulator tap: tapped once more, and said so
+                let word = text.trimmingCharacters(in: .whitespaces)
+                print("XR open-in \(tag) \(word)-first-tap-ignored: INFO no keyboard 4 s after the tap on the page - tapped again")
+                point.tap(); _ = app.keyboards.firstMatch.waitForExistence(timeout: 4)
+            }
             sleep(1)
             for ch in text { app.typeText(String(ch)); usleep(150_000) }
             sleep(1)

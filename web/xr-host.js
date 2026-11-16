@@ -773,9 +773,19 @@
   // handles it): a press shorter than iOS's own long press (500 ms) stays a tap - the right click has already put the
   // caret where the finger was, as a tap does; no menu, nothing selected. (2) A long press on blank paper (beside or
   // below the text) gives the caret and the menu (Paste, Select All), as in Pages: no word nobody touched is selected.
+  // (3) A gesture with more than one finger (pinch to zoom, a two-finger scroll) is never a long press: the touch
+  // manager emulates its right click when the LAST finger lifts more than 750 ms after the last finger went down, which
+  // a pinch always is - it opened the menu and selected the word at the lifted finger (CI run 156, both devices and
+  // languages: "edit menu: at ... text selected=true" after each pinch), and the next key typed replaced that word.
+  // iOS shows no edit menu for a pinch either. Pointer input never reaches this (fromTouch): a Pencil / trackpad press
+  // goes down the engine's mouse path (Word's touch manager only takes pointerType 'touch').
   var editMenu = (function () {
     var open = false, word = /documenteditor/.test(location.pathname);
     var downAt = -1, upAt = -1;                 // the primary finger's down / up (event timeStamp, ms)
+    var multi = false;                          // a second finger touched the page during this gesture
+    // read by the CI touch gate's probe (AutotestScreen): how often a touch was kept as a tap / a multi-finger gesture
+    // was let through without the menu. Plain numbers: nothing reads them on the keystroke path.
+    var stats = window.__xrEditMenuStats = { kept: 0, multi: 0 };
     function fromTouch() {
       var C = window.AscCommon, m = C && C.global_mouseEvent;
       return !!m && C.g_mouse_button_right !== undefined && m.ButtonOverride === C.g_mouse_button_right;
@@ -794,14 +804,17 @@
       var opts = { capture: true, passive: true };
       if (window.PointerEvent) {
         window.addEventListener('pointerdown', function (e) {
-          if (e.pointerType === 'touch' && e.isPrimary) { downAt = e.timeStamp; upAt = -1; }
+          if (e.pointerType !== 'touch') return;
+          // the first finger starts a new gesture; any other finger down while it lasts makes it a multi-finger one
+          if (e.isPrimary) { downAt = e.timeStamp; upAt = -1; multi = false; } else multi = true;
         }, opts);
         window.addEventListener('pointerup', function (e) {
           if (e.pointerType === 'touch' && e.isPrimary && downAt >= 0) upAt = e.timeStamp;
         }, opts);
       } else {
         window.addEventListener('touchstart', function (e) {
-          if (e.touches && e.touches.length === 1) { downAt = e.timeStamp; upAt = -1; }
+          if (e.touches && e.touches.length === 1) { downAt = e.timeStamp; upAt = -1; multi = false; }
+          else if (e.touches && e.touches.length > 1) multi = true;
         }, opts);
         window.addEventListener('touchend', function (e) {
           if ((!e.touches || e.touches.length === 0) && downAt >= 0) upAt = e.timeStamp;
@@ -810,9 +823,16 @@
     }
     function take(data) {
       if (!word || H.editMenu === '0' || !fromTouch()) return false;
+      if (multi) {
+        // a pinch / two-finger gesture: no menu, no word selected (see (3) above)
+        stats.multi++;
+        log('edit menu: a multi-finger gesture reached the engine as a long press - ignored');
+        return true;
+      }
       var held = downAt >= 0 && upAt >= downAt ? upAt - downAt : -1;
       if (held >= 0 && held < 500) {
         // a tap the busy page handled late: the desktop menu stays shut and nothing is selected (see above)
+        stats.kept++;
         log('edit menu: a ' + Math.round(held) + ' ms tap reached the engine as a long press - kept as a tap');
         return true;
       }

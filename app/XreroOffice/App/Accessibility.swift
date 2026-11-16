@@ -30,10 +30,32 @@ enum A11yText {
     static func hideKeyboardHint(_ ar: Bool) -> String { ar ? "يخفي لوحة المفاتيح" : "Hides the keyboard" }
 }
 
+/// How often the canvas note's Close action has run in this app process. Its button reports the count as its
+/// accessibility value ("closes=N"), so the UI test can tell a tap that never reached the button (simulator) from an
+/// action that ran while the note stayed on screen or came back (an app bug). Kept outside the note's own state: a note
+/// that came back with fresh state still shows the earlier count.
+enum CanvasNoteCloses {
+    static var count = 0
+}
+
+/// The count as the Close button's accessibility value - in the CI build only: VoiceOver users must not hear it.
+private struct CanvasNoteCloseCount: ViewModifier {
+    var count: Int                  // read by the note on every redraw (a stored value, so the modifier redraws too)
+    func body(content: Content) -> some View {
+        #if XR_AUTOTEST
+        content.accessibilityValue(Text(verbatim: "closes=\(count)"))
+        #else
+        content
+        #endif
+    }
+}
+
 /// The note under the editor's top bar while VoiceOver is on (or `-xr.canvasNote YES`, for the UI test: the simulator
-/// cannot turn VoiceOver on). Closable with a 44 pt button; closed stays closed for this editor.
-struct CanvasAccessibilityNote: ViewModifier {
+/// cannot turn VoiceOver on). Closable with a 44 pt button; closed stays closed for this editor. `below`: other notices
+/// at the top of the editor (the imported-copy notice, plan S11) stack under it instead of being drawn over by it.
+struct CanvasAccessibilityNote<Below: View>: ViewModifier {
     var ar: Bool
+    var below: Below
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
     @Environment(\.colorSchemeContrast) private var contrast
     @State private var closed = false
@@ -43,52 +65,67 @@ struct CanvasAccessibilityNote: ViewModifier {
     func body(content: Content) -> some View {
         content
             .overlay(alignment: .top) {
-                if shown {
-                    HStack(alignment: .top, spacing: 8) {
-                        Image(systemName: "eye.slash")
-                            .foregroundStyle(.tint)
-                            .padding(.top, 12)
-                            .accessibilityHidden(true)
-                        Text(A11yText.canvasNote(ar))
-                            .font(.footnote)
-                            .foregroundStyle(.primary)
-                            .multilineTextAlignment(.leading)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(.vertical, 10)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .accessibilityIdentifier("xr-a11y-canvas-note")
-                        Button { closed = true } label: {
-                            Image(systemName: "xmark")
-                                .font(.footnote.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                                .frame(width: 44, height: 44)
-                                .contentShape(Rectangle())
-                        }
-                        .accessibilityLabel(A11yText.close(ar))
-                        .accessibilityIdentifier("xr-a11y-canvas-close")
-                    }
-                    .padding(.leading, 14)
-                    .frame(maxWidth: 560)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .strokeBorder(contrast == .increased ? Color.primary.opacity(0.6) : Color(.separator),
-                                      lineWidth: contrast == .increased ? 1 : 0.5))
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
-                    .dynamicTypeSize(...DynamicTypeSize.xxxLarge)      // a note, not the page: kept compact over the ribbon
-                    .environment(\.layoutDirection, ar ? .rightToLeft : .leftToRight)
-                    .accessibilityElement(children: .contain)
-                    .onAppear {
-                        if voiceOver { UIAccessibility.post(notification: .announcement, argument: A11yText.canvasNote(ar)) }
-                    }
+                VStack(spacing: 0) {
+                    if shown { note }
+                    below
                 }
             }
+    }
+
+    private var note: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "eye.slash")
+                .foregroundStyle(.tint)
+                .padding(.top, 12)
+                .accessibilityHidden(true)
+            Text(A11yText.canvasNote(ar))
+                .font(.footnote)
+                .foregroundStyle(.primary)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityIdentifier("xr-a11y-canvas-note")
+            Button {
+                CanvasNoteCloses.count += 1
+                NSLog("XR a11y canvas note close action %ld", CanvasNoteCloses.count)
+                closed = true
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel(A11yText.close(ar))
+            .modifier(CanvasNoteCloseCount(count: CanvasNoteCloses.count))
+            .accessibilityIdentifier("xr-a11y-canvas-close")
+        }
+        .padding(.leading, 14)
+        .frame(maxWidth: 560)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+            .strokeBorder(contrast == .increased ? Color.primary.opacity(0.6) : Color(.separator),
+                          lineWidth: contrast == .increased ? 1 : 0.5))
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)      // a note, not the page: kept compact over the ribbon
+        .environment(\.layoutDirection, ar ? .rightToLeft : .leftToRight)
+        .accessibilityElement(children: .contain)
+        .onAppear {
+            if voiceOver { UIAccessibility.post(notification: .announcement, argument: A11yText.canvasNote(ar)) }
+        }
     }
 }
 
 extension View {
     /// The honest VoiceOver note over the drawn document page (plan S12).
-    func canvasAccessibilityNote(ar: Bool) -> some View { modifier(CanvasAccessibilityNote(ar: ar)) }
+    func canvasAccessibilityNote(ar: Bool) -> some View { modifier(CanvasAccessibilityNote(ar: ar, below: EmptyView())) }
+
+    /// The same note with the editor's other top notices stacked under it (they would otherwise be drawn over by it).
+    func canvasAccessibilityNote<Below: View>(ar: Bool, @ViewBuilder below: () -> Below) -> some View {
+        modifier(CanvasAccessibilityNote(ar: ar, below: below()))
+    }
 
     /// An animation that is dropped with Reduce Motion.
     func xrAnimation<V: Equatable>(_ animation: Animation, value: V) -> some View {

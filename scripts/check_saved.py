@@ -75,6 +75,8 @@ TOUCH = {   # what EditorUITests.touchGate types per language: sentence, tapped-
 # the checks every language must log (a missing line means the test stopped early: that is a failure too)
 TOUCH_CHECKS = ("editor-ready", "tap-places-caret-first-line", "typing", "line-direction", "tap-moves-caret-into-text",
                 "tap-then-type-inserts-there", "double-tap-selects-word", "long-press-selects-word", "long-press-native-menu",
+                # a long press on blank paper selects no word; a short tap on a busy page stays a tap (xr-host.js editMenu)
+                "long-press-blank-no-word", "busy-tap-kept-as-tap",
                 "caret-to-line-end",
                 "bold-button-applies", "format-tap-keeps-keyboard", "type-after-format",
                 "kbar-shown", "kbar-bold-on", "kbar-keeps-keyboard", "kbar-next-word-bold", "kbar-align-cycles",
@@ -82,7 +84,8 @@ TOUCH_CHECKS = ("editor-ready", "tap-places-caret-first-line", "typing", "line-d
                 "sheet-opens-and-closes", "sheet-return-keyboard", "sheet-return-caret",
                 "fmt-sheet-opens", "fmt-sheet-keyboard-down", "fmt-size-applies", "fmt-sheet-return-keyboard",
                 "fmt-sheet-return-caret", "pinch-in-zooms-page",
-                "pinch-zoom-kept", "pinch-out-zooms-back", "kbar-hide-keyboard", "save", "reopen-keeps-text")
+                "pinch-zoom-kept", "pinch-in-no-menu", "pinch-out-zooms-back", "pinch-out-no-menu",
+                "kbar-hide-keyboard", "save", "reopen-keeps-text")
 
 
 QA = {}   # device -> lang -> {check: [status, detail]} + typing latency: written to out/qa/touch-gate.json (F1 trend)
@@ -108,6 +111,11 @@ def touch_gate(d, lang):
         # KNOWN = a real app gap the gate found and reported (it passes by itself once fixed); FAIL / missing = fail
         if (name in TOUCH_CHECKS and st not in ("PASS", "KNOWN")) or st == "FAIL":
             good = False
+    # the busy-page tap (touch-gate busy-tap-kept-as-tap): the hook really held the page and the edit menu kept the tap
+    held = re.search(r"^busy hook: the page was held busy \d+ ms", log, re.M) is not None
+    kept = re.search(r"^edit menu: a \d+ ms tap reached the engine as a long press - kept as a tap", log, re.M) is not None
+    print("  busy-page tap: page held busy=%s  kept as a tap=%s -> %s" % (held, kept, "OK" if held and kept else "WRONG"))
+    good &= held and kept
     sentence, marker, bold_word, end_word, bar_word = TOUCH[lang]
     p = os.path.join(d, "xr-touch-%s.docx" % lang)
     if not os.path.exists(p):
@@ -286,8 +294,10 @@ def pdf_bar(d, lang):
     return good
 
 
-KBDIR_CHECKS = ("editor-ready", "keyboard-up", "empty-arabic-rtl", "empty-english-ltr", "empty-arabic-rtl-again",
+KBDIR_CHECKS = ("editor-ready", "keyboard-up", "observer", "empty-arabic-rtl", "empty-english-ltr", "empty-arabic-rtl-again",
                 "arabic-typed", "text-paragraph-kept", "new-empty-english-ltr", "english-text-kept", "both-typed", "save")
+# the shipped default of the setting (no -xr.kbDirection): xr-log-xr-kbdef-<lang>.docx.txt
+KBDEF_CHECKS = ("default-editor-ready", "default-keyboard-up", "default-observer", "default-switch")
 
 
 def para_bidi(p, word):
@@ -321,16 +331,19 @@ def kbdir_gate(d, lang):
     good = True
     lg = os.path.join(d, "xr-log-xr-kbdir-%s.docx.txt" % lang)
     log = open(lg, encoding="utf-8", errors="replace").read() if os.path.exists(lg) else ""
+    lg2 = os.path.join(d, "xr-log-xr-kbdef-%s.docx.txt" % lang)
+    log += "\n" + (open(lg2, encoding="utf-8", errors="replace").read() if os.path.exists(lg2) else "")
     res = {}
     for m in re.finditer(r"^touch-gate %s kbdir-([\w-]+): (PASS|FAIL|KNOWN|INFO)\s*(.*)$" % lang, log, re.M):
         res[m.group(1)] = (m.group(2), m.group(3))
     QA.setdefault(os.path.basename(d), {}).setdefault(lang, {}).setdefault("checks", {}).update(
         {"kbdir-" + k: list(v) for k, v in res.items()})
     print("Keyboard direction gate C1 (%s):" % lang.upper())
-    for name in KBDIR_CHECKS + tuple(k for k in res if k not in KBDIR_CHECKS):
+    want = KBDIR_CHECKS + KBDEF_CHECKS
+    for name in want + tuple(k for k in res if k not in want):
         st, why = res.get(name, ("NOT LOGGED", ""))
         print("  %-30s %-10s %s" % ("kbdir-" + name, st, why[:160]))
-        if (name in KBDIR_CHECKS and st != "PASS") or st == "FAIL":
+        if (name in want and st != "PASS") or st == "FAIL":
             good = False
     p = os.path.join(d, "xr-kbdir-%s.docx" % lang)
     if not os.path.exists(p):
@@ -729,6 +742,31 @@ for dev in sorted(os.listdir(root)) if os.path.isdir(root) else []:
     ok &= open_in(d)
 if not (os.path.isdir(root) and os.listdir(root)):
     print("no saved files from any simulator"); ok = False
+
+
+def run_notes(out):
+    """Beside the verdict, what a green run does NOT show by itself: every skipped test case and every retried tap
+    (INFO lines) per device, from the filtered test output the workflow keeps in out/ui-<device>.log. Informational:
+    the strict checks above decide the RESULT."""
+    import glob
+    logs = sorted(glob.glob(os.path.join(out, "ui-*.log")))
+    print("== Skipped tests and retried taps (informational)")
+    if not logs:
+        print("  no out/ui-<device>.log (the workflow keeps the filtered test output there)")
+    for lg in logs:
+        lines = open(lg, encoding="utf-8", errors="replace").read().splitlines()
+        skipped = [re.sub(r"^.*Test Case '-\[XreroOfficeUITests\.", "", l).split("]")[0]
+                   for l in lines if re.search(r"Test Case '.*' skipped", l)]
+        retries = [l.strip() for l in lines if "first-tap-ignored: INFO" in l or "first-tap-missed: INFO" in l]
+        infos = [l.strip() for l in lines if re.search(r"XR springboard\b.*: INFO", l)]
+        print("  %s: %d skipped, %d retried tap(s)" % (os.path.basename(lg), len(skipped), len(retries)))
+        for t in skipped:
+            print("    skipped:", t)
+        for l in infos + retries:
+            print("    ", l[l.find("XR "):] if "XR " in l else l)
+
+
+run_notes(os.path.dirname(os.path.abspath(root)))
 try:   # out/qa/touch-gate.json beside out/saved: the gate's results per device + language (published in the evidence)
     qd = os.path.join(os.path.dirname(os.path.abspath(root)), "qa")
     os.makedirs(qd, exist_ok=True)

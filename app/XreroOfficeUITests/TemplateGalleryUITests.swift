@@ -56,7 +56,7 @@ final class TemplateGalleryUITests: XCTestCase {
                                                             dy: UIDevice.current.userInterfaceIdiom == .pad ? 0.19 : 0.3))
         point.tap()
         if !app.keyboards.firstMatch.waitForExistence(timeout: 4) {
-            print("XR template first line: no keyboard after the tap - tapping again")
+            print("XR template first-line-first-tap-ignored: INFO no keyboard 4 s after the tap on the first line - tapped again")
             point.tap()
             _ = app.keyboards.firstMatch.waitForExistence(timeout: 4)
         }

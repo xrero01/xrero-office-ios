@@ -27,7 +27,10 @@ final class EditorUITests: XCTestCase {
 
     /// Taps the new page's first line: where the editor's own text cursor is (read through the Autotest hook), so
     /// the tap follows the ribbon's real height; the old fixed point only when the cursor cannot be found.
-    private func tapFirstLine(_ app: XCUIApplication, fallback: CGVector) {
+    /// `tag` names the test in the INFO line of a retried tap. Returns true when the first tap gave no keyboard and the
+    /// line was tapped again (a gate can add its own INFO note for it).
+    @discardableResult
+    private func tapFirstLine(_ app: XCUIApplication, fallback: CGVector, tag: String = "editor") -> Bool {
         let web = app.webViews.firstMatch
         XCUIDevice.shared.system.open(URL(string: "xrero-autotest://caret")!)
         let s = waitState(app, prefix: "caret:", timeout: 10)
@@ -38,12 +41,14 @@ final class EditorUITests: XCTestCase {
             ? web.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: n[0], dy: n[1]))
             : web.coordinate(withNormalizedOffset: fallback)
         point.tap()
-        // seen once on iPad (Arabic blank): the first tap gave no keyboard - one more tap, as a person would
+        // seen once on iPad (Arabic blank): the first tap gave no keyboard - one more tap, as a person would, and said
         if !app.keyboards.firstMatch.waitForExistence(timeout: 4) {
-            print("XR first line: no keyboard after the tap - tapping again")
+            print("XR first line \(tag) first-line-first-tap-ignored: INFO no keyboard 4 s after the tap on the first line - tapped again")
             point.tap()
             _ = app.keyboards.firstMatch.waitForExistence(timeout: 4)
+            return true
         }
+        return false
     }
 
     /// Human pace: one character at a time (a burst from XCUITest is far faster than any person types).
@@ -763,9 +768,15 @@ final class EditorUITests: XCTestCase {
                 sleep(1)
                 // a tap on blank paper gives the caret only. The edit menu here means the tap was taken for a long press
                 // (CI runs 136 / 138: the word before was selected and the typing replaced it - fixed in xr-host.js's
-                // edit menu). Recorded; the strict check is the saved file's words (check_saved.py title_menu)
+                // edit menu), which a user would see too: a FAIL, with or without a selected word. The saved file's
+                // words are checked as well (check_saved.py title_menu).
                 let menu = app.menuItems.count
-                if menu > 0 { print("XR title menu \(run.lang) \(word)-tap-menu: INFO the tap on blank paper showed the edit menu (\(menu) items)") }
+                if menu > 0 {
+                    let line = "XR title menu \(run.lang) \(word)-tap-menu: FAIL the tap on blank paper showed the edit menu (\(menu) items)"
+                    print(line)
+                    shot(app, "66-ren-\(run.lang)-tap-menu-\(word)")
+                    XCTAssertEqual(menu, 0, line)
+                }
                 typeSlowly(app, text)
                 sleep(1)
                 shot(app, "66-ren-\(run.lang)-typed-\(word)")
@@ -1438,7 +1449,10 @@ final class EditorUITests: XCTestCase {
 
         // 1) tap the first line: caret there, keyboard up (one tap, as a user expects; further taps are only made so
         //    the later checks can run, and the count is logged)
-        tapFirstLine(app, fallback: CGVector(dx: ar ? 0.65 : 0.35, dy: UIDevice.current.userInterfaceIdiom == .pad ? 0.19 : 0.3))
+        if tapFirstLine(app, fallback: CGVector(dx: ar ? 0.65 : 0.35, dy: UIDevice.current.userInterfaceIdiom == .pad ? 0.19 : 0.3),
+                        tag: "touch-gate \(lang)") {
+            info("first-line-first-tap-ignored", "no keyboard 4 s after the tap on the first line - tapped again")
+        }
         var p0 = probe(app)
         if !focused(p0) { sleep(2); p0 = probe(app) }      // the keyboard can take a moment to come up on the simulator
         var taps = 1
@@ -1515,6 +1529,48 @@ final class EditorUITests: XCTestCase {
         } else {
             info("edit-menu-copy", "Copy not found in the native menu (menu items: \(app.menuItems.count)); not tapped")
         }
+
+        // 5b) a long press on blank paper below the text: the caret and the menu (Paste, Select All), as in Pages - and
+        //     NO word selected (no word was under the finger; f9c4c83). The page holds one line here, so 60 pt below
+        //     it is blank paper on both devices (and above the keyboard).
+        let blankX = at(0.5), blankY = ly + 60
+        tapEnd()
+        var pb0 = probe(app)
+        for _ in 0..<2 where !(str(pb0, "sel").isEmpty && app.menuItems.count == 0) { tapEnd(); pb0 = probe(app) }
+        let emB0: Double = num(pb0, "em") ?? 0
+        point(blankX, blankY).press(forDuration: 1.2)
+        var pb1 = probe(app)
+        for _ in 0..<3 where (num(pb1, "em") ?? 0) <= emB0 { usleep(500_000); pb1 = probe(app) }
+        shot(app, "53b-touch-\(lang)-long-press-blank")
+        let selB: String = str(pb1, "sel"), emB1: Double = num(pb1, "em") ?? 0, webB: Double = num(pb1, "menu") ?? 0
+        let menuB: Int = app.menuItems.count
+        let blankOk: Bool = selB.isEmpty && emB1 > emB0 && webB == 0
+        gate("long-press-blank-no-word", blankOk,
+             "sel='\(selB)' native presentations \(emB0)->\(emB1) native menu=\(menuB) web menu=\(webB) \(focusInfo(pb1))")
+
+        // 5c) a SHORT tap while the page is busy (the keyboard coming back after the Rename alert, CI runs 136 / 138):
+        //     the touch manager times the finger's up late, as a long press, but the page keeps it a tap - no menu,
+        //     nothing selected, "kept as a tap" in the editor log. The Autotest "busy" hook holds the page's main thread
+        //     900 ms right after the engine took the next finger down (deterministic: it does not wait for a real race).
+        tap(blankX, blankY)                                // closes the 5b menu (a touch on the page does)
+        sleep(1)                                           // its fade; a second tap sooner would be a double tap
+        var pc0 = probe(app)
+        for _ in 0..<2 where app.menuItems.count > 0 { tap(blankX, blankY); sleep(1); pc0 = probe(app) }
+        let kept0: Double = num(pc0, "emk") ?? -1, emC0: Double = num(pc0, "em") ?? 0
+        autotest("busy?ms=900")
+        tap(blankX, blankY)
+        sleep(2)                                           // the 900 ms, then the engine's late mouse up
+        var pc1 = probe(app)
+        for _ in 0..<3 where (num(pc1, "emk") ?? -1) <= kept0 { usleep(700_000); pc1 = probe(app) }
+        let menuC: Int = app.menuItems.count
+        shot(app, "53c-touch-\(lang)-busy-tap")
+        let kept1: Double = num(pc1, "emk") ?? -1, emC1: Double = num(pc1, "em") ?? 0, webC: Double = num(pc1, "menu") ?? 0
+        let selC: String = str(pc1, "sel")
+        let keptOk: Bool = kept0 >= 0 && kept1 > kept0
+        let quietOk: Bool = menuC == 0 && emC1 == emC0 && webC == 0 && selC.isEmpty
+        let busyDetail: String = "kept as a tap \(kept0)->\(kept1) native presentations \(emC0)->\(emC1) native menu=\(menuC) "
+            + "sel='\(selC)' web menu=\(webC) \(focusInfo(pc1))"
+        gate("busy-tap-kept-as-tap", keptOk && quietOk, busyDetail)
 
         // 6) a formatting tap keeps the keyboard: caret at the end, Bold, type on
         // close the menu the long press left with a tap in the page margin just above the line (the menu opens below
@@ -1709,7 +1765,21 @@ final class EditorUITests: XCTestCase {
                                                                  "\u{0627}\u{0644}\u{0631}\u{0626}\u{064A}\u{0633}\u{064A}\u{0629}")).firstMatch   // الرئيسية
             if home.exists && home.isHittable { home.tap() }
         }
-        let z0 = num(probe(app), "zoom") ?? 0
+        let pz0 = probe(app)
+        let z0 = num(pz0, "zoom") ?? 0
+        /// A pinch is not a long press: no edit menu (native or web) and the selection as it was (CI run 156: each pinch
+        /// opened the menu over a word it had selected, which the next key typed would have replaced). Checked a moment
+        /// after the pinch, when a menu the pinch had caused would be up.
+        func pinchNoMenu(_ name: String, before: [String: Any], after: [String: Any]) {
+            let menu: Int = app.menuItems.count
+            let em0: Double = num(before, "em") ?? 0, em1: Double = num(after, "em") ?? 0, web1: Double = num(after, "menu") ?? 0
+            let sel0: String = str(before, "sel"), sel1: String = str(after, "sel")
+            let mm0: Double = num(before, "emm") ?? -1, mm1: Double = num(after, "emm") ?? -1
+            let ok: Bool = menu == 0 && em1 == em0 && web1 == 0 && sel1 == sel0
+            let detail: String = "native menu=\(menu) native presentations \(em0)->\(em1) web menu=\(web1) "
+                + "sel '\(sel0)'->'\(sel1)' multi-finger ignored \(mm0)->\(mm1)"
+            gate(name, ok, detail)
+        }
         web.pinch(withScale: 2.0, velocity: 2.0)
         let p13 = probe(app)
         let z1 = num(p13, "zoom") ?? 0
@@ -1717,8 +1787,10 @@ final class EditorUITests: XCTestCase {
         shot(app, "57-touch-\(lang)-pinch-in")
         gate("pinch-in-zooms-page", z1 > z0 * 1.15 && crisp, "zoom \(z0)->\(z1) viewport scale \(num(p13, "vv") ?? 0)/\(num(p13, "vvi") ?? 0)")
         sleep(2)
-        let z1b = num(probe(app), "zoom") ?? 0
+        let p13b = probe(app)
+        let z1b = num(p13b, "zoom") ?? 0
         gate("pinch-zoom-kept", z1 > z0 && z1b == z1, "zoom \(z1) after 3 s: \(z1b)")
+        pinchNoMenu("pinch-in-no-menu", before: pz0, after: p13b)
         web.pinch(withScale: 0.5, velocity: -2.0)
         let p14 = probe(app)
         let z2 = num(p14, "zoom") ?? 0
@@ -1726,18 +1798,20 @@ final class EditorUITests: XCTestCase {
         gate("pinch-out-zooms-back", z2 < z1b && z2 >= 25 && (num(p14, "vv") ?? 0) == 1,
              "zoom \(z1b)->\(z2) viewport scale \(num(p14, "vv") ?? 0)",
              known: z1b > z0 ? "a pinch-in zooms the page, but the pinch-out after it leaves the zoom where it was (seen on the simulator; to confirm on a device)" : nil)
+        sleep(1)
+        pinchNoMenu("pinch-out-no-menu", before: p13b, after: probe(app))
 
         // keypress-to-frame latency of this run (simulator: recorded for the trend, the real bar needs an iPhone)
         let lat = probe(app)["lat"] as? [String: Any] ?? [:]
         // keydown/input -> second requestAnimationFrame (not the canvas paint itself), with the probe paused while typing
         info("typing-latency", "n=\(num(lat, "n") ?? 0) median=\(num(lat, "med") ?? -1) ms p95=\(num(lat, "p95") ?? -1) ms (keydown->2rAF, probe paused, simulator)")
 
-        // 9b) the keyboard bar's last button puts the keyboard away (plan M5); the keyboard is brought up first when the
-        //     pinches left it down. Not with tapEnd(): its point was measured at the old zoom and the pinch-in changed
-        //     the page scale, so it can land in the text and open the desktop menu (CI run 43588342045, iPhone AR).
-        //     The caret's position is measured again at the current zoom and the tap goes into the text on the caret's
-        //     line, toward the line's start: a pinch can also open the desktop menu right beside the caret (iPad, CI run
-        //     43593838031), and a tap on the caret itself then lands in that menu. The tap closes the menu too.
+        // 9b) the keyboard bar's last button puts the keyboard away (plan M5); the keyboard is brought up first, only
+        //     when the pinches left it down. Not with tapEnd(): its point was measured at the old zoom and the pinch-in
+        //     changed the page scale. The caret's position is measured again at the current zoom and the tap goes into
+        //     the text on the caret's line, toward the line's start. No menu has to be closed here any more: a pinch
+        //     opens none (pinch-in-no-menu / pinch-out-no-menu above; CI runs 43593838031 and 156 had one up after the
+        //     pinches, which this tap used to close).
         var q0 = probe(app)
         let webWidth = Double(web.frame.width)
         for i in 0..<3 where !focused(q0) {
@@ -2027,11 +2101,81 @@ final class EditorUITests: XCTestCase {
     /// Plan C1 gate (touch gate family): the paragraph direction follows a keyboard switch, in a new Word document with
     /// the app in English and in Arabic. An EMPTY paragraph turns right-to-left when Arabic input starts and back to
     /// left-to-right for English; a paragraph that has text is left alone; the saved xr-kbdir-<lang>.docx keeps both
-    /// directions (check_saved.py kbdir_gate). The switch itself goes through the app's own keyboard-switch handler
-    /// (EditorWebView.Coordinator.keyboardLanguageChanged, the notification's path) with the language given by the
-    /// test: the simulator's keyboard list cannot be changed from a test. Results: "touch-gate <lang> kbdir-*" lines.
+    /// directions (check_saved.py kbdir_gate). The switch itself is the system's keyboard-switch notification
+    /// (UITextInputMode.currentInputModeDidChangeNotification), posted by the app's probe: it is answered only through
+    /// the observer the editor registered (kbdir-observer). Only the language it stands for is given by the test: the
+    /// simulator's keyboard list cannot be changed from a test. Then the SHIPPED default (no -xr.kbDirection): on with
+    /// the Arabic interface, off with the English one (kbdir-default-*, xr-kbdef-<lang>.docx's log).
+    /// Results: "touch-gate <lang> kbdir-*" lines.
     func testZZKeyboardDirectionFollowsKeyboard() {
         for lang in ["en", "ar"] { kbDirGate(lang) }
+        for lang in ["en", "ar"] { kbDirDefault(lang) }
+    }
+
+    /// One keyboard switch through the probe file (<probe file>.kblang = the language tag): the switch's answer (the
+    /// part after "<tag>:" in the probe's kbd, or "no answer (...)") and the direction at the caret.
+    private func kbSwitch(_ app: XCUIApplication, _ tag: String, wantDir: String, polls: Int = 10) -> (answer: String, dir: String) {
+        FileManager.default.createFile(atPath: probeFile + ".kblang", contents: Data(tag.utf8))
+        var q = probe(app)
+        for _ in 0..<polls where !str(q, "kbd").hasPrefix(tag + ":") { q = probe(app) }
+        // the direction reaches EditorState through the coalesced state channel: give it a moment
+        for _ in 0..<4 where str(q, "dir") != wantDir { q = probe(app) }
+        let answer = str(q, "kbd").hasPrefix(tag + ":") ? String(str(q, "kbd").dropFirst(tag.count + 1)) : "no answer (\(str(q, "kbd")))"
+        return (answer, str(q, "dir"))
+    }
+
+    /// The shipped default of "Match paragraph direction to keyboard" (KeyboardDirection.enabled, no launch argument):
+    /// the Arabic interface registers the observer and answers a switch; the English one registers none, so a switch
+    /// gets no answer and the paragraph keeps its direction.
+    private func kbDirDefault(_ lang: String) {
+        let ar = lang == "ar"
+        let app = XCUIApplication()
+        app.launchArguments = ["-xr.lang", lang, "-xr.keyboardBar", "NO"]          // no -xr.kbDirection: the default
+        try? FileManager.default.removeItem(atPath: probeFile)
+        try? FileManager.default.removeItem(atPath: probeFile + ".kblang")
+        pauseProbe(false)
+        app.launchEnvironment = ["XR_KIND": "word", "XR_NEW_NAME": "xr-kbdef-\(lang).docx", "XR_PROBE": "1", "XR_PROBE_FILE": probeFile]
+        app.launch()
+        let keep = continueAfterFailure
+        continueAfterFailure = true
+        var notes: [String] = []
+        func gate(_ name: String, _ ok: Bool, _ detail: String) {
+            let line = "touch-gate \(lang) kbdir-default-\(name): \(ok ? "PASS" : "FAIL") \(detail)"
+            print("XR " + line)
+            notes.append(line.replacingOccurrences(of: "\n", with: " "))
+            XCTAssertTrue(ok, line)
+        }
+        defer {
+            autotest("note", notes.joined(separator: "\n"))
+            app.terminate()
+            continueAfterFailure = keep
+        }
+        let ready = waitState(app, prefix: "ready", timeout: 120)
+        gate("editor-ready", ready == "ready", ready)
+        guard ready == "ready" else { return }
+        XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 10))
+        sleep(2)
+        if tapFirstLine(app, fallback: CGVector(dx: ar ? 0.65 : 0.35, dy: UIDevice.current.userInterfaceIdiom == .pad ? 0.19 : 0.3),
+                        tag: "touch-gate \(lang) kbdir-default") {
+            let line = "touch-gate \(lang) kbdir-default-first-line-first-tap-ignored: INFO no keyboard 4 s after the tap on the first line - tapped again"
+            print("XR " + line); notes.append(line)
+        }
+        var p = probe(app)
+        if !focused(p) { sleep(2); p = probe(app) }
+        gate("keyboard-up", focused(p), focusInfo(p))
+        let start = str(p, "dir")
+        // the setting's default: on in Arabic, off in English (the observer exists exactly then)
+        gate("observer", flag(p, "kbobs") == ar, "observer registered=\(flag(p, "kbobs")) interface=\(lang) (default: \(ar ? "on" : "off"))")
+        if ar {
+            // the Arabic blank is right-to-left already: an Arabic keyboard is answered 'same'
+            let s = kbSwitch(app, "ar-x-d1", wantDir: "rtl")
+            gate("switch", s.answer == "same" && s.dir == "rtl", "answer=\(s.answer) dir \(start)->\(s.dir)")
+        } else {
+            // nobody listens: no answer, the empty English paragraph stays left-to-right
+            let s = kbSwitch(app, "ar-x-d1", wantDir: "rtl", polls: 6)
+            gate("switch", s.answer.hasPrefix("no answer") && s.dir == "ltr" && start == "ltr", "answer=\(s.answer) dir \(start)->\(s.dir)")
+        }
+        shot(app, "63-kbdir-default-\(lang)")
     }
 
     private func kbDirGate(_ lang: String) {
@@ -2068,25 +2212,24 @@ final class EditorUITests: XCTestCase {
         guard ready == "ready" else { return }
         XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 10))
         sleep(2)
-        tapFirstLine(app, fallback: CGVector(dx: lang == "ar" ? 0.65 : 0.35, dy: UIDevice.current.userInterfaceIdiom == .pad ? 0.19 : 0.3))
+        if tapFirstLine(app, fallback: CGVector(dx: lang == "ar" ? 0.65 : 0.35, dy: UIDevice.current.userInterfaceIdiom == .pad ? 0.19 : 0.3),
+                        tag: "touch-gate \(lang) kbdir") {
+            info("first-line-first-tap-ignored", "no keyboard 4 s after the tap on the first line - tapped again")
+        }
         var p = probe(app)
         if !focused(p) { sleep(2); p = probe(app) }
         gate("keyboard-up", focused(p), focusInfo(p))
+        // the switches below are the system notification: only the editor's own registered observer can answer them
+        gate("observer", flag(p, "kbobs"), "keyboard-switch observer registered=\(flag(p, "kbobs")) (-xr.kbDirection YES)")
         info("start", "blank paragraph dir=\(str(p, "dir")) globe key on this simulator: \(app.keyboards.buttons["Next keyboard"].exists)")
 
-        // one keyboard switch: the language tag into <probe file>.kblang (the app's probe poll hands it to the
-        // keyboard-switch handler), then the handler's answer and the direction at the caret from the probe
+        // one keyboard switch: the language tag into <probe file>.kblang (the app's probe poll posts the system's
+        // keyboard-switch notification for it), then the editor's answer and the direction at the caret from the probe
         var step = 0
         func switchKeyboard(_ base: String, wantDir: String) -> (answer: String, dir: String) {
             step += 1
             let tag = "\(base)-x-s\(step)"                        // unique per step: the answer names its own switch
-            FileManager.default.createFile(atPath: probeFile + ".kblang", contents: Data(tag.utf8))
-            var q = probe(app)
-            for _ in 0..<10 where !str(q, "kbd").hasPrefix(tag + ":") { q = probe(app) }
-            // the direction reaches EditorState through the coalesced state channel: give it a moment
-            for _ in 0..<4 where str(q, "dir") != wantDir { q = probe(app) }
-            let answer = str(q, "kbd").hasPrefix(tag + ":") ? String(str(q, "kbd").dropFirst(tag.count + 1)) : "no answer (\(str(q, "kbd")))"
-            return (answer, str(q, "dir"))
+            return kbSwitch(app, tag, wantDir: wantDir)
         }
 
         // 1) empty paragraph: Arabic keyboard -> right-to-left (the Arabic blank already is: 'same')
@@ -2407,6 +2550,16 @@ final class EditorUITests: XCTestCase {
         func arabic(_ s: String) -> Bool { s.unicodeScalars.contains { (0x0600...0x06FF).contains($0.value) } }
         func latin(_ s: String) -> Bool { s.unicodeScalars.contains { $0.isASCII && CharacterSet.letters.contains($0) } }
         var failures: [String] = [], lines: [String] = []
+        /// every check of this test: a failure is printed, kept for the RESULT line and the summary, and asserted - the
+        /// summary can never say PASS while the test fails
+        func must(_ ok: Bool, _ msg: String) {
+            if !ok {
+                let line = "XR a11y FAIL \(msg)"
+                print(line)
+                failures.append(line); lines.append(line)
+            }
+            XCTAssertTrue(ok, msg)
+        }
         // scrolls the Home list by a slow drag on the list itself (app.swipeUp did not move it at AX5 on CI)
         func scrollTo(_ app: XCUIApplication, _ e: XCUIElement) -> Bool {
             let list = app.collectionViews["xr-home-list"].firstMatch
@@ -2447,7 +2600,7 @@ final class EditorUITests: XCTestCase {
             home.launchEnvironment = ["XR_HOME": "1"]
             home.launchArguments = ["-xr.lang", lang, "-xr.welcomeShown", "NO"] + ax5
             home.launch()
-            XCTAssertTrue(home.descendants(matching: .any)["xr-home-list"].waitForExistence(timeout: 30), "Home did not open (\(lang))")
+            must(home.descendants(matching: .any)["xr-home-list"].waitForExistence(timeout: 30), "Home did not open (\(lang))")
             sleep(1)
             shot(home, "60-a11y-home-\(lang)-ax5")
             _ = check(home, "xr-home-more", "home", bar: true, lang: lang)
@@ -2459,11 +2612,14 @@ final class EditorUITests: XCTestCase {
             let word = check(home, "xr-home-word", "home", lang: lang)
             let wf = word.frame, screen = home.windows.firstMatch.frame
             print("XR a11y home \(lang) word tile: \(wf) window: \(screen)")
-            XCTAssertGreaterThan(wf.width, screen.width * 0.5, "create tiles not in one column at AX5 (\(lang)): \(wf)")
+            must(wf.width > screen.width * 0.5, "create tiles not in one column at AX5 (\(lang)): \(wf)")
             _ = check(home, "xr-home-cell", "home", lang: lang)
             _ = check(home, "xr-home-slide", "home", lang: lang)
+            // the rows the stage-5 merge brought in, in list order: Templates (S8) and Scan to PDF (S10)
+            _ = check(home, "xr-home-templates", "home", lang: lang)
             _ = check(home, "xr-home-browse", "home", lang: lang)
             _ = check(home, "xr-home-pdf", "home", lang: lang)
+            _ = check(home, "xr-home-scan", "home", lang: lang)
             shot(home, "61-a11y-home-\(lang)-ax5-scrolled")
             home.terminate()
 
@@ -2472,7 +2628,8 @@ final class EditorUITests: XCTestCase {
             ed.launchEnvironment = ["XR_KIND": "word", "XR_BAR": "1", "XR_LANG": lang, "XR_NEW_NAME": "xr-a11y-\(lang).docx"]
             ed.launchArguments = ["-xr.lang", lang, "-xr.canvasNote", "YES"] + ax5
             ed.launch()
-            XCTAssertEqual(waitState(ed, prefix: "ready", timeout: 120), "ready", "editor did not become ready (\(lang))")
+            let ready = waitState(ed, prefix: "ready", timeout: 120)
+            must(ready == "ready", "editor did not become ready (\(lang)): \(ready)")
             sleep(1)
             shot(ed, "62-a11y-bar-\(lang)-ax5")
             _ = check(ed, "xr-bar-back", "bar", bar: true, lang: lang)
@@ -2482,27 +2639,39 @@ final class EditorUITests: XCTestCase {
             // the bar stays one bar tall at AX5 (its text is capped; long-press shows the Large Content Viewer)
             let nav = ed.navigationBars.firstMatch
             print("XR a11y bar \(lang) navigation bar: \(nav.exists ? "\(nav.frame)" : "missing")")
-            if nav.exists { XCTAssertLessThanOrEqual(nav.frame.height, 140, "top bar grew with the text size (\(lang)): \(nav.frame)") }
+            if nav.exists { must(nav.frame.height <= 140, "top bar grew with the text size (\(lang)): \(nav.frame)") }
             // the honest note: VoiceOver cannot read the drawn page
             let note = ed.staticTexts["xr-a11y-canvas-note"]
-            XCTAssertTrue(note.waitForExistence(timeout: 10), "no canvas accessibility note (\(lang))")
+            must(note.waitForExistence(timeout: 10), "no canvas accessibility note (\(lang))")
             let noteText = note.exists ? note.label : ""
             print("XR a11y note \(lang): \(noteText)")
-            XCTAssertTrue(noteText.contains("VoiceOver") && (lang == "ar" ? arabic(noteText) : !arabic(noteText)),
-                          "canvas note text (\(lang)): \(noteText)")
+            must(noteText.contains("VoiceOver") && (lang == "ar" ? arabic(noteText) : !arabic(noteText)),
+                 "canvas note text (\(lang)): \(noteText)")
             let close = check(ed, "xr-a11y-canvas-close", "note", lang: lang)
             if close.exists && close.isHittable {
+                // the Close action counts its runs (CI build: the button's accessibility value "closes=N"), so a tap
+                // that never reached the button can be told from an action that ran while the note stayed or came back
+                func closes() -> Int {
+                    let v = ((try? close.snapshot())?.value as? String) ?? ""
+                    return Int(v.replacingOccurrences(of: "closes=", with: "")) ?? -1
+                }
+                let before = closes()
+                print("XR a11y note \(lang) close count before the tap: \(before)")
                 close.tap()
                 for _ in 0..<10 where note.exists { usleep(300_000) }
-                // a lost simulator tap (CI run 150, iPhone, English: Close found and hittable, the note still up after
-                // the tap; the Arabic Close in the same run and all four of S12's own runs closed at once): tapped once
-                // more, and said so. The note must still close: if it stays, that is a FAIL in the summary too.
-                if note.exists && close.exists && close.isHittable {
-                    let retry = "XR a11y \(lang) close-first-tap-ignored: INFO the note was still up 3 s after the tap on Close - tapped again"
-                    print(retry)
-                    lines.append(retry)
-                    close.tap()
-                    for _ in 0..<10 where note.exists { usleep(300_000) }
+                if note.exists {
+                    let after = close.exists ? closes() : -1
+                    if before >= 0 && after == before && close.exists && close.isHittable {
+                        // the action never ran: the tap did not reach the app (a lost simulator tap) - once more, said so
+                        let retry = "XR a11y \(lang) close-first-tap-ignored: INFO the note was still up 3 s after the tap on Close and its action had not run (closes=\(after)) - tapped again"
+                        print(retry)
+                        lines.append(retry)
+                        close.tap()
+                        for _ in 0..<10 where note.exists { usleep(300_000) }
+                    } else {
+                        // the action ran (or its count cannot be read) and the note is still there: an app bug
+                        must(false, "\(lang) close: the note stayed or came back after Close (closes \(before)->\(after))")
+                    }
                 }
                 let closed = !note.exists
                 let line = "XR a11y note \(lang) closes: \(closed ? "ok" : "FAIL the note is still up after Close")"

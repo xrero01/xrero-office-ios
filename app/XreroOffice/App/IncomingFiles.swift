@@ -91,16 +91,9 @@ enum IncomingFiles {
 
 // MARK: the editor's notice
 
-extension View {
-    /// The one-time capsule for an imported copy (plan S11): on the first edit it says the edits go to a copy kept in
-    /// the app's own folder, and offers Show in Files. Nothing for a file opened in place or the app's own files.
-    func importedCopyNotice(_ origin: DocumentOrigin?, fileURL: URL?, state: EditorState, ar: Bool) -> some View {
-        overlay(alignment: .top) {
-            if origin == .importedCopy { ImportedCopyNotice(state: state, fileURL: fileURL, ar: ar) }
-        }
-    }
-}
-
+/// The one-time capsule for an imported copy (plan S11): on the first edit it says the edits go to a copy kept in the
+/// app's own folder, and offers Show in Files. Nothing for a file opened in place or the app's own files (EditorScreen
+/// shows it only for DocumentOrigin.importedCopy, stacked under the VoiceOver canvas note: Accessibility.swift).
 /// Observes the editor's state on its own, so the editor screen itself never redraws for it.
 struct ImportedCopyNotice: View {
     @ObservedObject var state: EditorState
@@ -179,6 +172,7 @@ struct ImportedCopyNotice: View {
         .shadow(color: .black.opacity(0.12), radius: 14, y: 6)
         .padding(.horizontal, 12)
         .padding(.top, 8)
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)      // a notice over the page: kept compact (S12, as the canvas note)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("xr-copy-notice")
     }
@@ -189,7 +183,7 @@ struct ImportedCopyNotice: View {
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(Color.xrOnTeal)
                 .padding(.horizontal, 16)
-                .frame(minHeight: 38)
+                .frame(minHeight: 44)                          // S12: 44 pt touch targets
                 .background(Color.xrTeal, in: Capsule())
         }
         .buttonStyle(.plain)
@@ -202,7 +196,7 @@ struct ImportedCopyNotice: View {
             Image(systemName: "xmark")
                 .font(.system(size: 13, weight: .bold))
                 .foregroundStyle(.secondary)
-                .frame(width: 30, height: 30)
+                .frame(width: 44, height: 44)                  // S12: 44 pt touch targets
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

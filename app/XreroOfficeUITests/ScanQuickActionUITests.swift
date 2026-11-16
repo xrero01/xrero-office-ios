@@ -101,7 +101,11 @@ final class ScanQuickActionUITests: XCTestCase {
     }
 
     /// The real Home Screen: touch and hold the app icon, the four quick actions are listed, New Spreadsheet opens one.
-    /// Skipped (not failed) only when the simulator's Home Screen does not show the icon on its first page.
+    /// This is the only test of the system's own delivery (Info.plist UIApplicationShortcutItems, the cold launch's
+    /// options.shortcutItem); the others inject XR_SHORTCUT. A newly installed app lands past the first Home Screen
+    /// page, so the pages are swiped through (as a person would) until the icon is there - the App Library last.
+    /// Quick actions missing from the icon's menu are a FAIL. Skipped (with an INFO line, listed by check_saved.py)
+    /// only when the icon cannot be found at all or no icon menu opens.
     func testHomeScreenIconQuickActions() throws {
         let app = launch([:])                                   // installs + runs once, then leave to the Home Screen
         _ = app.buttons["xr-home-scan"].waitForExistence(timeout: 20)
@@ -109,17 +113,34 @@ final class ScanQuickActionUITests: XCTestCase {
         XCUIDevice.shared.press(.home)
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let icon = springboard.icons["Xrero Office"]
-        guard icon.waitForExistence(timeout: 10), icon.isHittable else {
-            print("XR springboard: icon not on the visible Home Screen page - skipped")
-            throw XCTSkip("app icon not on the visible Home Screen page")
+        _ = icon.waitForExistence(timeout: 5)
+        var pages = 0
+        while !(icon.exists && icon.isHittable) && pages < 8 {
+            springboard.swipeLeft()
+            sleep(1)
+            pages += 1
         }
+        print("XR springboard: icon after \(pages) page swipe(s): exists=\(icon.exists) hittable=\(icon.exists && icon.isHittable)")
+        guard icon.exists && icon.isHittable else {
+            shot("springboard-no-icon")
+            print("XR springboard icon: INFO skipped - the app icon was not found on the Home Screen pages or the App Library (\(pages) swipes)")
+            throw XCTSkip("app icon not found on the Home Screen")
+        }
+        shot("springboard-icon")
         icon.press(forDuration: 1.5)
         let titles = ["New Document", "New Spreadsheet", "New Presentation", "Scan to PDF"]
         let first = springboard.buttons[titles[0]]
         guard first.waitForExistence(timeout: 8) else {
-            shot("springboard-no-menu")
-            print("XR springboard: no quick-action menu after touch and hold - skipped")
-            throw XCTSkip("no quick-action menu shown")
+            shot("springboard-no-quick-actions")
+            // the system's own items show that the icon menu itself opened: then the app's quick actions are missing
+            let system = ["Remove App", "Delete App", "Edit Home Screen", "Share App"].filter { springboard.buttons[$0].exists }
+            if !system.isEmpty {
+                print("XR springboard: FAIL the icon menu opened (\(system.joined(separator: ", "))) without the app's quick actions")
+                XCTFail("quick actions missing from the icon menu (system items: \(system.joined(separator: ", ")))")
+                return
+            }
+            print("XR springboard menu: INFO skipped - no icon menu opened after touch and hold")
+            throw XCTSkip("no icon menu shown")
         }
         shot("springboard-quick-actions")
         let found = titles.map { springboard.buttons[$0].exists }
@@ -130,7 +151,10 @@ final class ScanQuickActionUITests: XCTestCase {
         let title = editorTitle(app)
         print("XR springboard: New Spreadsheet opened title=\(title ?? "none")")
         shot("springboard-new-spreadsheet")
-        XCTAssertTrue(title?.hasPrefix("Spreadsheet") ?? false, "New Spreadsheet opened '\(title ?? "none")'")
+        // the new file is named in the app's language (the icon launch carries no -xr.lang: an earlier test may have
+        // left the app in Arabic); either way it must be a new spreadsheet
+        let spreadsheet = (title?.hasPrefix("Spreadsheet") ?? false) || (title?.hasPrefix("\u{062C}\u{062F}\u{0648}\u{0644} \u{0628}\u{064A}\u{0627}\u{0646}\u{0627}\u{062A}") ?? false)  // جدول بيانات
+        XCTAssertTrue(spreadsheet, "New Spreadsheet opened '\(title ?? "none")'")
         app.terminate()
     }
 }

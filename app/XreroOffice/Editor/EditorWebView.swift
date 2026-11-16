@@ -115,6 +115,11 @@ struct EditorWebView: UIViewRepresentable {
         var activeObserver: NSObjectProtocol?
         /// plan C1: UITextInputMode.currentInputModeDidChangeNotification (Word, flag on), nil otherwise
         var inputModeObserver: NSObjectProtocol?
+        #if XR_AUTOTEST
+        /// CI only: the language the next input-mode notification stands for (the simulator's keyboard list cannot be
+        /// changed from a test). The notification itself still has to reach `inputModeObserver`.
+        var testKeyboardLanguage: String?
+        #endif
         deinit {
             if let o = activeObserver { NotificationCenter.default.removeObserver(o) }
             if let o = inputModeObserver { NotificationCenter.default.removeObserver(o) }
@@ -313,6 +318,10 @@ struct EditorWebView: UIViewRepresentable {
         /// is empty (__xrKbDirection). `language` replaces the keyboard's own language (CI gate only: the simulator's
         /// keyboard list cannot be changed from a test). The answer goes to the editor log and controller.kbDirLast.
         func keyboardLanguageChanged(language: String? = nil) {
+            var language = language
+            #if XR_AUTOTEST
+            if language == nil, let t = testKeyboardLanguage { language = t; testKeyboardLanguage = nil }
+            #endif
             guard ready, let web, let owner = XRWebView.firstResponder(in: web) else { return }
             if let input = owner as? UITextInput, input.markedTextRange != nil {
                 parent.onCommand("log", "keyboard direction: skip (marked text)")

@@ -130,6 +130,12 @@ struct AutotestScreen: View {
                 controller.coordinator?.web?.evaluateJavaScript(js) { r, _ in state = (r as? String) ?? "caret:none" }
             }
             if url.host == "about" { showAbout = true }      // About & Licences over the open editor
+            if url.host == "busy" {             // touch gate: the editor page held busy right after the NEXT touch (the
+                                                // keyboard coming back after an alert, a redraw), so a short tap reaches
+                                                // the engine's touch manager late, as a long press: it must stay a tap
+                let ms = Int(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "ms" }?.value ?? "") ?? 900
+                controller.call(Self.busyJS(ms)) { r, e in handle("log", "busy hook: \((r as? String) ?? e ?? "?")") }
+            }
             if url.host == "doctext" {          // template test (S8): the document's text after a reopen (Word only)
                 controller.call("var a=(this.Asc&&this.Asc.editor)||this.editor;var d=a&&a.WordControl&&a.WordControl.m_oLogicDocument;"
                                 + "return d&&d.GetText?String(d.GetText()).replace(/[\\s]+/g,' ').slice(0,4000):'none';") { r, e in
@@ -377,6 +383,27 @@ struct AutotestScreen: View {
         .sheet(isPresented: $showAccount) { AccountView() }
     }
 
+    /// The "busy" hook (touch gate): arms a ONE-shot listener in the editor frame that holds the page's main thread
+    /// busy for `ms` right AFTER the engine's own handler has taken the next finger down (window bubble phase of
+    /// pointerdown; the touchstart that WebKit dispatches after it is the fallback if the engine stopped the
+    /// pointerdown there). The finger's up then reaches the touch manager `ms` late, so a short tap is timed as a long
+    /// press - what the keyboard coming back after the Rename alert did (CI runs 136 / 138). The page must keep it a
+    /// tap: xr-host.js editMenu logs "kept as a tap" and shows no menu. CI build only.
+    private static func busyJS(_ ms: Int) -> String {
+        """
+        var ms=\(max(100, min(ms, 3000))),done=false;
+        function busy(why){if(done)return;done=true;
+         window.removeEventListener('pointerdown',pd,false);window.removeEventListener('touchstart',ts,true);
+         var t0=performance.now();while(performance.now()-t0<ms){}
+         if(window.XreroHost&&XreroHost.log)XreroHost.log('busy hook: the page was held busy '+ms+' ms right after a touch ('+why+')');}
+        function pd(e){if(e.pointerType==='touch')busy('pointerdown');}
+        function ts(){busy('touchstart');}
+        window.addEventListener('pointerdown',pd,false);
+        window.addEventListener('touchstart',ts,{capture:true,passive:true});
+        return 'armed '+ms+' ms';
+        """
+    }
+
     /// Bridge check (20.3 F0): a native call reaches the engine and the engine's answer comes back through the state
     /// channel - Bold on, then off, through controller.call; EditorState must follow both, show undo after the typing
     /// test, a text selection, and the channel's callbacks must stay within the typing budget (< 0.2 ms average).
@@ -551,6 +578,7 @@ private struct ProbeLabel: View {
      r.focus=ae?(ae.id||ae.tagName):'';r.area=!!(A&&ae===A);r.hasFocus=d.hasFocus();
      var bar=d.querySelector('.toolbar.folded');r.fold=bar?(bar.classList.contains('expanded')?'open':'closed'):'none';
      r.menu=[].slice.call(d.querySelectorAll('.dropdown-menu')).filter(function(m){return w.getComputedStyle(m).display!=='none'&&m.getBoundingClientRect().height>4;}).length;
+     var ems=w.__xrEditMenuStats;r.emk=ems?ems.kept:-1;r.emm=ems?ems.multi:-1;
      r.btn={};['bold','select-all'].forEach(function(k){var e=[].slice.call(d.querySelectorAll('[id="id-toolbar-btn-'+k+'"]')).filter(function(x){var q=x.getBoundingClientRect();return x.offsetParent&&q.width>4&&q.height>4;})[0],b=e&&e.getBoundingClientRect();
       if(!b)return;if(k==='bold'){r.bact=e.classList.contains('active');var h=d.elementFromPoint(b.left+b.width/2,b.top+b.height/2),hb=h&&h.closest&&h.closest('[id]');r.bhit=hb?hb.id:'';r.bhitc=h?(h.tagName+'.'+String(h.className||'').slice(0,60)+(hb&&hb!==h?' in '+hb.tagName+'.'+String(hb.className||'').slice(0,60):'')):'';r.bn=d.querySelectorAll('[id="id-toolbar-btn-bold"]').length;}var z=1;for(var x=e;x&&x!==d.documentElement;x=x.parentElement)z*=parseFloat(w.getComputedStyle(x).zoom)||1;
       r.btn[k]=[Math.round(o.left+(b.left+b.width/2)*z),Math.round(o.top+(b.top+b.height/2)*z)];});
@@ -564,12 +592,18 @@ private struct ProbeLabel: View {
 
     private func poll() {
         guard !probing, let web = controller.coordinator?.web else { return }
-        // plan C1 gate: a keyboard switch the test asks for (<probe file>.kblang holds the language tag) takes the
-        // keyboard notification's own path; a file, not a hook URL, so the keyboard focus it depends on is not moved
+        // plan C1 gate: a keyboard switch the test asks for (<probe file>.kblang holds the language tag). The tag only
+        // stands in for the keyboard's own language (the simulator's keyboard list cannot be changed from a test); the
+        // switch itself is the system's UITextInputMode.currentInputModeDidChangeNotification, so an answer arrives
+        // only through the observer the editor registered (none when the setting is off). A file, not a hook URL, so
+        // the keyboard focus it depends on is not moved.
         if let f = ProcessInfo.processInfo.environment["XR_PROBE_FILE"],
            let tag = try? String(contentsOfFile: f + ".kblang", encoding: .utf8) {
             try? FileManager.default.removeItem(atPath: f + ".kblang")
-            controller.coordinator?.keyboardLanguageChanged(language: tag.trimmingCharacters(in: .whitespacesAndNewlines))
+            controller.coordinator?.testKeyboardLanguage = tag.trimmingCharacters(in: .whitespacesAndNewlines)
+            // the keyboard's own input mode as the object, as a real switch would carry one
+            let mode = XRWebView.firstResponder(in: web)?.textInputMode
+            NotificationCenter.default.post(name: UITextInputMode.currentInputModeDidChangeNotification, object: mode)
         }
         // the test pauses the probe while it types (<probe file>.pause): its full-document read on the main thread
         // would otherwise sit inside the keypress-latency samples it collects
@@ -592,6 +626,8 @@ private struct ProbeLabel: View {
             // plan C1: the paragraph direction at the caret (state channel) and the last keyboard switch's answer
             o["dir"] = controller.state.direction.rawValue
             o["kbd"] = controller.kbDirLast
+            // ... and whether the editor registered its keyboard-switch observer (the setting decides, per language)
+            o["kbobs"] = controller.coordinator?.inputModeObserver != nil
             let line = "t=\(started)|"
                 + ((try? JSONSerialization.data(withJSONObject: o)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}")
             // the simulator shares the Mac's file system: a file the test reads costs no accessibility query (each one

@@ -46,8 +46,6 @@ struct EditorScreen: View {
             .editorRecovery(notice: $recovered, tooLarge: tooLarge, ar: lang == "ar", share: shareDocument, back: leave)
             // spreadsheets (plan S3): the selection's Sum capsule and its Sum / Average / Min / Max / Count sheet
             .sheetSum(kind: document.kind, state: controller.state, controller: controller, ar: lang == "ar")
-            // an attachment from Mail / WhatsApp: "Editing a copy saved in Xrero Office" on the first edit (plan S11)
-            .importedCopyNotice(files?.origin, fileURL: fileURL, state: controller.state, ar: lang == "ar")
             // one native bar (plan M4a): Back, name + Edited / Saved, Undo (+ Redo when wide), the ⋯ document menu
             // (plan M7b: Find, Redo, Save | Share, Export, Document info | Language, Account, About, All tools)
             .editorTopBar(title: (title as NSString).deletingPathExtension, state: controller.state, status: barStatus,
@@ -83,7 +81,13 @@ struct EditorScreen: View {
                 }
             }
             .xrAnimation(.easeInOut(duration: 0.2), value: toast)         // none with Reduce Motion (S12)
-            .canvasAccessibilityNote(ar: lang == "ar")                   // S12: VoiceOver cannot read the page
+            // S12: VoiceOver cannot read the page. Stacked under that note (not drawn over by it) when both are up: an
+            // attachment from Mail / WhatsApp says "Editing a copy saved in Xrero Office" on the first edit (plan S11)
+            .canvasAccessibilityNote(ar: lang == "ar") {
+                if files?.origin == .importedCopy {
+                    ImportedCopyNotice(state: controller.state, fileURL: fileURL, ar: lang == "ar")
+                }
+            }
             .saveAsCopy(formats: $saveAsFormats, lang: lang, controller: controller)
             // the editor's page has to reopen in the other language, which clears its undo history: say so first, in
             // the language being switched to (Home and this bar flip at once; the page follows after its save)
