@@ -103,6 +103,13 @@ struct ImportedCopyNotice: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.horizontalSizeClass) private var sizeClass
 
+    /// Made by EditorScreen (another file): an explicit initializer, so the private state below never narrows its access.
+    init(state: EditorState, fileURL: URL?, ar: Bool) {
+        _state = ObservedObject(wrappedValue: state)
+        self.fileURL = fileURL
+        self.ar = ar
+    }
+
     private var compact: Bool { sizeClass == .compact }
 
     private var pad: Bool { UIDevice.current.userInterfaceIdiom == .pad }
