@@ -951,12 +951,25 @@ final class EditorUITests: XCTestCase {
                 guard e.waitForExistence(timeout: 10) else { XCTFail("no \(b) button on the harness"); return false }
                 let before = taps(b)
                 e.tap()
+                /// The counter went up - or the harness left the screen: the tap opened something over it. New opens
+                /// the editor full screen at once; CI run 160 (iPhone "new", iPad "newheld") had it up before the
+                /// counter was read, and the next query of the gone button ended the whole test. Whether it really
+                /// opened is the caller's next check (waitEditor / the picker's Cancel).
                 func reached() -> Bool {
                     let end = Date().addingTimeInterval(3)
-                    while Date() < end { if taps(b) > before { return true }; Thread.sleep(forTimeInterval: 0.2) }
+                    while Date() < end {
+                        if taps(b) > before { return true }
+                        if !e.exists {
+                            print("XR files tap on \(b): the harness is covered (something opened over it)")
+                            return true
+                        }
+                        Thread.sleep(forTimeInterval: 0.2)
+                    }
                     return false
                 }
                 if reached() { return true }
+                // gone since the last look: the same as above (never query the frame of a button that is not there)
+                guard e.exists else { print("XR files tap on \(b): the harness is covered (late)"); return true }
                 let f = e.frame
                 XCUIDevice.shared.system.open(URL(string: "xrero-autotest://hit?x=\(Int(f.midX))&y=\(Int(f.midY))")!)
                 Thread.sleep(forTimeInterval: 2)
