@@ -1386,6 +1386,20 @@
     }
     return best;
   }
+  // Word's page jump: the engine's own GoToPage (its current page, rulers, caret and page callback), then its scroll
+  // again with the view's height in CSS pixels. GoToPage divides by the canvas's DEVICE-pixel height (the unit slip of
+  // GetCurrentVisiblePage above), so it lands too far down on a Retina screen: CI run 158, Go to Page 3 showed page 4
+  // on the 3x iPhone and page 3 with its top cut off on the 2x iPad. The engine's own ScrollToPosition does it this
+  // way (CSS height = canvas height / retinaPixelRatio).
+  function wordGoTo(api, i) {
+    api.goToPage(i);
+    var wc = api.WordControl, el = wc && wc.m_oEditor && wc.m_oEditor.HtmlElement, sv = wc && wc.m_oScrollVerApi;
+    var B = window.AscCommon && AscCommon.AscBrowser, k = (B && B.retinaPixelRatio) || 1;
+    if (k === 1 || !el || !sv || !sv.scrollTo || !wc.GetVerticalScrollTo) return;
+    var h = el.height / k, D = wc.m_dDocumentHeight, max = wc.m_dScrollY_max;
+    if (!(D > h + 10) || !(max > 0)) return;
+    sv.scrollTo(0, Math.min(max, wc.GetVerticalScrollTo(0, i) * max / (D - h) + 1));
+  }
   // while reading, a finger on the page (or a trackpad scroll) shows the capsule: 'moving' true, the page read every
   // 200 ms until 1.2 s after the last touch (the engine's own momentum scroll runs on after the finger lifts)
   function readTouch() {
@@ -1513,8 +1527,15 @@
     var shown = function (id) { var e = document.getElementById(id); return e && e.offsetParent !== null && e.offsetHeight > 0 ? 1 : 0; };
     var view = 0;
     try { view = api && api.isRestrictionView && api.isRestrictionView() ? 1 : 0; } catch (e) {}
+    // Word: where that page's top is in the view (CSS px), so the gate sees a Go to Page that lands past the top
+    var top = '-';
+    try {
+      var pg = !PDFED && api.WordControl.m_oDrawingDocument.m_arrPages[hub.get('page') | 0];
+      if (pg && pg.drawingPage) top = Math.round(pg.drawingPage.top);
+    } catch (e) {}
     return 'read=' + (read.on ? 1 : 0) + ' view=' + view + ' input=' + (ic && ic.HtmlArea ? (ic.HtmlArea.readOnly ? 'ro' : 'rw') : '-') +
-      ' toolbar=' + shown('toolbar') + ' status=' + shown('statusbar') + ' page=' + ((hub.get('page') | 0) + 1) + '/' + (hub.get('pages') | 0);
+      ' toolbar=' + shown('toolbar') + ' status=' + shown('statusbar') + ' page=' + ((hub.get('page') | 0) + 1) + '/' + (hub.get('pages') | 0) +
+      ' top=' + top;
   };
   // Edit / Done: 'ok <state>', or 'later' while the document is still opening (applied at content-ready then)
   window.__xrReadMode = function (on) {
@@ -1535,7 +1556,7 @@
     var n = 0;
     try { n = api.getCountPages() | 0; } catch (e) {}
     i = Math.max(0, Math.min(i | 0, n - 1));
-    try { api.goToPage(i); } catch (e) { return 'error: ' + (e && e.message || e); }
+    try { if (PDFED) api.goToPage(i); else wordGoTo(api, i); } catch (e) { return 'error: ' + (e && e.message || e); }
     readPage();
     setTimeout(readPage, 400);                     // after the scroll has landed
     return 'ok ' + (i + 1) + '/' + n;

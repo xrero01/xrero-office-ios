@@ -920,7 +920,7 @@ final class EditorUITests: XCTestCase {
                 shot(app, "70-read-\(lang)-\(what)-not-ready")
                 return false
             }
-            /// "read<n>:read=1 view=1 input=ro toolbar=0 status=0 page=1/1 app=1": n = switches the editor answered
+            /// "read<n>:read=1 view=1 input=ro toolbar=0 status=0 page=1/6 top=20 app=1": n = switches the editor answered
             func applied(_ s: String) -> Int {
                 guard s.hasPrefix("read"), let c = s.firstIndex(of: ":") else { return -1 }
                 return Int(s[s.index(s.startIndex, offsetBy: 4)..<c]) ?? -1
@@ -1085,6 +1085,19 @@ final class EditorUITests: XCTestCase {
                 print("XR read en go to page 3: \(after) | \(after.contains("page=3/\(pages)") ? "PASS" : "FAIL")")
                 XCTAssertTrue(after.contains("page=3/\(pages)"), "Go to Page 3 did not land on page 3 of \(pages): \(after)")
                 XCTAssertTrue(after.contains("input=ro") && after.contains("view=1"), "Go to Page left reading state: \(after)")
+                // ... at the page's top (the probe's top=: that page's top in the view, CSS px; about 20 = the gap above
+                // a page): the engine's own jump landed past it on Retina screens (CI run 158: page 4 on the 3x iPhone,
+                // page 3 with its heading cut off on the 2x iPad)
+                func topOf(_ s: String) -> Int? {
+                    guard let r = s.range(of: " top=") else { return nil }
+                    return Int(s[r.upperBound...].prefix { $0 != " " })
+                }
+                func atTop(_ s: String) -> Bool { s.contains("page=3/\(pages)") && (topOf(s).map { $0 >= -4 && $0 <= 80 } ?? false) }
+                var landed = after
+                let topEnd = Date().addingTimeInterval(4)
+                while !atTop(landed) && Date() < topEnd { Thread.sleep(forTimeInterval: 0.3); landed = snap("xr-read-probe") }
+                print("XR read en go to page 3 top: \(topOf(landed).map { "\($0)" } ?? "?") \(atTop(landed) ? "PASS" : "FAIL") | \(landed)")
+                XCTAssertTrue(atTop(landed), "Go to Page 3 did not land on the top of page 3: \(landed)")
                 shot(app, "72b-read-en-page-3")
                 // a swipe in reading state scrolls the document (no pointer event is blocked) and the page follows
                 let before = pageOf(after)?.p ?? 3
