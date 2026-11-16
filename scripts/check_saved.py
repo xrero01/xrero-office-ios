@@ -11,7 +11,8 @@ the word typed after the Bold tap and the word typed after the keyboard bar's Bo
 5 Enter presses.
 The window gate (plan S6, EditorUITests.testZZZZWindowLayoutAndKeyCommands) must log every check as PASS: the
 design follows the window (compact on the iPhone, regular on the full-screen iPad, compact for a narrow iPad window),
-Cmd+B from the hardware keyboard and the menu bar's Format > Bold each toggle Bold exactly once.
+the menu bar sees the window's editor (focusedSceneValue), Cmd+B from the hardware keyboard and the menu bar's
+Format > Bold each toggle Bold exactly once.
 Every editor log must be free of 'missing AscDesktopEditor.*' lines (engine contract: a member the editors ask the
 shell for that xr-host.js does not define). Prints each editor log."""
 import json, os, re, sys, zipfile
@@ -436,8 +437,8 @@ def gallery(d):
     return good
 
 
-WINDOW_CHECKS = ("editor-ready", "layout-follows-window", "live-narrow-class", "cmd-b-on-once", "cmd-b-off-once",
-                 "cmd-b-types-nothing", "menu-bold-once")
+WINDOW_CHECKS = ("editor-ready", "layout-follows-window", "live-narrow-class", "menu-sees-editor", "cmd-b-on-once",
+                 "cmd-b-off-once", "cmd-b-types-nothing", "menu-bold-once")
 
 
 def window_gate(d):

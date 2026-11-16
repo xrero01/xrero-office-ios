@@ -2304,13 +2304,17 @@ final class EditorUITests: XCTestCase {
     /// - ⌘B from the hardware keyboard toggles Bold EXACTLY once per press - on and still on 2 s later, then off and
     ///   still off - and types nothing. Pressed the way a person does: tap in the page, type, ⌘B. Every handler that
     ///   took a press writes a line to the menu file: the editor view's key command ("key bold") and a key spy in the
-    ///   page ("page b+meta ..."); a press must have exactly ONE handler. The simulator drops some synthesized ⌘
-    ///   presses before any handler sees them (CI runs 142 / 152: none reached the page on the iPhone, every other one
-    ///   on the iPad): such a press - no handler line, no change - is pressed again, up to 4 times;
-    /// - the menu bar's Format > Bold action (XreroCommands -> EditorMenuTarget.bold) toggles it once too;
-    /// - last, recorded only (INFO): a test-only menu command (⌃⌥⌘P) reaching the editor through the menu bar and
-    ///   focusedSceneValue; its answer comes through a file, never an app query. (⌘W is not pressed any more: CI run
-    ///   142's ⌘W on the iPad left the app unreachable, and File > Close carries no ⌘W - see XreroCommands.)
+    ///   page ("page b+meta ..."); a press must have exactly ONE handler. The simulator drops the first synthesized ⌘
+    ///   chords after on-screen-keyboard typing before the app gets them at all (CI runs 142-159: 1 to 4 of them, with
+    ///   not even the ⌘ key's own keydown reaching the page - every press that did reach the app logged it). So:
+    ///   first the menu bar check below is pressed until it answers (it changes nothing in the document), and a ⌘B
+    ///   press is pressed again (up to 6 times) only when it never reached the app - no handler, no change AND no ⌘
+    ///   keydown in the page. A ⌘B that reached the app and did nothing fails;
+    /// - the menu bar sees this window's editor (focusedSceneValue, which XreroCommands' File / Edit / Format items
+    ///   act through): a test-only menu command (⌃⌥⌘P) answers "probe editor=1" through a file, never an app query;
+    /// - the menu bar's Format > Bold action (XreroCommands -> EditorMenuTarget.bold) toggles it once too.
+    ///   (⌘W is not pressed: CI run 142's ⌘W on the iPad left the app unreachable, and File > Close carries no ⌘W -
+    ///   see XreroCommands.)
     func testZZZZWindowLayoutAndKeyCommands() {
         let pad = UIDevice.current.userInterfaceIdiom == .pad
         let keep = continueAfterFailure
@@ -2369,22 +2373,24 @@ final class EditorUITests: XCTestCase {
         func menuLines() -> [String] {
             ((try? String(contentsOfFile: menuFile, encoding: .utf8)) ?? "").split(separator: "\n").map(String.init)
         }
-        /// ⌘B until a handler takes it (at most 4 presses): Bold must then reach `want` and stay there, with exactly one
-        /// handler line for that press
+        /// ⌘B until a press reaches the app (at most 6): Bold must then reach `want` and stay there, with exactly one
+        /// handler line for that press. A press is pressed again only when it never reached the app: no handler line,
+        /// no change, and the page saw no ⌘ keydown either ("page Meta+meta" - logged for every press that arrived)
         func pressBold(_ app: XCUIApplication, _ want: String) -> (ok: Bool, detail: String) {
             var tries: [String] = []
-            for attempt in 1...4 {
+            for attempt in 1...6 {
                 let before = menuLines().count
                 app.typeKey("b", modifierFlags: .command)
                 let r = boldSettles(app, want)
                 let new = menuLines().dropFirst(before)
                 let native = new.filter { $0 == "key bold" }.count
                 let page = new.filter { $0.hasPrefix("page b+meta") }.count
-                tries.append("#\(attempt) key=\(native) page=\(page) reached=\(r.reached) 2s-later=\(r.after)")
-                if native + page == 0 && !r.reached && r.after != want { continue }   // dropped before any handler
+                let arrived = new.contains { $0.hasPrefix("page Meta+meta") }
+                tries.append("#\(attempt) key=\(native) page=\(page) cmd-down=\(arrived ? 1 : 0) reached=\(r.reached) 2s-later=\(r.after)")
+                if native + page == 0 && !arrived && !r.reached && r.after != want { continue }   // dropped before the app
                 return (native + page == 1 && r.reached && r.after == want, tries.joined(separator: " "))
             }
-            return (false, tries.joined(separator: " ") + " (no handler saw any press)")
+            return (false, tries.joined(separator: " ") + " (no press reached the app)")
         }
         /// last step on the app in front: the test-only menu command, its answer from the menu file
         func menuKeys(_ app: XCUIApplication) {
@@ -2421,6 +2427,19 @@ final class EditorUITests: XCTestCase {
         sleep(1)
         typeSlowly(app, "Keys")
         sleep(1)
+        // the menu bar sees this window's editor - pressed until it answers, which also lets the simulator's dropped
+        // first ⌘ chords (see above) fall on a command that changes nothing in the document
+        try? FileManager.default.removeItem(atPath: menuFile)
+        var probes = 0
+        for _ in 0..<10 where !menuLines().contains(where: { $0.hasPrefix("probe") }) {
+            probes += 1
+            app.typeKey("p", modifierFlags: [.command, .option, .control])
+            _ = menuAnswer("probe", 4)
+        }
+        let menuSeen = menuLines().first { $0.hasPrefix("probe") } ?? "(no answer)"
+        gate("menu-sees-editor", menuSeen == "probe editor=1",
+             "\(menuSeen) after \(probes) press(es) | \(menuLines().joined(separator: " | "))")
+        sleep(2)                                         // the page's key-spy lines for that chord land before ⌘B counts
         let b0 = bold(app)
         let on = pressBold(app, "1")
         shot(app, "71-window-cmd-b-on")
