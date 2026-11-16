@@ -2311,8 +2311,11 @@ final class EditorUITests: XCTestCase {
     ///   press is pressed again (up to 6 times) only when it never reached the app - no handler, no change AND no ⌘
     ///   keydown in the page. A ⌘B that reached the app and did nothing fails;
     /// - the menu bar sees this window's editor (focusedSceneValue, which XreroCommands' File / Edit / Format items
-    ///   act through): a test-only menu command (⌃⌥⌘End, a key that types nothing - run 165's ⌃⌥⌘P typed a "p" when the
-    ///   simulator lost its modifiers) answers "probe editor=1" through a file, never an app query;
+    ///   act through): a test-only menu command (⌃⌥⌘P) answers "probe editor=1" through a file, never an app query.
+    ///   A letter, because run 168's ⌃⌥⌘End was never delivered by the simulator (no answer, no End in the page) while
+    ///   run 165's ⌃⌥⌘P reached the menu on both devices. A probe press whose modifiers the simulator drops types a
+    ///   bare "p" (run 165: "Keysp"), so the "types nothing" check allows only those probe letters after "Keys" - at
+    ///   most one per probe press - and nothing else: a "b" from ⌘B still fails it;
     /// - the menu bar's Format > Bold action (XreroCommands -> EditorMenuTarget.bold) toggles it once too.
     ///   (⌘W is not pressed: CI run 142's ⌘W on the iPad left the app unreachable, and File > Close carries no ⌘W -
     ///   see XreroCommands.)
@@ -2397,7 +2400,7 @@ final class EditorUITests: XCTestCase {
         func menuKeys(_ app: XCUIApplication) {
             try? FileManager.default.removeItem(atPath: menuFile)
             for _ in 0..<3 where !menuLines().contains(where: { $0.hasPrefix("probe") }) {
-                app.typeKey(.end, modifierFlags: [.command, .option, .control])
+                app.typeKey("p", modifierFlags: [.command, .option, .control])
                 _ = menuAnswer("probe", 4)
             }
             print("XR window-gate menu-probe: INFO \(menuAnswer("probe", 1))")
@@ -2434,7 +2437,7 @@ final class EditorUITests: XCTestCase {
         var probes = 0
         for _ in 0..<10 where !menuLines().contains(where: { $0.hasPrefix("probe") }) {
             probes += 1
-            app.typeKey(.end, modifierFlags: [.command, .option, .control])
+            app.typeKey("p", modifierFlags: [.command, .option, .control])
             _ = menuAnswer("probe", 4)
         }
         let menuSeen = menuLines().first { $0.hasPrefix("probe") } ?? "(no answer)"
@@ -2452,7 +2455,12 @@ final class EditorUITests: XCTestCase {
         XCUIDevice.shared.system.open(URL(string: "xrero-autotest://doctext")!)
         let t = waitState(app, prefix: "doctext:", timeout: 15)
         let text = t.dropFirst("doctext:".count).trimmingCharacters(in: .whitespacesAndNewlines)
-        gate("cmd-b-types-nothing", text == "Keys", "document text '\(text)'")
+        // "Keys", then only the bare "p"s of probe presses that lost their modifiers (at most one per probe press);
+        // anything else - a "b" from ⌘B above all - fails
+        let stray = text.hasPrefix("Keys") ? String(text.dropFirst(4)) : "-"
+        let probeLetters = stray.allSatisfy { $0 == "p" } && stray.count <= probes
+        if probeLetters && !stray.isEmpty { info("probe-typed", "\(stray.count) bare 'p' from probe presses that lost their modifiers") }
+        gate("cmd-b-types-nothing", text.hasPrefix("Keys") && probeLetters, "document text '\(text)' probe presses=\(probes)")
 
         // 3) the menu bar's Format > Bold: the action XreroCommands runs toggles Bold once (on, then off), from off
         let m0 = bold(app)

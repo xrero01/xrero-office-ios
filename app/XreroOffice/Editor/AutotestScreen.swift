@@ -393,7 +393,7 @@ struct AutotestScreen: View {
                 }
             }
             if url.host == "keyspy" {           // window gate (plan S6): which Cmd / Ctrl key presses (and End / Home /
-                                                // arrows: the menu probe's key) reach the editor page (a capture
+                                                // arrows) reach the editor page (a capture
                                                 // listener in the editor frame: key, modifiers, target, whether the
                                                 // page took it); "read=1" answers with the record
                 let read = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "read" }?.value == "1"
@@ -712,18 +712,19 @@ enum AutotestMenuFile {
     }
 }
 
-/// Plan S6 window gate, test build only: a menu command with a key no other command uses (Ctrl-Option-Cmd-End)
-/// that says whether the menu bar sees this window's editor through focusedSceneValue (XreroCommands relies on the
-/// same). A key that types nothing: CI run 165's first press of the old Ctrl-Option-Cmd-P lost its modifiers in the
-/// simulator and typed a "p" into the document; End at the end of the text moves nothing (and, unlike Cmd-arrows,
-/// is no Simulator shortcut).
+/// Plan S6 window gate, test build only: a menu command with a key no other command uses (Ctrl-Option-Cmd-P) that
+/// says whether the menu bar sees this window's editor through focusedSceneValue (XreroCommands relies on the same).
+/// A letter on purpose: CI run 165 proved this chord reaches the menu on the iPhone and the iPad, while run 168's
+/// Ctrl-Option-Cmd-End never arrived anywhere (no menu answer, no End keydown in the page) - the simulator's
+/// synthesized End is not delivered. The price: a press whose modifiers the simulator drops types a bare "p" into the
+/// document; the UI test allows exactly those letters after its typed word (EditorUITests window gate).
 struct AutotestMenuProbe: Commands {
     @FocusedValue(\.xrEditor) private var editor: EditorMenuTarget?
 
     var body: some Commands {
         CommandMenu("XR Autotest") {
             Button("Menu probe") { AutotestMenuFile.note("probe editor=\(editor == nil ? 0 : 1)") }
-                .keyboardShortcut(.end, modifiers: [.command, .option, .control])
+                .keyboardShortcut("p", modifiers: [.command, .option, .control])
         }
     }
 }
