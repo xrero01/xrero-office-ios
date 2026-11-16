@@ -23,6 +23,8 @@ enum A11yText {
     static func formatHint(_ ar: Bool) -> String { ar ? "يفتح الخط والحجم والنمط والفقرة والإدراج" : "Opens font, size, style, paragraph and insert" }
     static func newHint(_ ar: Bool) -> String { ar ? "ينشئ ملفًا فارغًا جديدًا ويفتحه" : "Creates a new blank file and opens it" }
     static func browseHint(_ ar: Bool) -> String { ar ? "يفتح قائمة الملفات لاختيار ملف" : "Opens the file browser to pick a file" }
+    static func templatesHint(_ ar: Bool) -> String { ar ? "يفتح معرض القوالب" : "Opens the template gallery" }
+    static func scanHint(_ ar: Bool) -> String { ar ? "يفتح الكاميرا لمسح الصفحات" : "Opens the camera to scan pages" }
     static func recentHint(_ ar: Bool) -> String { ar ? "يفتح الملف" : "Opens the file" }
     static func homeMoreHint(_ ar: Bool) -> String { ar ? "الحساب واللغة وحول التطبيق والخصوصية والملاحظات" : "Account, language, about, privacy and feedback" }
     static func hideKeyboardHint(_ ar: Bool) -> String { ar ? "يخفي لوحة المفاتيح" : "Hides the keyboard" }

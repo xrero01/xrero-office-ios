@@ -234,6 +234,7 @@ struct HomeScene: View {
                                : "Letter, tax invoice, CV, minutes, budget - in English and Arabic") {
                 openTemplates(for: nil)
             }
+            .accessibilityHint(A11yText.templatesHint(ar))
             .accessibilityIdentifier("xr-home-templates")
         } header: {
             Text(ar ? "جديد" : "New")
@@ -259,6 +260,7 @@ struct HomeScene: View {
             OpenRow(symbol: "doc.viewfinder", color: .xrTeal, title: ScanText.rowTitle, detail: ScanText.rowDetail) {
                 DocumentScanner.shared.start(opener: opener)
             }
+            .accessibilityHint(A11yText.scanHint(ar))
             .accessibilityIdentifier("xr-home-scan")
         } header: {
             Text(ar ? "فتح" : "Open")

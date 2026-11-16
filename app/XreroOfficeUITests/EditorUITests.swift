@@ -2494,7 +2494,22 @@ final class EditorUITests: XCTestCase {
             if close.exists && close.isHittable {
                 close.tap()
                 for _ in 0..<10 where note.exists { usleep(300_000) }
-                XCTAssertFalse(note.exists, "canvas note did not close (\(lang))")
+                // a lost simulator tap (CI run 150, iPhone, English: Close found and hittable, the note still up after
+                // the tap; the Arabic Close in the same run and all four of S12's own runs closed at once): tapped once
+                // more, and said so. The note must still close: if it stays, that is a FAIL in the summary too.
+                if note.exists && close.exists && close.isHittable {
+                    let retry = "XR a11y \(lang) close-first-tap-ignored: INFO the note was still up 3 s after the tap on Close - tapped again"
+                    print(retry)
+                    lines.append(retry)
+                    close.tap()
+                    for _ in 0..<10 where note.exists { usleep(300_000) }
+                }
+                let closed = !note.exists
+                let line = "XR a11y note \(lang) closes: \(closed ? "ok" : "FAIL the note is still up after Close")"
+                print(line)
+                lines.append(line)
+                if !closed { failures.append(line) }
+                XCTAssertTrue(closed, "canvas note did not close (\(lang))")
             }
             shot(ed, "63-a11y-bar-\(lang)-note-closed")
             ed.terminate()
