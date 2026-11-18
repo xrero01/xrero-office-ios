@@ -1675,10 +1675,10 @@ final class EditorUITests: XCTestCase {
     /// Acrobat) draw a field from its saved appearance, not from its value. tests/ar_form_embedded.pdf: Arabic in a
     /// field whose font is an embedded Arabic font (XR-FIELD-AP: the joined letters saved as outlines), a Latin
     /// reference number in the same font (scripts/patch_field_ap_ios.py) and Arabic in a Helvetica field (drawn by x2t
-    /// with the app's fonts: xr-host.js fontUrls). tests/ar_booking_form.pdf, filled as with a hardware keyboard: Tab
-    /// from field to field, the date typed key by key (every digit must arrive), Tab to the first check box and Return
-    /// (ticked, and still ticked in the saved file); a second check box ticked by a tap. check_saved.py (pdf_form) reads
-    /// the saved files outside the app. Log lines "form-gate <file> <check>: PASS|FAIL|INFO <detail>".
+    /// with the app's fonts: xr-host.js fontUrls). tests/ar_booking_form.pdf, field by field by touch: Arabic, the date
+    /// typed key by key (every digit must arrive), digits, and a check box ticked by a tap (still ticked in the saved
+    /// file). check_saved.py (pdf_form) reads the saved files outside the app. Log lines
+    /// "form-gate <file> <check>: PASS|FAIL|INFO <detail>". No hardware key events here (see the booking part).
     func testPdfFormFields() throws {
         let env = ProcessInfo.processInfo.environment
         guard let form = env["XR_FORM_B64"], let booking = env["XR_BOOK_B64"] else { throw XCTSkip("no form PDFs passed") }
@@ -1763,39 +1763,21 @@ final class EditorUITests: XCTestCase {
             shot(app, "form-embedded-typed")
         }
 
-        // 2) the booking form: Tab between fields, the date key by key, Tab to a check box + Return, a tap on another
+        // 2) the booking form, field by field as a person taps them, the date typed key by key (every digit must
+        //    arrive), then a check box ticked by a tap. Quick runs 176-178 also drove this form with hardware Tab /
+        //    Return (Tab moved from field to field; Return on a check box did not tick it - INFO, not claimed). Those
+        //    hardware key events were dropped: they leave the iPad simulator in hardware-keyboard mode, and the later
+        //    reading-view test then saw "the keyboard stayed up" after Go to Page (full runs 179 and 184).
         run("xr-form-booking.pdf", booking) { app, gate in
-            let (on, info) = edit(app, "department")
-            gate("department-editing", on, "\(info)", true)
-            guard on else { return }
-            typeSlowly(app, projects)
-            for (name, text) in [("office", sharjah), ("date", "24/11/2026"), ("attendees", "12")] {
-                app.typeKey(XCUIKeyboardKey.tab.rawValue, modifierFlags: [])
-                sleep(1)
-                var (_, i) = pdfField(app, name)
-                var how = "Tab"
-                if !(i["active"] as? String == name && i["inForm"] as? Bool == true) {
-                    // the hardware Tab did not reach the next field here: tap it (recorded), then type
-                    let r = edit(app, name); i = r.1; how = r.0 ? "tap (Tab did not move: active=\(i["active"] ?? "?"))" : "neither"
-                }
-                gate("\(name)-reached", how == "Tab", how, false)
+            for (name, text) in [("department", projects), ("office", sharjah), ("date", "24/11/2026"), ("attendees", "12")] {
+                let (on, info) = edit(app, name)
+                gate("\(name)-editing", on, "\(info)", true)
+                guard on else { continue }
                 typeSlowly(app, text)
                 sleep(1)
-                let got = value(app, name)
-                gate("\(name)-typed", got == text, "value=\(got) via \(how) firstInput=\(i["firstInput"] ?? "?")", true)
-            }
-            // Tab to the first check box, then Return: the keyboard way to tick it
-            app.typeKey(XCUIKeyboardKey.tab.rawValue, modifierFlags: [])
-            sleep(1)
-            let (_, b) = pdfField(app, "display")
-            let onBox = b["active"] as? String == "display"
-            gate("display-reached", onBox, "active=\(b["active"] ?? "?") inForm=\(b["inForm"] ?? "?")", false)
-            if onBox {
-                app.typeKey(XCUIKeyboardKey.return.rawValue, modifierFlags: [])
-                sleep(2)
-                let (_, a) = pdfField(app, "display")
-                gate("display-return-ticked", "\(a["value"] ?? "?")" == "1" || a["value"] as? Bool == true,
-                     "value=\(a["value"] ?? "?") keyTick=\(a["keyTick"] ?? "?")", false)
+                let (_, i) = pdfField(app, name)
+                let got = i["value"].map { "\($0)" } ?? "?"
+                gate("\(name)-typed", got == text, "value=\(got) firstInput=\(i["firstInput"] ?? "?")", true)
             }
             // a check box ticked by a tap (the touch way)
             let (vp, _) = pdfField(app, "video")
