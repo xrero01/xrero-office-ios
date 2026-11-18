@@ -302,6 +302,201 @@ def pdf_bar(d, lang):
     return good
 
 
+# PDF forms (21.0, EditorUITests.testPdfFormFields): the typed values must be in the SAVED page. Other apps draw a field
+# from its saved appearance (/AP /N), not from its value (/V), so each typed field's appearance must draw something:
+# glyph outlines (an embedded font: XR-FIELD-AP + scripts/patch_field_ap_ios.py) or text in a font x2t embedded
+# (a standard-font field: xr-host.js fontUrls). With PyMuPDF the embedded-font Arabic line is also drawn and compared
+# with the same text shaped by MuPDF / HarfBuzz in the field's own font (joined letters, not separate ones).
+AR_CLIENT = "مؤسسة الإمارات للملاحظات"
+FORM_VALUES = {
+    "xr-form-embedded.pdf": {"client": AR_CLIENT, "ref": "XO-2026-014", "office": "الشارقة"},
+    "xr-form-booking.pdf": {"department": "المشاريع", "office": "الشارقة", "date": "24/11/2026", "attendees": "12"},
+}
+FORM_CHECKS = {   # the test's own hard lines (INFO lines are printed, never required)
+    "xr-form-embedded.pdf": ("editor-ready", "client-editing", "client-typed", "ref-editing", "ref-typed",
+                             "office-editing", "office-typed", "field-ap-shim", "save"),
+    "xr-form-booking.pdf": ("editor-ready", "department-editing", "office-typed", "date-typed", "attendees-typed", "save"),
+}
+FORM_MATCH_OK = 0.85      # ink match of the saved Arabic line with its HarfBuzz reference (Mac engine_checks.py)
+
+
+def glyph_fills(s):
+    """fills of paths that begin with a moveto in a content stream: glyph outlines, not a background 're' rectangle"""
+    s = re.sub(r"\((?:\\.|[^\\)])*\)", " ", s)
+    s = re.sub(r"<[0-9A-Fa-f\s]*>", " ", s)
+    n, has_m = 0, False
+    for tok in s.split():
+        if tok[0] in "/[]<>" or re.match(r"^[-+.\d]", tok):
+            continue
+        if tok == "m":
+            has_m = True
+        elif tok in ("f", "f*", "F", "B", "B*", "b", "b*"):
+            n += has_m
+            has_m = False
+        elif tok in ("n", "S", "s"):
+            has_m = False
+    return n
+
+
+def form_fields(path):
+    """{field name: {value, kind, text_ops, glyph_fills, state}} read with pypdf"""
+    from pypdf import PdfReader
+    out = {}
+    for pg in PdfReader(path).pages:
+        for a in (pg.get("/Annots") or []):
+            w = a.get_object()
+            par = w.get("/Parent")
+            par = par.get_object() if par is not None else None
+            name = w.get("/T") or (par.get("/T") if par is not None else None)
+            if name is None:
+                continue
+            ft = w.get("/FT") or (par.get("/FT") if par is not None else None)
+            v = w.get("/V") if w.get("/V") is not None else (par.get("/V") if par is not None else None)
+            r = {"value": str(v) if v is not None else None, "kind": str(ft), "state": str(w.get("/AS"))}
+            ap = w.get("/AP")
+            n = ap.get_object().get("/N") if ap is not None else None
+            n = n.get_object() if n is not None else None
+            if ft == "/Tx" and n is not None and hasattr(n, "get_data"):
+                s = n.get_data().decode("latin1")
+                r["text_ops"] = len(re.findall(r"\bT[jJ]\b", s))
+                r["glyph_fills"] = glyph_fills(s)
+            out[str(name)] = r
+    return out
+
+
+def form_draw(path, field, value, font_name, evid):
+    """PyMuPDF (when installed): the saved field drawn from its appearance -> (ink pixels, match with HarfBuzz or None)"""
+    try:
+        import pymupdf as fz
+    except ImportError:
+        try:
+            import fitz as fz
+        except ImportError:
+            return None, None
+    d = fz.open(path)
+    try:
+        w = next((x for x in d[0].widgets() if x.field_name == field), None)
+        if w is None:
+            return None, None
+        zoom = 4
+        pix = d[0].get_pixmap(matrix=fz.Matrix(zoom, zoom), clip=w.rect, annots=True)
+        pix.save(os.path.join(evid, "form-%s-%s-saved.png" % (os.path.basename(path)[:-4], field)))
+        ink = ink_mask(pix)
+        n_ink = sum(v for r in ink for v in r)
+        if not font_name:
+            return n_ink, None
+        # the field's own font program from /AcroForm/DR/Font/<name>
+        af = d.xref_get_key(d.pdf_catalog(), "AcroForm/DR/Font/" + font_name)
+        if af[0] != "xref":
+            return n_ink, None
+        f = int(af[1].split()[0])
+        desc = re.search(r"DescendantFonts \[ ?(\d+)", d.xref_object(f))
+        fobj = int(desc.group(1)) if desc else f
+        fd = int(re.search(r"FontDescriptor (\d+)", d.xref_object(fobj)).group(1))
+        ff = int(re.search(r"FontFile2 (\d+)", d.xref_object(fd)).group(1))
+        ttf = os.path.join(evid, "_dr_%s.ttf" % font_name)
+        open(ttf, "wb").write(d.xref_stream(ff))
+        ref = fz.open()
+        pg = ref.new_page(width=w.rect.width + 20, height=w.rect.height + 30)
+        rtl = any("؀" <= c <= "ۿ" for c in value)
+        css = "@font-face{font-family:f;src:url(%s)}div{font-family:f}" % os.path.basename(ttf)
+        box = fz.Rect(10, 10, 10 + w.rect.width, 10 + w.rect.height + 12)
+        pg.insert_htmlbox(box, '<div dir="%s" style="font-size:%gpt;color:#000">%s</div>'
+                          % ("rtl" if rtl else "ltr", w.text_fontsize or 14, value),
+                          css=css, archive=fz.Archive(os.path.dirname(ttf)), scale_low=1)
+        rp = pg.get_pixmap(matrix=fz.Matrix(zoom, zoom), clip=box)
+        return n_ink, ink_match(ink, ink_mask(rp), 2)
+    finally:
+        d.close()
+
+
+def ink_mask(pix, thr=140):
+    w, h, n, s, st = pix.width, pix.height, pix.n, pix.samples, pix.stride
+    return [[((s[y * st + x * n] * 299 + s[y * st + x * n + 1] * 587 + s[y * st + x * n + 2] * 114) // 1000) < thr
+             if n >= 3 else s[y * st + x * n] < thr for x in range(w)] for y in range(h)]
+
+
+def ink_match(a, b, k=1):
+    """share of each drawing's ink within k px of the other's (both ink-cropped, b scaled to a's box); 1.0 = same"""
+    def crop(m):
+        ys = [y for y, r in enumerate(m) if any(r)]
+        if not ys:
+            return None
+        xs = [x for x in range(len(m[0])) if any(m[y][x] for y in ys)]
+        return [r[xs[0]:xs[-1] + 1] for r in m[ys[0]:ys[-1] + 1]]
+    def dil(m):
+        h, w = len(m), len(m[0])
+        out = [[False] * w for _ in range(h)]
+        for y in range(h):
+            for x in range(w):
+                if m[y][x]:
+                    for yy in range(max(0, y - k), min(h, y + k + 1)):
+                        for xx in range(max(0, x - k), min(w, x + k + 1)):
+                            out[yy][xx] = True
+        return out
+    a, b = crop(a), crop(b)
+    if a is None or b is None:
+        return 0.0
+    h, w = len(a), len(a[0])
+    H, W = len(b), len(b[0])
+    b = [[b[min(H - 1, y * H // h)][min(W - 1, x * W // w)] for x in range(w)] for y in range(h)]
+    da, db = dil(a), dil(b)
+    na = sum(v for r in a for v in r) or 1
+    nb = sum(v for r in b for v in r) or 1
+    pa = sum(1 for y in range(h) for x in range(w) if a[y][x] and db[y][x]) / na
+    pb = sum(1 for y in range(h) for x in range(w) if b[y][x] and da[y][x]) / nb
+    return round((pa + pb) / 2, 3)
+
+
+def pdf_form(d):
+    """the PDF form test's lines + the two saved forms (values and what their saved appearance draws); returns ok"""
+    good = True
+    evid = os.path.join(os.path.dirname(os.path.abspath(root)), "qa", "forms-" + os.path.basename(d))
+    os.makedirs(evid, exist_ok=True)
+    for name, want in FORM_VALUES.items():
+        print("PDF form %s:" % name)
+        lg = os.path.join(d, "xr-log-%s.txt" % name)
+        log = open(lg, encoding="utf-8", errors="replace").read() if os.path.exists(lg) else ""
+        res = {}
+        for m in re.finditer(r"^form-gate %s ([\w-]+): (PASS|FAIL|INFO)\s*(.*)$" % re.escape(name), log, re.M):
+            res[m.group(1)] = (m.group(2), m.group(3))
+        for c in FORM_CHECKS[name] + tuple(k for k in res if k not in FORM_CHECKS[name]):
+            st, why = res.get(c, ("NOT LOGGED", ""))
+            print("  %-26s %-10s %s" % (c, st, why[:170]))
+            if (c in FORM_CHECKS[name] and st != "PASS") or st == "FAIL":
+                good = False
+        for l in re.findall(r"^saved %s [^\n]*" % re.escape(name), log, re.M):
+            print("  log:", l)
+        p = os.path.join(d, name)
+        if not os.path.exists(p):
+            print("  %s: MISSING" % name)
+            good = False
+            continue
+        try:
+            got = form_fields(p)
+        except Exception as e:
+            print("  %s: cannot read: %s" % (name, e))
+            good = False
+            continue
+        for field, value in want.items():
+            g = got.get(field, {})
+            drawn = (g.get("text_ops") or 0) + (g.get("glyph_fills") or 0)
+            ok_v = g.get("value") == value
+            ink, match = form_draw(p, field, value, "PlexAr" if name == "xr-form-embedded.pdf" and field != "office" else None, evid)
+            line_ok = ok_v and drawn > 0 and (ink is None or ink > 0)
+            if field == "client":              # Arabic in the embedded font: joined letters, as outlines
+                line_ok &= (g.get("glyph_fills") or 0) >= 15 and (match is None or match >= FORM_MATCH_OK)
+            print("  %-12s value=%s (%s) appearance: text ops %s, glyph outlines %s, ink %s, HarfBuzz match %s -> %s"
+                  % (field, g.get("value"), "OK" if ok_v else "WANT %s" % value, g.get("text_ops"), g.get("glyph_fills"),
+                     ink, match, "OK" if line_ok else "WRONG"))
+            good &= line_ok
+        if name == "xr-form-booking.pdf":       # recorded: the check boxes ticked by Return (Tab path) and by a tap
+            for box in ("display", "video", "refreshments"):
+                print("  %-12s saved value %s, appearance state %s (informational)" % (box, got.get(box, {}).get("value"),
+                                                                                       got.get(box, {}).get("state")))
+    return good
+
+
 KBDIR_CHECKS = ("editor-ready", "keyboard-up", "observer", "empty-arabic-rtl", "empty-english-ltr", "empty-arabic-rtl-again",
                 "arabic-typed", "text-paragraph-kept", "new-empty-english-ltr", "english-text-kept", "both-typed", "save")
 # the shipped default of the setting (no -xr.kbDirection): xr-log-xr-kbdef-<lang>.docx.txt
@@ -769,6 +964,7 @@ for dev in sorted(os.listdir(root)) if os.path.isdir(root) else []:
         ok &= sheet_gate(d, lang)
     for lang in ("en", "ar"):                     # PDF tool bar (plan S7)
         ok &= pdf_bar(d, lang)
+    ok &= pdf_form(d)                             # PDF form fields typed + saved visibly (21.0)
     for lang in ("en", "ar"):                     # paragraph direction follows the keyboard (plan C1)
         ok &= kbdir_gate(d, lang)
     for ext in ("docx", "xlsx", "pptx"):          # Arabic-first blanks (EditorUITests.testArabicBlanksStartRightToLeft)
