@@ -108,11 +108,38 @@ final class AccountWallUITests: XCTestCase {
         return nil
     }
 
-    /// Back to Home from the editor (an untouched new file is removed again on close, plan S9).
+    /// Back to Home from the editor (an untouched new file is removed again on close, plan S9). A Back tap can be lost
+    /// on the CI simulator (CI run 44303095580, iPhone and iPad; EditorUITests' Files gate taps Back once more after
+    /// 20 s for the same reason) - so here too; the app closes a file only once however often Back is tapped.
     private func closeEditor(_ app: XCUIApplication) {
-        let back = app.buttons["xr-bar-back"]
+        let back = app.buttons["xr-bar-back"].firstMatch, home = el(app, "xr-home-list")
         if back.waitForExistence(timeout: 10) { back.tap() }
-        XCTAssertTrue(el(app, "xr-home-list").waitForExistence(timeout: 30), "no Home after closing the editor")
+        var ok = home.waitForExistence(timeout: 20)
+        if !ok && back.exists && back.isHittable {
+            print("XR account Back did not close the editor - tapping it again")
+            back.tap()
+            ok = home.waitForExistence(timeout: 30)
+        }
+        XCTAssertTrue(ok, "no Home after closing the editor")
+    }
+
+    /// ⋯ (`more`), then its entry `id`. A tap on ⋯ can be lost (CI run 44303095580: the menu never opened) - as
+    /// EditorUITests' pick() does, a tap on the status bar closes whatever is open and ⋯ is tapped again, up to 3
+    /// times. nil when the entry never shows.
+    private func menuItem(_ app: XCUIApplication, _ more: String, _ id: String) -> XCUIElement? {
+        for attempt in 0..<3 {
+            if attempt > 0 {
+                print("XR account menu: \(id) not shown - opening \(more) again")
+                app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.01)).tap()
+                sleep(1)
+            }
+            let m = app.buttons[more].firstMatch
+            guard m.waitForExistence(timeout: 10) else { continue }
+            m.tap()
+            let e = app.buttons[id].firstMatch
+            if e.waitForExistence(timeout: 5) { return e }
+        }
+        return nil
     }
 
     // MARK: tests
@@ -292,11 +319,9 @@ final class AccountWallUITests: XCTestCase {
         shot(app, "session-editor-\(lang)")
 
         // 3) ⋯ > Account: the account, Sign out, Delete account (asks for the password; cancelled)
-        let more = app.buttons["xr-bar-more"]
-        XCTAssertTrue(more.waitForExistence(timeout: 10), "no ⋯ in the editor")
-        more.tap()
-        let item = app.buttons["xr-nav-account"]
-        XCTAssertTrue(item.waitForExistence(timeout: 5), "no Account in the editor's ⋯")
+        guard let item = menuItem(app, "xr-bar-more", "xr-nav-account") else {
+            XCTFail("no Account in the editor's ⋯ (\(lang))"); return
+        }
         XCTAssertEqual(item.label, ar ? "الحساب" : "Account", "the ⋯ item does not say Account when signed in")
         item.tap()
         XCTAssertTrue(el(app, "xr-acct-sheet").waitForExistence(timeout: 10), "⋯ > Account did not open (\(lang))")
@@ -338,9 +363,9 @@ final class AccountWallUITests: XCTestCase {
 
         // 6) Home > ⋯ > Account > Delete account > Delete permanently (local session: nothing sent) -> the wall
         closeEditor(app)
-        app.buttons["xr-home-more"].firstMatch.tap()
-        let homeAccount = app.buttons["xr-home-account"].firstMatch
-        XCTAssertTrue(homeAccount.waitForExistence(timeout: 5), "no Account in Home's ⋯")
+        guard let homeAccount = menuItem(app, "xr-home-more", "xr-home-account") else {
+            XCTFail("no Account in Home's ⋯ (\(lang))"); return
+        }
         homeAccount.tap()
         let delete2 = app.buttons["xr-acct-delete"].firstMatch
         XCTAssertTrue(delete2.waitForExistence(timeout: 10), "no Delete account from Home (\(lang))")
