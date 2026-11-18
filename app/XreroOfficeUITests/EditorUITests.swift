@@ -1717,25 +1717,28 @@ final class EditorUITests: XCTestCase {
         func tapAt(_ app: XCUIApplication, _ p: CGPoint) {
             app.webViews.firstMatch.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: p.x, dy: p.y)).tap()
         }
-        /// taps the field (again if a tap did not start editing it, as a person would) -> (editing, info). The first
-        /// keyboard of a fresh simulator comes with iOS's one-time "Speed up your typing by sliding your finger" tip
-        /// (quick run 176: the field was not being edited behind it): its Continue is tapped, as a person would.
+        /// taps the field (again if a tap did not start editing it, as a person would) -> (editing, info). Editing =
+        /// the editor edits this field AND the keyboard is up (typing needs it). The first keyboard of a fresh
+        /// simulator comes with iOS's one-time "Speed up your typing by sliding your finger" tip: its Continue is
+        /// tapped and the field tapped again (quick run 177: the keyboard went away with the tip on the iPhone).
         func edit(_ app: XCUIApplication, _ name: String) -> (Bool, [String: Any]) {
             let first = pdfField(app, name)
             var info = first.1
             guard let p = first.0 else { return (false, info) }
-            for attempt in 1...3 {
+            for attempt in 1...4 {
                 tapAt(app, p)
-                _ = app.keyboards.firstMatch.waitForExistence(timeout: 5)
+                let kb = app.keyboards.firstMatch.waitForExistence(timeout: 5)
                 let tip = app.buttons.matching(NSPredicate(format: "label == 'Continue'")).firstMatch
                 if tip.exists && tip.isHittable {
-                    print("XR form keyboard tip shown at \(name) (attempt \(attempt)): Continue tapped")
+                    print("XR form keyboard tip shown at \(name) (attempt \(attempt)): Continue tapped, the field tapped again")
                     tip.tap(); sleep(2)
+                    continue
                 }
                 sleep(1)
                 (_, info) = pdfField(app, name)
-                if info["active"] as? String == name && info["inForm"] as? Bool == true { return (true, info) }
-                print("XR form \(name) not being edited after tap \(attempt): \(info)")
+                let on = info["active"] as? String == name && info["inForm"] as? Bool == true
+                if on && app.keyboards.firstMatch.exists { return (true, info) }
+                print("XR form \(name) not ready for typing after tap \(attempt): keyboard=\(kb) \(info)")
             }
             return (false, info)
         }
