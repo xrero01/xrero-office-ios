@@ -352,8 +352,12 @@ final class AccountWallUITests: XCTestCase {
         assertWall(app, "after Delete account \(lang)", home: true)
         let notice = el(app, "xr-acct-notice")
         XCTAssertTrue(notice.waitForExistence(timeout: 10), "the wall does not say the account was deleted (\(lang))")
-        print("XR account wall after delete (\(lang)): \(notice.label)")
-        XCTAssertTrue(notice.label.contains(ar ? "تم حذف حسابك" : "Your account was deleted"), "notice: \(notice.label)")
+        // a Label like the error row: its icon (checkmark.circle, VoiceOver "Selected") carries the identifier too
+        // (CI run 44295190954 read the icon alone) - every part of it is read
+        let said = app.descendants(matching: .any).matching(identifier: "xr-acct-notice").allElementsBoundByIndex
+            .map(\.label).joined(separator: " | ")
+        print("XR account wall after delete (\(lang)): \(said)")
+        XCTAssertTrue(said.contains(ar ? "تم حذف حسابك" : "Your account was deleted"), "notice: \(said)")
         shot(app, "deleted-wall-\(lang)")
         app.terminate()
     }
