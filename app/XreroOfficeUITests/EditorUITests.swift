@@ -1717,17 +1717,25 @@ final class EditorUITests: XCTestCase {
         func tapAt(_ app: XCUIApplication, _ p: CGPoint) {
             app.webViews.firstMatch.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: p.x, dy: p.y)).tap()
         }
-        /// taps the field (once more if the first tap did not start editing it, as a person would) -> (editing, info)
+        /// taps the field (again if a tap did not start editing it, as a person would) -> (editing, info). The first
+        /// keyboard of a fresh simulator comes with iOS's one-time "Speed up your typing by sliding your finger" tip
+        /// (quick run 176: the field was not being edited behind it): its Continue is tapped, as a person would.
         func edit(_ app: XCUIApplication, _ name: String) -> (Bool, [String: Any]) {
             let first = pdfField(app, name)
             var info = first.1
             guard let p = first.0 else { return (false, info) }
-            for _ in 0..<2 {
+            for attempt in 1...3 {
                 tapAt(app, p)
                 _ = app.keyboards.firstMatch.waitForExistence(timeout: 5)
+                let tip = app.buttons.matching(NSPredicate(format: "label == 'Continue'")).firstMatch
+                if tip.exists && tip.isHittable {
+                    print("XR form keyboard tip shown at \(name) (attempt \(attempt)): Continue tapped")
+                    tip.tap(); sleep(2)
+                }
                 sleep(1)
                 (_, info) = pdfField(app, name)
                 if info["active"] as? String == name && info["inForm"] as? Bool == true { return (true, info) }
+                print("XR form \(name) not being edited after tap \(attempt): \(info)")
             }
             return (false, info)
         }
