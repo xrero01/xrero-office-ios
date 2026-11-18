@@ -175,11 +175,20 @@ struct EditorHost: View {
     /// Reading or editing when it opens (plan S2): chosen by DocumentOpener.
     var reading: ReadingModel = .off
     var onClose: () -> Void
+    @ObservedObject private var account = XreroAccount.shared
 
     var body: some View {
         NavigationStack {
             EditorScreen(document: $model.document, fileURL: model.fileURL, files: model, onClose: onClose,
                          reading: reading)
+        }
+        // the account is required (owner 18 Nov 2026): once it is gone (Sign out, Delete account, or refused by
+        // xrero.com) the editor - which has saved first (EditorScreen) - is covered by the wall, as on the Mac. Screen
+        // content, not a presentation: nothing to swipe away, and the editor's page stays alive underneath, so the
+        // same document is back as it was once the user has signed in again.
+        .accessibilityHidden(!account.isSignedIn)
+        .overlay {
+            if !account.isSignedIn { AccountView(mode: .wall) }
         }
         .appLanguageEnvironment()
     }

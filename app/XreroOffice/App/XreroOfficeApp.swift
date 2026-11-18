@@ -16,12 +16,12 @@ struct XreroOfficeApp: App {
         }
         .commands {
             // the same menu bar (EditorUITests window gate) + a test-only probe (AutotestScreen.swift)
-            XreroCommands(language: AppLanguage.shared, targets: MenuBarTargets.shared)
+            XreroCommands(language: AppLanguage.shared, targets: MenuBarTargets.shared, account: XreroAccount.shared)
             AutotestMenuProbe(targets: MenuBarTargets.shared)
         }
         #else
         WindowGroup { HomeScene().appLanguageEnvironment() }   // start screen; documents open over it (HomeScene.swift, DocumentOpener.swift)
-            .commands { XreroCommands(language: AppLanguage.shared, targets: MenuBarTargets.shared) }
+            .commands { XreroCommands(language: AppLanguage.shared, targets: MenuBarTargets.shared, account: XreroAccount.shared) }
         #endif
     }
 }
@@ -139,7 +139,8 @@ final class MenuBarTargets: ObservableObject {
 
 /// The menu bar on iPad and the Mac, and the list iPadOS shows while ⌘ is held (plan S6): File, Edit and Format
 /// commands for the window in front. Each reaches that window's home screen or open editor through MenuBarTargets
-/// and is disabled when the window has none. Words in the app's own language (EN / AR).
+/// and is disabled when the window has none - and all of them while the account wall is up (no stored Xrero account:
+/// nothing opens, and an editor under the wall is not edited). Words in the app's own language (EN / AR).
 ///
 /// Bold / Italic / Underline and Find are listed WITHOUT a key equivalent: ⌘B / ⌘I / ⌘U belong to the editor view's
 /// own key commands (XRWebView.formatKey - the page does not reliably get them on iOS) and ⌘F to the web editor; a
@@ -150,43 +151,46 @@ final class MenuBarTargets: ObservableObject {
 struct XreroCommands: Commands {
     @ObservedObject var language: AppLanguage
     @ObservedObject var targets: MenuBarTargets
+    @ObservedObject var account: XreroAccount
 
     private var ar: Bool { language.isArabic }
+    /// the account wall is up (DocumentOpener holds a New / Open asked for anyway)
+    private var walled: Bool { !account.isSignedIn }
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
             Button(ar ? "مستند جديد" : "New Document") { Self.perform(.newDocument, targets) }
                 .keyboardShortcut("n", modifiers: .command)
-                .disabled(targets.home == nil)
+                .disabled(targets.home == nil || walled)
             Button(ar ? "جدول بيانات جديد" : "New Spreadsheet") { Self.perform(.newSpreadsheet, targets) }
                 .keyboardShortcut("n", modifiers: [.command, .option])
-                .disabled(targets.home == nil)
+                .disabled(targets.home == nil || walled)
             Button(ar ? "عرض تقديمي جديد" : "New Presentation") { Self.perform(.newPresentation, targets) }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
-                .disabled(targets.home == nil)
+                .disabled(targets.home == nil || walled)
             Divider()
             // files open from the home screen (one document at a time): not over an open editor
             Button(ar ? "فتح…" : "Open…") { Self.perform(.open, targets) }
                 .keyboardShortcut("o", modifiers: .command)
-                .disabled(targets.home == nil || targets.editor != nil)
+                .disabled(targets.home == nil || targets.editor != nil || walled)
             Divider()
             // no ⌘W: CI run 155 pressed it with this menu active and it never reached Close - on the iPhone the key
             // went on to the page, so another (system) ⌘W entry owns the key. A shortcut shown here that does not work
             // would over-promise.
             Button(ar ? "إغلاق" : "Close") { Self.perform(.close, targets) }
-                .disabled(targets.editor == nil)
+                .disabled(targets.editor == nil || walled)
         }
         CommandGroup(replacing: .textEditing) {
             Button(ar ? "بحث…" : "Find…") { Self.perform(.find, targets) }
-                .disabled(targets.editor == nil)
+                .disabled(targets.editor == nil || walled)
         }
         CommandGroup(replacing: .textFormatting) {
             Button(ar ? "غامق" : "Bold") { Self.perform(.bold, targets) }
-                .disabled(!(targets.editor?.formats ?? false))
+                .disabled(!(targets.editor?.formats ?? false) || walled)
             Button(ar ? "مائل" : "Italic") { Self.perform(.italic, targets) }
-                .disabled(!(targets.editor?.formats ?? false))
+                .disabled(!(targets.editor?.formats ?? false) || walled)
             Button(ar ? "تسطير" : "Underline") { Self.perform(.underline, targets) }
-                .disabled(!(targets.editor?.formats ?? false))
+                .disabled(!(targets.editor?.formats ?? false) || walled)
         }
     }
 

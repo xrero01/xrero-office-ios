@@ -6,9 +6,9 @@
 	<array>
 		<dict>
 			<key>FooterText</key>
-			<string>Free, open-source office suite for documents, spreadsheets and presentations. Arabic-first, works fully offline. Source code: https://github.com/xrero01/xrero-office-ios</string>
+			<string>Free, open-source office suite for documents, spreadsheets and presentations. Arabic-first; your documents stay on this device. Source code: https://github.com/xrero01/xrero-office-ios</string>
 			<key>Title</key>
-			<string>Xrero Office 20.2</string>
+			<string>Xrero Office 21.0</string>
 			<key>Type</key>
 			<string>PSGroupSpecifier</string>
 		</dict>

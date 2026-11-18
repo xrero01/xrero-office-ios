@@ -6,6 +6,11 @@ import UniformTypeIdentifiers
 /// create tiles, Browse files / Open a PDF, then the Recent files with real first-page thumbnails, swipe and context
 /// actions and search. A native inset-grouped List, so large titles, swipe actions, search, Dynamic Type, dark mode and
 /// right-to-left mirroring all come from the system instead of being imitated.
+///
+/// The Xrero account is REQUIRED (owner 18 Nov 2026, as on Windows and Mac 20.2): without a stored session the whole
+/// screen is the account wall (AccountView, mode .wall) - nothing to dismiss, no Home behind it - and requests that
+/// arrive meanwhile (Open in / Share, a Home Screen quick action, the menu bar's New / Open) wait in DocumentOpener and
+/// run once the user has signed in. 20.1-21.0 users who chose "Not now" meet the wall after the update.
 struct HomeScene: View {
     @StateObject private var opener = DocumentOpener()
     @ObservedObject private var recents = RecentFiles.shared
@@ -14,9 +19,6 @@ struct HomeScene: View {
     @ObservedObject private var language = AppLanguage.shared
     /// Home Screen quick actions (plan S10, QuickActions.swift): run here once Home is up
     @ObservedObject private var quick = QuickActionRouter.shared
-    /// The optional account has been offered and answered: "Not now" on the Home card, signing in, or (20.1) the
-    /// first-launch sheet. The key is the 20.1 one, so an update does not offer the account a second time.
-    @AppStorage("xr.welcomeShown") private var accountOffered = false
     /// Read-first opening (plan S2): files from Recent / Browse / Open-in open in reading view; off = for editing.
     @AppStorage(ReadingModel.settingKey) private var readingView = true
     @State private var showAccount = false
@@ -45,12 +47,60 @@ struct HomeScene: View {
     }
 
     var body: some View {
+        // one container whatever it shows, so the opener's anchor below stays the same view across sign-in / sign-out
+        ZStack {
+            if account.isSignedIn { home } else { AccountView(mode: .wall) }
+        }
+        .background(PresenterAnchor(opener: opener).frame(width: 0, height: 0))
+        .sheet(isPresented: $showAccount) { AccountView() }
+        .onChange(of: account.isSignedIn) { _, signedIn in
+            NSLog("XR account wall %@", signedIn ? "lifted" : "shown")
+            guard signedIn else {
+                // Home's own sheets went with Home: they must not come back by themselves after the next sign-in
+                showAbout = false; showTemplates = false; pickedTemplate = nil; share = nil
+                sharedScoped?.stopAccessingSecurityScopedResource()
+                sharedScoped = nil
+                return
+            }
+            // after this update has put Home on screen: what waited behind the wall (DocumentOpener, a quick action)
+            DispatchQueue.main.async {
+                opener.accountReady()
+                runQuickAction()
+            }
+        }
+        .alert(ar ? "تعذّر العثور على الملف" : "File not found", isPresented: Binding(
+            get: { missing != nil }, set: { if !$0 { missing = nil } })) {
+            Button(L.ok, role: .cancel) {}
+        } message: { Text(missing ?? "") }
+        .onAppear {
+            runQuickAction()
+            #if XR_AUTOTEST
+            autotestIncoming()
+            #endif
+        }
+        .onChange(of: quick.pending) { _, _ in runQuickAction() }
+        .onOpenURL { url in
+            if url.isFileURL { opener.openExternal(url) }        // "Open in Xrero Office" from Files / Share
+            #if XR_AUTOTEST
+            // CI only: the local test session (XreroAccount.startTestSession) while the wall is up
+            if url.scheme == "xrero-autotest" && url.host == "session" { XreroAccount.shared.startTestSession() }
+            #endif
+        }
+        .task {
+            // the account is required: a stored one is checked here (disabled / removed on xrero.com = the wall again;
+            // offline it is kept); without one the wall is already up
+            await XreroAccount.shared.refresh()
+            NSLog("XR start signedIn=%ld", XreroAccount.shared.isSignedIn ? 1 : 0)
+        }
+    }
+
+    /// Home itself: shown only with a stored account.
+    private var home: some View {
         NavigationStack {
             List {
                 if searching {
                     searchResults
                 } else {
-                    if !accountOffered && !account.isSignedIn { accountCard }
                     createSection
                     openSection
                     recentSection
@@ -85,30 +135,34 @@ struct HomeScene: View {
                 sharedScoped = nil
             }) { ShareSheet(items: [$0.url]) }
         }
-        .background(PresenterAnchor(opener: opener).frame(width: 0, height: 0))
-        .sheet(isPresented: $showAccount) { AccountView() }
-        .onChange(of: account.isSignedIn) { _, signedIn in if signedIn { accountOffered = true } }
-        .alert(ar ? "تعذّر العثور على الملف" : "File not found", isPresented: Binding(
-            get: { missing != nil }, set: { if !$0 { missing = nil } })) {
-            Button(L.ok, role: .cancel) {}
-        } message: { Text(missing ?? "") }
-        .onAppear { runQuickAction() }
-        .onChange(of: quick.pending) { _, _ in runQuickAction() }
-        .onOpenURL { url in
-            if url.isFileURL { opener.openExternal(url) }        // "Open in Xrero Office" from Files / Share
-        }
-        .task {
-            // no sign-in wall: the account is optional and never presented by itself (the Home card offers it)
-            await XreroAccount.shared.refresh()
-            NSLog("XR start accountOffered=%ld signedIn=%ld", accountOffered ? 1 : 0, XreroAccount.shared.isSignedIn ? 1 : 0)
-        }
     }
 
-    /// New document / spreadsheet / presentation or Scan, chosen on the app icon (plan S10).
+    /// New document / spreadsheet / presentation or Scan, chosen on the app icon (plan S10). Behind the account wall it
+    /// stays pending, and runs once the user has signed in.
     private func runQuickAction() {
+        guard account.isSignedIn else {
+            if quick.pending != nil { NSLog("XR account wall: quick action waits for sign-in") }
+            return
+        }
         guard let action = quick.take() else { return }
         if let kind = action.kind { opener.create(kind) } else { DocumentScanner.shared.start(opener: opener) }
     }
+
+    #if XR_AUTOTEST
+    /// CI only (AccountWallUITests): XR_HOME_INCOMING=<name> hands this Home a file "from another app" at launch - a
+    /// blank in the Inbox, the system's place for a copy from Mail / Share - through the same call as onOpenURL above.
+    private func autotestIncoming() {
+        guard let name = ProcessInfo.processInfo.environment["XR_HOME_INCOMING"],
+              let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+        let inbox = docs.appendingPathComponent("Inbox", isDirectory: true)
+        let url = inbox.appendingPathComponent(name)
+        guard !FileManager.default.fileExists(atPath: url.path) else { return }       // once per launch
+        try? FileManager.default.createDirectory(at: inbox, withIntermediateDirectories: true)
+        try? OfficeDocument.blank(OfficeKind(url: url) ?? .word).write(to: url, options: .atomic)
+        NSLog("XR autotest incoming %@", name)
+        opener.openExternal(url)
+    }
+    #endif
 
     // MARK: header menu
 
@@ -162,52 +216,6 @@ struct HomeScene: View {
     }
 
     // MARK: sections
-
-    /// The optional Xrero account, offered inline until answered, so new users reach their documents at once.
-    private var accountCard: some View {
-        Section {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: "person.crop.circle")
-                        .font(.system(size: 28))
-                        .foregroundStyle(Color.xrTeal)
-                        .accessibilityHidden(true)
-                    Text(ar ? "تستخدم Xrero على ويندوز؟ سجّل الدخول بنفس الحساب. اختياري."
-                            : "Use Xrero on Windows? Sign in to use the same account. Optional.")
-                        .font(.subheadline)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                // side by side; one above the other at accessibility text sizes, so neither word is cut (S12)
-                let buttons = typeSize.isAccessibilitySize
-                    ? AnyLayout(VStackLayout(spacing: 8)) : AnyLayout(HStackLayout(spacing: 8))
-                buttons {
-                    Button { showAccount = true } label: {
-                        Text(ar ? "تسجيل الدخول" : "Sign in")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(Color.xrOnTeal)
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .accessibilityIdentifier("xr-home-signin")
-                    Button {
-                        withAnimation(reduceMotion ? nil : Animation.default) { accountOffered = true }
-                    } label: {
-                        Text(ar ? "ليس الآن" : "Not now")
-                            .font(.subheadline.weight(.semibold))
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .accessibilityIdentifier("xr-home-signin-later")
-                }
-                .controlSize(.large)                                     // 44 pt+ touch targets
-            }
-            .tint(Color.xrTeal)
-            .padding(.vertical, 6)
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("xr-home-account-card")
-        }
-    }
 
     /// Three create tiles in one row (one column at accessibility text sizes, so the words never get cut).
     private var createSection: some View {
@@ -324,8 +332,8 @@ struct HomeScene: View {
             Text(ar ? "ملفاتك تبقى على جهازك" : "Your files stay on this device")
                 .font(.headline)
                 .multilineTextAlignment(.center)
-            Text(ar ? "مستندات وجداول وعروض تقديمية وملفات PDF، بالعربية والإنجليزية، بدون إنترنت. الملفات التي تفتحها ستظهر هنا."
-                    : "Documents, spreadsheets, presentations and PDF, in Arabic and English, offline. Files you open will appear here.")
+            Text(ar ? "مستندات وجداول وعروض تقديمية وملفات PDF، بالعربية والإنجليزية. الملفات التي تفتحها ستظهر هنا."
+                    : "Documents, spreadsheets, presentations and PDF, in Arabic and English. Files you open will appear here.")
                 .font(.subheadline).foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)

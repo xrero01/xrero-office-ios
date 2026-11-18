@@ -44,8 +44,8 @@ struct AboutView: View {
                 Text(ar ? "الإصدار \(AppBuild.version) (\(AppBuild.build))" : "Version \(AppBuild.version) (\(AppBuild.build))")
                     .font(.subheadline).foregroundStyle(.secondary)
                     .accessibilityIdentifier("xr-about-version")
-                Text(ar ? "حزمة مكتبية مجانية ومفتوحة المصدر للمستندات والجداول والعروض التقديمية وملفات PDF. العربية أولًا، وتعمل بالكامل دون إنترنت."
-                        : "Free, open-source office suite for documents, spreadsheets, presentations and PDF. Arabic-first, works fully offline.")
+                Text(ar ? "حزمة مكتبية مجانية ومفتوحة المصدر للمستندات والجداول والعروض التقديمية وملفات PDF. العربية أولًا، ومستنداتك تبقى على هذا الجهاز."
+                        : "Free, open-source office suite for documents, spreadsheets, presentations and PDF. Arabic-first, and your documents stay on this device.")
                     .font(.footnote).foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }
@@ -131,8 +131,8 @@ struct AboutView: View {
 
     private var privacy: some View {
         Section(ar ? "الخصوصية" : "Privacy") {
-            Text(ar ? "تُفتح مستنداتك وتُحرَّر وتُحفظ على هذا الجهاز ولا تُرفع إلى أي خادم. حساب Xrero الاختياري يحفظ اسمك وبريدك الإلكتروني فقط."
-                    : "Your documents are opened, edited and saved on this device; they are never uploaded. The optional Xrero account holds only your name and email.")
+            Text(ar ? "تُفتح مستنداتك وتُحرَّر وتُحفظ على هذا الجهاز ولا تُرفع إلى أي خادم. حساب Xrero المجاني الذي تسجّل الدخول به يحفظ اسمك وبريدك الإلكتروني فقط."
+                    : "Your documents are opened, edited and saved on this device; they are never uploaded. The free Xrero account you sign in with holds only your name and email.")
                 .font(.subheadline)
             Link(ar ? "سياسة الخصوصية" : "Privacy Policy", destination: URL(string: "https://xrero.com/privacy")!)
                 .accessibilityIdentifier("xr-about-privacy")

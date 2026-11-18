@@ -14,6 +14,11 @@ import UniformTypeIdentifiers
 /// asc_nativeGetFile3 + base64 serialisation of a 200-page .docx after 5 s idle, with the Tier-7 typing gate on a real
 /// iPhone - because a large save can hitch the next keystroke. Until then a document is saved by Save, on close and
 /// when the app goes to the background.
+///
+/// The Xrero account is required (owner 18 Nov 2026): without a stored session nothing opens here. Every entry point -
+/// the Home tiles and templates, Browse / Open a PDF, Open in / Share (openExternal), Home Screen quick actions and Scan
+/// (both through create / open), the menu bar's File > New / Open, Recent - is held instead (one request per window, the
+/// newest wins) and runs once the user has signed in on the wall (accountReady(), from HomeScene).
 final class DocumentOpener: NSObject, ObservableObject, UIDocumentPickerDelegate {
     /// How a file opens (plan S2): `.edit` for a document the app has just made (a blank or a template), `.existing`
     /// for any other file - a Word document or PDF then opens in reading state unless the setting is off or the file
@@ -57,6 +62,27 @@ final class DocumentOpener: NSObject, ObservableObject, UIDocumentPickerDelegate
         return lastRoot
     }
 
+    // MARK: the account wall
+
+    /// What this window was asked to open while the account wall was up.
+    private var heldForAccount: (() -> Void)?
+
+    /// true (and `request` kept for later) when there is no account: the wall is up and nothing may open yet.
+    private func walled(_ what: String, _ request: @escaping () -> Void) -> Bool {
+        guard !XreroAccount.signedInNow else { return false }
+        heldForAccount = request
+        NSLog("XR account wall: %@ waits for sign-in", what)
+        return true
+    }
+
+    /// The user has signed in (HomeScene): the request that waited behind the wall runs now.
+    func accountReady() {
+        guard XreroAccount.signedInNow, let request = heldForAccount else { return }
+        heldForAccount = nil
+        NSLog("XR account wall: running the request that waited")
+        request()
+    }
+
     func attach(_ vc: UIViewController) {
         anchor = vc
         // the menu bar on iPad / Mac (plan S6): File > New Document / Spreadsheet / Presentation and Open… act on this
@@ -68,12 +94,14 @@ final class DocumentOpener: NSObject, ObservableObject, UIDocumentPickerDelegate
     // MARK: entry points from the home screen
 
     func create(_ kind: OfficeKind) {
+        if walled("new \(kind.rawValue)", { [weak self] in self?.create(kind) }) { return }
         do { open(remember(try NewDocuments.create(kind)), as: .edit) }
         catch { alert(L.cannotCreate, error.localizedDescription) }
     }
 
     /// A new file from a gallery template (plan S8), opened in the editor at once.
     func create(from template: TemplateManifest.Template, lang: String) {
+        if walled("template", { [weak self] in self?.create(from: template, lang: lang) }) { return }
         do { open(remember(try NewDocuments.create(from: template, lang: lang)), as: .edit) }
         catch { alert(L.cannotCreate, error.localizedDescription) }
     }
@@ -84,6 +112,7 @@ final class DocumentOpener: NSObject, ObservableObject, UIDocumentPickerDelegate
     /// The file is opened where it is (asCopy: false - no copy in the app's folder), so its saves go back into it;
     /// open() holds its security-scoped access while the editor is up, and Recent keeps a bookmark to it.
     func browse(_ types: [UTType] = [.docx, .xlsx, .pptx, .pdf]) {
+        if walled("browse", { [weak self] in self?.browse(types) }) { return }
         guard let root, !editorOpen else { return }
         let picker = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: false)
         picker.allowsMultipleSelection = false
@@ -109,6 +138,8 @@ final class DocumentOpener: NSObject, ObservableObject, UIDocumentPickerDelegate
     /// editor says so on the first edit. If the copy cannot be moved, nothing opens (an editor writing into the
     /// Inbox would lose the edits).
     func openExternal(_ url: URL) {
+        // behind the wall the system's copy stays where it is (the Inbox) until it is opened after the sign-in
+        if walled("open-in " + url.lastPathComponent, { [weak self] in self?.openExternal(url) }) { return }
         guard IncomingFiles.isIncomingCopy(url) else { open(url); return }
         do {
             open(try IncomingFiles.importCopy(url), importedCopy: true)
@@ -268,6 +299,9 @@ final class DocumentOpener: NSObject, ObservableObject, UIDocumentPickerDelegate
     /// file the app has just made, else read-first (ReadingModel.forOpening).
     func open(_ url: URL, importedCopy: Bool = false, as how: OpenAs = .existing) {
         NSLog("XR open %@ editorOpen=%ld", url.lastPathComponent, editorOpen ? 1 : 0)
+        if walled("open " + url.lastPathComponent, { [weak self] in self?.open(url, importedCopy: importedCopy, as: how) }) {
+            return
+        }
         guard let root, !editorOpen else { pending = (url, importedCopy, how); return }
         guard let kind = OfficeKind(url: url) else { alert(L.cannotOpen, url.lastPathComponent); return }
         editorOpen = true
@@ -314,7 +348,7 @@ final class DocumentOpener: NSObject, ObservableObject, UIDocumentPickerDelegate
             host.modalPresentationStyle = .fullScreen
             self.editorHost = host
             self.editorPresenter = root
-            if let shown = root.presentedViewController {            // e.g. the account card: replace it with the editor
+            if root.presentedViewController != nil {                 // e.g. the account sheet: replace it with the editor
                 root.dismiss(animated: false) { root.present(host, animated: true) }
             } else {
                 root.present(host, animated: true)

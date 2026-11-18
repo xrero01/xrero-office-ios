@@ -127,6 +127,14 @@ struct EditorScreen: View {
             .sheet(isPresented: $showAccount) { AccountView() }
             .sheet(isPresented: $showAbout) { AboutSheet() }
             .onChange(of: account.info) { _, _ in controller.syncAccount(account.webValue) }
+            // the account went away (Sign out, Delete account, refused by xrero.com): save what is on screen and put the
+            // keyboard away - EditorHost covers the editor with the account wall
+            .onChange(of: account.isSignedIn) { _, signedIn in
+                guard !signedIn else { return }
+                NSLog("XR account wall over the editor: saving")
+                controller.hideKeyboard()
+                controller.save(onlyIfModified: true) { NSLog("XR account wall over the editor: saved") }
+            }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .background { controller.save() }     // never lose typing when the app is left
             }
@@ -178,7 +186,7 @@ struct EditorScreen: View {
             tooLarge = false                    // the editor came back after all (e.g. reopened in the other language)
             reading.apply(controller)           // plan S2: the page (also a reloaded one) takes the current mode
         } else if cmd == "xrero:account" || cmd == "xrero:signin" {
-            showAccount = true
+            if account.isSignedIn { showAccount = true }    // signed out: the wall is already over the editor
         } else if cmd == "paste-failed" {
             showToast(L.cannotPaste)
         } else if cmd == "export-failed" {

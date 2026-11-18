@@ -63,7 +63,7 @@ def main():
     os.makedirs(OUT, exist_ok=True)
     write("Root", [
         group("Xrero Office " + VERSION, "Free, open-source office suite for documents, spreadsheets and presentations. "
-              "Arabic-first, works fully offline. Source code: " + SOURCE),
+              "Arabic-first; your documents stay on this device. Source code: " + SOURCE),
         child("Licences", "Licences"),
     ])
     specs = [

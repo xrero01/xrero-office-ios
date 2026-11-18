@@ -3,8 +3,8 @@
 <plist version="1.0">
 <dict>
 	<!-- Xrero Office edits files on the device only; documents are never uploaded. No tracking.
-	     Collected ONLY when the user chooses to sign in to the optional Xrero account: name + email (the account itself,
-	     on xrero.com), linked to that account, used for the account only. -->
+	     Collected for the Xrero account, which the app requires (sign in, or create the free account, on the account
+	     wall): name + email (the account itself, on xrero.com), linked to that account, used for the account only. -->
 	<key>NSPrivacyTracking</key>
 	<false/>
 	<key>NSPrivacyTrackingDomains</key>
