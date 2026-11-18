@@ -1654,6 +1654,147 @@ final class EditorUITests: XCTestCase {
         checkChrome(app, "pdf")
     }
 
+    private var pfRun = 0
+    /// The Autotest "pdffield" hook: a form field's centre (web view points) and {value, active, inForm, inView,
+    /// fieldAp, keyTick, firstInput}.
+    private func pdfField(_ app: XCUIApplication, _ name: String) -> (CGPoint?, [String: Any]) {
+        pfRun += 1
+        let tag = "pf\(pfRun):"
+        autotest("pdffield?n=\(pfRun)&name=\(name)")
+        let s = waitState(app, prefix: tag, timeout: 15)
+        guard s.hasPrefix(tag) else { return (nil, ["error": s]) }
+        let body = String(s.dropFirst(tag.count))
+        let parts = body.split(separator: "|", maxSplits: 1).map(String.init)
+        var info: [String: Any] = ["raw": String(body.prefix(200))]
+        if parts.count == 2, let o = (try? JSONSerialization.jsonObject(with: Data(parts[1].utf8))) as? [String: Any] { info = o }
+        let xy = parts[0].split(separator: ",").compactMap { Double($0) }
+        return (xy.count == 2 ? CGPoint(x: xy[0], y: xy[1]) : nil, info)
+    }
+
+    /// PDF forms (21.0): what is typed into a form field must be in the SAVED page - other apps (Files, Mail, Preview,
+    /// Acrobat) draw a field from its saved appearance, not from its value. tests/ar_form_embedded.pdf: Arabic in a
+    /// field whose font is an embedded Arabic font (XR-FIELD-AP: the joined letters saved as outlines), a Latin
+    /// reference number in the same font (scripts/patch_field_ap_ios.py) and Arabic in a Helvetica field (drawn by x2t
+    /// with the app's fonts: xr-host.js fontUrls). tests/ar_booking_form.pdf, filled as with a hardware keyboard: Tab
+    /// from field to field, the date typed key by key (every digit must arrive), Tab to the first check box and Return
+    /// (ticked, and still ticked in the saved file); a second check box ticked by a tap. check_saved.py (pdf_form) reads
+    /// the saved files outside the app. Log lines "form-gate <file> <check>: PASS|FAIL|INFO <detail>".
+    func testPdfFormFields() throws {
+        let env = ProcessInfo.processInfo.environment
+        guard let form = env["XR_FORM_B64"], let booking = env["XR_BOOK_B64"] else { throw XCTSkip("no form PDFs passed") }
+        let keep = continueAfterFailure
+        continueAfterFailure = true
+        defer { continueAfterFailure = keep }
+        let client = "\u{0645}\u{0624}\u{0633}\u{0633}\u{0629} \u{0627}\u{0644}\u{0625}\u{0645}\u{0627}\u{0631}\u{0627}\u{062A} \u{0644}\u{0644}\u{0645}\u{0644}\u{0627}\u{062D}\u{0638}\u{0627}\u{062A}"   // مؤسسة الإمارات للملاحظات
+        let sharjah = "\u{0627}\u{0644}\u{0634}\u{0627}\u{0631}\u{0642}\u{0629}"            // الشارقة
+        let projects = "\u{0627}\u{0644}\u{0645}\u{0634}\u{0627}\u{0631}\u{064A}\u{0639}"   // المشاريع
+
+        func run(_ file: String, _ b64: String, _ body: (XCUIApplication, (String, Bool, String, Bool) -> Void) -> Void) {
+            let app = XCUIApplication()
+            app.launchArguments = ["-xr.lang", "ar"]
+            app.launchEnvironment = ["XR_DOC_B64": b64, "XR_DOC_NAME": file, "XR_LANG": "ar"]
+            app.launch()
+            var notes: [String] = []
+            // hard = an XCTest failure when it does not pass; INFO lines are recorded only
+            func gate(_ name: String, _ ok: Bool, _ detail: String, _ hard: Bool) {
+                let line = "form-gate \(file) \(name): \(ok ? "PASS" : (hard ? "FAIL" : "INFO")) \(detail)"
+                print("XR " + line)
+                notes.append(line.replacingOccurrences(of: "\n", with: " "))
+                if hard { XCTAssertTrue(ok, line) }
+            }
+            let ready = waitState(app, prefix: "ready", timeout: 120)
+            gate("editor-ready", ready == "ready", ready, true)
+            if ready == "ready" {
+                sleep(3)
+                body(app, gate)
+                let saved = save(app)
+                gate("save", saved.hasPrefix("saved"), saved, true)
+                shot(app, "form-\(file)-saved")
+            }
+            autotest("note", notes.joined(separator: "\n"))
+            app.terminate()
+        }
+        func tapAt(_ app: XCUIApplication, _ p: CGPoint) {
+            app.webViews.firstMatch.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: p.x, dy: p.y)).tap()
+        }
+        /// taps the field (once more if the first tap did not start editing it, as a person would) -> (editing, info)
+        func edit(_ app: XCUIApplication, _ name: String) -> (Bool, [String: Any]) {
+            let first = pdfField(app, name)
+            var info = first.1
+            guard let p = first.0 else { return (false, info) }
+            for _ in 0..<2 {
+                tapAt(app, p)
+                _ = app.keyboards.firstMatch.waitForExistence(timeout: 5)
+                sleep(1)
+                (_, info) = pdfField(app, name)
+                if info["active"] as? String == name && info["inForm"] as? Bool == true { return (true, info) }
+            }
+            return (false, info)
+        }
+        func value(_ app: XCUIApplication, _ name: String) -> String {
+            let v = pdfField(app, name).1["value"]
+            return v.map { "\($0)" } ?? "?"
+        }
+
+        // 1) the embedded-font form: Arabic, Latin + digits in the embedded Arabic font, Arabic in a Helvetica field
+        run("xr-form-embedded.pdf", form) { app, gate in
+            for (name, text) in [("client", client), ("ref", "XO-2026-014"), ("office", sharjah)] {
+                let (on, info) = edit(app, name)
+                gate("\(name)-editing", on, "\(info)", true)
+                guard on else { continue }
+                typeSlowly(app, text)
+                sleep(1)
+                let got = value(app, name)
+                gate("\(name)-typed", got == text, "value=\(got)", true)
+            }
+            let (_, info) = pdfField(app, "client")
+            gate("field-ap-shim", info["fieldAp"] as? Bool == true, "XR-FIELD-AP in the editor: \(info["fieldAp"] ?? "?")", true)
+            shot(app, "form-embedded-typed")
+        }
+
+        // 2) the booking form: Tab between fields, the date key by key, Tab to a check box + Return, a tap on another
+        run("xr-form-booking.pdf", booking) { app, gate in
+            let (on, info) = edit(app, "department")
+            gate("department-editing", on, "\(info)", true)
+            guard on else { return }
+            typeSlowly(app, projects)
+            for (name, text) in [("office", sharjah), ("date", "24/11/2026"), ("attendees", "12")] {
+                app.typeKey(XCUIKeyboardKey.tab.rawValue, modifierFlags: [])
+                sleep(1)
+                var (_, i) = pdfField(app, name)
+                var how = "Tab"
+                if !(i["active"] as? String == name && i["inForm"] as? Bool == true) {
+                    // the hardware Tab did not reach the next field here: tap it (recorded), then type
+                    let r = edit(app, name); i = r.1; how = r.0 ? "tap (Tab did not move: active=\(i["active"] ?? "?"))" : "neither"
+                }
+                gate("\(name)-reached", how == "Tab", how, false)
+                typeSlowly(app, text)
+                sleep(1)
+                let got = value(app, name)
+                gate("\(name)-typed", got == text, "value=\(got) via \(how) firstInput=\(i["firstInput"] ?? "?")", true)
+            }
+            // Tab to the first check box, then Return: the keyboard way to tick it
+            app.typeKey(XCUIKeyboardKey.tab.rawValue, modifierFlags: [])
+            sleep(1)
+            let (_, b) = pdfField(app, "display")
+            let onBox = b["active"] as? String == "display"
+            gate("display-reached", onBox, "active=\(b["active"] ?? "?") inForm=\(b["inForm"] ?? "?")", false)
+            if onBox {
+                app.typeKey(XCUIKeyboardKey.return.rawValue, modifierFlags: [])
+                sleep(2)
+                let (_, a) = pdfField(app, "display")
+                gate("display-return-ticked", "\(a["value"] ?? "?")" == "1" || a["value"] as? Bool == true,
+                     "value=\(a["value"] ?? "?") keyTick=\(a["keyTick"] ?? "?")", false)
+            }
+            // a check box ticked by a tap (the touch way)
+            let (vp, _) = pdfField(app, "video")
+            if let vp { tapAt(app, vp); sleep(2) }
+            let (_, v) = pdfField(app, "video")
+            gate("video-tap-ticked", "\(v["value"] ?? "?")" == "1" || v["value"] as? Bool == true, "value=\(v["value"] ?? "?")", false)
+            shot(app, "form-booking-filled")
+        }
+    }
+
     /// Swipes until `e` is on screen (lists are lazy: rows below the fold are not in the tree yet).
     private func reveal(_ app: XCUIApplication, _ e: XCUIElement, up: Bool = true) -> Bool {
         for _ in 0..<6 {

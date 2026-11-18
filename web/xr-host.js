@@ -698,9 +698,20 @@
                            formatTo: opts.formatTo || 0 });
     });
   }
-  // the editors' font files as absolute URLs (for x2t when it has to draw text: PDF editing)
+  // the editors' font files as absolute URLs (for x2t when it has to draw text: PDF editing). 21.0: the font engine
+  // reads window.__fonts_files (AllFonts.js) once and then DELETES it, so at Save time the list was empty and x2t got
+  // no fonts - text typed into PDF form fields was saved without its drawing (the value was there, but every other app
+  // showed an empty field). The list is kept here as AllFonts.js sets it (this script runs first, at document start).
+  var keptFontIds = null;
+  try {
+    if (!Object.getOwnPropertyDescriptor(window, '__fonts_files')) {
+      Object.defineProperty(window, '__fonts_files', { configurable: true, enumerable: true,
+        get: function () { return keptFontIds; },
+        set: function (v) { keptFontIds = v; } });
+    }
+  } catch (e) {}
   function fontUrls() {
-    var ids = window.__fonts_files || [];
+    var ids = window.__fonts_files || keptFontIds || [];
     return ids.map(function (id) { return new URL(H.fontUrl(id), location.href).href; });
   }
 

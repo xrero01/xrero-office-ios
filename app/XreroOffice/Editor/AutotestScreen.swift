@@ -263,6 +263,30 @@ struct AutotestScreen: View {
                     state = "pdf\(n):" + ((r as? String) ?? ("{\"error\":\"" + (e ?? "?") + "\"}"))
                 }
             }
+            if url.host == "pdffield" {         // PDF form gate (21.0): a form field's centre in web view points, its value,
+                                                // which field is being edited, and the 21.0 form shims' counters:
+                                                // "pf<n>:<x>,<y>|{json}" ("pf<n>:none ..." when there is no such field)
+                let q = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+                let n = q.first { $0.name == "n" }?.value ?? "0"
+                let field = q.first { $0.name == "name" }?.value ?? ""
+                let arg = String(data: (try? JSONSerialization.data(withJSONObject: [field])) ?? Data("[\"\"]".utf8), encoding: .utf8) ?? "[\"\"]"
+                controller.call("""
+                var name=\(arg)[0],a=window.Asc&&Asc.editor;if(!a||!a.getPDFDoc)return 'none no pdf editor';
+                var doc=a.getPDFDoc(),v=a.getDocumentRenderer(),o={};
+                var fe=window.frameElement,fr=fe?fe.getBoundingClientRect():{left:0,top:0};
+                var det=v.getPageLikeDetector(0),rp=(AscCommon.AscBrowser&&AscCommon.AscBrowser.retinaPixelRatio)||1;
+                var cv=v.canvas.getBoundingClientRect(),W=v.file.pages[0].W,sc=(det.w/rp)/W,pl=cv.left+det.x/rp,pt=cv.top+det.y/rp;
+                var act=doc.activeForm;o.active=act?act.GetFullName():'';o.inForm=!!(act&&act.IsInForm&&act.IsInForm());
+                o.fieldAp=typeof AscCommon.xrFieldApTg==='function';o.keyTick=window.__xrPdfKeyTick||0;
+                o.firstInput=[window.__xrFirstInputHeld||0,window.__xrFirstInputRetried||0,window.__xrFirstInputDropped||0,window.__xrFieldFontSync||0];
+                var f=doc.widgets.filter(function(x){return x.GetFullName()===name;})[0];
+                if(!f)return 'none no field '+name+'|'+JSON.stringify(o);
+                var r=f.GetRect();o.value=f.IsChecked?f.IsChecked():f.GetValue();
+                var x=fr.left+pl+(r[0]+r[2])/2*sc,y=fr.top+pt+(r[1]+r[3])/2*sc;
+                o.inView=x>=fr.left+cv.left&&x<=fr.left+cv.right&&y>=fr.top+cv.top&&y<=fr.top+cv.bottom;
+                return Math.round(x)+','+Math.round(y)+'|'+JSON.stringify(o);
+                """) { r, e in state = "pf\(n):" + ((r as? String) ?? ("none " + (e ?? "?"))) }
+            }
             if url.host == "pdfsigdelete" { SignatureStore.delete() }   // PDF bar gate: start without a saved signature
             if url.host == "bridge" { checkBridge() }
             if url.host == "contract" { checkContract() }

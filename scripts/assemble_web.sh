@@ -24,6 +24,9 @@ mkdir -p "$OUT/x2t"
 cp "$ROOT/web/x2t-worker.js" "$ROOT/vendor/x2t-wasm/x2t.js" "$ROOT/vendor/x2t-wasm/x2t.wasm" "$OUT/x2t/"
 cp -R "$ROOT/fonts-gen" "$OUT/fonts-gen"
 python3 "$ROOT/scripts/patch_amd_deps.py" "$OUT/editors/web-apps"
+# 21.0: PDF form fields in an embedded font - every glyph saved as its outline (x2t WebAssembly has no access to the
+# PDF's own fonts; see the script)
+python3 "$ROOT/scripts/patch_field_ap_ios.py" "$OUT/editors"
 # 20.3 (M6): the Windows build paints its modern-theme header in the Office kind colours with white text
 # (/*XR-HEADER*/ ... /*XR-HEADER-END*/ in each editor's app.css). The iPhone / iPad chrome is neutral, with Xrero's
 # own kind accents (xr-host.js neutralChrome) - drop that block from this bundle only; Windows is unchanged.

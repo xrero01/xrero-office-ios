@@ -33,6 +33,8 @@ jobs:
           xcodebuild -version
           brew install xcodegen >/dev/null
           python3 -m pip install --quiet --break-system-packages pillow pypdf 2>/dev/null || true
+          # PyMuPDF (21.0 PDF form check): draws the saved form fields outside the app; check_saved.py falls back to pypdf
+          python3 -m pip install --quiet --break-system-packages pymupdf 2>/dev/null || echo "pymupdf not installed (pypdf checks only)"
           xcrun simctl list devices available | grep -E "iPhone|iPad" | head -20
 
       - name: Arabic blank templates are the generated right-to-left ones
@@ -85,6 +87,9 @@ jobs:
           # the reading view (plan S2): 6-page files, so its page capsule / Go to Page / scrolling are really exercised
           export TEST_RUNNER_XR_READ_DOCX_B64=$(base64 -i tests/reading_6p.docx | tr -d '\n')
           export TEST_RUNNER_XR_READ_PDF_B64=$(base64 -i tests/reading_6p.pdf | tr -d '\n')
+          # PDF forms (21.0, testPdfFormFields): an embedded-Arabic-font form and a booking form with check boxes
+          export TEST_RUNNER_XR_FORM_B64=$(base64 -i tests/ar_form_embedded.pdf | tr -d '\n')
+          export TEST_RUNNER_XR_BOOK_B64=$(base64 -i tests/ar_booking_form.pdf | tr -d '\n')
           TESTS="-only-testing:XreroOfficeUITests/EditorUITests -only-testing:XreroOfficeUITests/TemplateGalleryUITests -only-testing:XreroOfficeUITests/ScanQuickActionUITests -only-testing:XreroOfficeUITests/OpenInUITests"
           if [ -n "$ONLY_TESTS" ]; then TESTS=""; for T in $ONLY_TESTS; do TESTS="$TESTS -only-testing:XreroOfficeUITests/$T"; done; fi
           echo "tests: $TESTS"
@@ -94,7 +99,7 @@ jobs:
             ( while true; do xcrun simctl io $DEV screenshot "out/shots/$DEV-$(date +%H%M%S).png" >/dev/null 2>&1; sleep 6; done ) & SHOOT=$!
             # out/ui-<device>.log: the whole filtered output (check_saved.py lists every skipped test and retried tap)
             xcodebuild test-without-building -project app/XreroOffice.xcodeproj -scheme XreroOffice -configuration Autotest \
-              -destination "id=$DEV" -derivedDataPath dd -resultBundlePath "out/ui-$DEV.xcresult"               $TESTS 2>&1 | grep -E "Test Case|error|passed|failed|XCTAssert|XR save path|XR save-as path|XR web buttons|XR geom|XR rotate|XR bridge|XR contract|XR chrome|XR touch|XR bar|XR menu|XR title menu|XR sheet|XR template|XR pdf-gate|XR quick|XR scan|XR springboard|XR open-in|XR a11y|XR first line|XR files|XR read|XR window|XR crash" | tee "out/ui-$DEV.log" | tail -1000
+              -destination "id=$DEV" -derivedDataPath dd -resultBundlePath "out/ui-$DEV.xcresult"               $TESTS 2>&1 | grep -E "Test Case|error|passed|failed|XCTAssert|XR save path|XR save-as path|XR web buttons|XR geom|XR rotate|XR bridge|XR contract|XR chrome|XR touch|XR bar|XR menu|XR title menu|XR sheet|XR template|XR pdf-gate|XR quick|XR scan|XR springboard|XR open-in|XR a11y|XR first line|XR files|XR read|XR window|XR crash|XR form" | tee "out/ui-$DEV.log" | tail -1000
             R=${PIPESTATUS[0]}; [ $R -ne 0 ] && RC=$R
             # the tail above keeps only the last tests of a full run: every test's result (and the Files gate, plan S9)
             # once more, in one short list - the whole filtered output is in the evidence zip (out/ui-<device>.log)
