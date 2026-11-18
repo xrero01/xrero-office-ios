@@ -4,7 +4,7 @@ on:
     inputs:
       editors:
         description: release tag holding ios-editors-<version>.zip
-        default: "ios-editors-20.0.10"
+        default: "ios-editors-21.0"
       only:
         description: "optional, for a quick round: run only these tests (space-separated Class or Class/testName); the gate needs the full run"
         default: ""
