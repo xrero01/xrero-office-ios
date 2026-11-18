@@ -149,14 +149,19 @@ struct HomeScene: View {
     }
 
     #if XR_AUTOTEST
+    /// XR_HOME_INCOMING was handed over in this launch: Home's onAppear runs again whenever a full-screen editor over
+    /// it closes, and the Inbox copy has been moved out by then (CI run 44286726554 opened it a second time).
+    private static var autotestIncomingDone = false
+
     /// CI only (AccountWallUITests): XR_HOME_INCOMING=<name> hands this Home a file "from another app" at launch - a
     /// blank in the Inbox, the system's place for a copy from Mail / Share - through the same call as onOpenURL above.
     private func autotestIncoming() {
-        guard let name = ProcessInfo.processInfo.environment["XR_HOME_INCOMING"],
+        guard !Self.autotestIncomingDone, let name = ProcessInfo.processInfo.environment["XR_HOME_INCOMING"],
               let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+        Self.autotestIncomingDone = true                                                // once per launch
         let inbox = docs.appendingPathComponent("Inbox", isDirectory: true)
         let url = inbox.appendingPathComponent(name)
-        guard !FileManager.default.fileExists(atPath: url.path) else { return }       // once per launch
+        guard !FileManager.default.fileExists(atPath: url.path) else { return }
         try? FileManager.default.createDirectory(at: inbox, withIntermediateDirectories: true)
         try? OfficeDocument.blank(OfficeKind(url: url) ?? .word).write(to: url, options: .atomic)
         NSLog("XR autotest incoming %@", name)

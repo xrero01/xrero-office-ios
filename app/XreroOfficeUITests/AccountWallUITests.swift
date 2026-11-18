@@ -89,6 +89,13 @@ final class AccountWallUITests: XCTestCase {
         XCUIDevice.shared.system.open(URL(string: "xrero-autotest://session")!)
     }
 
+    /// A button of an alert: SwiftUI puts each alert action into the tree twice (a Button inside a Button with the same
+    /// identifier and label - CI run 44286726554: "Multiple matching elements found"), so the first match is tapped.
+    private func alertButton(_ alert: XCUIElement, _ id: String, _ label: String) -> XCUIElement {
+        let byId = alert.buttons.matching(identifier: id).firstMatch
+        return byId.exists ? byId : alert.buttons.matching(NSPredicate(format: "label == %@", label)).firstMatch
+    }
+
     /// The editor is up: its title shows and its second line no longer says Opening…
     private func waitEditor(_ app: XCUIApplication, timeout: TimeInterval = 120) -> String? {
         let title = app.staticTexts["xr-bar-title"], status = app.staticTexts["xr-bar-status"]
@@ -248,7 +255,10 @@ final class AccountWallUITests: XCTestCase {
         app.buttons["xr-acct-submit"].tap()
         let answer = el(app, "xr-acct-error")
         XCTAssertTrue(answer.waitForExistence(timeout: 40), "no answer from xrero.com to the made-up sign-in")
-        let text = answer.label
+        // a Label: its icon (VoiceOver "Error") and its text carry the identifier both (CI run 44286726554 read the
+        // icon alone) - every part of it is read
+        let text = app.descendants(matching: .any).matching(identifier: "xr-acct-error").allElementsBoundByIndex
+            .map(\.label).joined(separator: " | ")
         print("XR account server answer (\(lang)): \(text)")
         shot(app, "signin-answer-\(lang)")
         XCTAssertFalse(text.contains("HTTP") || text.range(of: #"\b[45]\d\d\b"#, options: .regularExpression) != nil,
@@ -300,7 +310,7 @@ final class AccountWallUITests: XCTestCase {
         XCTAssertTrue(alert.waitForExistence(timeout: 5), "Delete account asked nothing (\(lang))")
         XCTAssertTrue(alert.secureTextFields.firstMatch.exists, "no password field in the Delete account alert (\(lang))")
         shot(app, "session-delete-asks-\(lang)")
-        alert.buttons[ar ? "إلغاء" : "Cancel"].tap()
+        alertButton(alert, "xr-acct-delete-cancel", ar ? "إلغاء" : "Cancel").tap()
         XCTAssertTrue(waitGone(alert, 5), "the Delete account alert did not close on Cancel")
         XCTAssertTrue(signout.waitForExistence(timeout: 3), "a cancelled Delete signed out (\(lang))")
 
@@ -328,16 +338,17 @@ final class AccountWallUITests: XCTestCase {
 
         // 6) Home > ⋯ > Account > Delete account > Delete permanently (local session: nothing sent) -> the wall
         closeEditor(app)
-        app.buttons["xr-home-more"].tap()
-        let homeAccount = app.buttons["xr-home-account"]
+        app.buttons["xr-home-more"].firstMatch.tap()
+        let homeAccount = app.buttons["xr-home-account"].firstMatch
         XCTAssertTrue(homeAccount.waitForExistence(timeout: 5), "no Account in Home's ⋯")
         homeAccount.tap()
-        let delete2 = app.buttons["xr-acct-delete"]
+        let delete2 = app.buttons["xr-acct-delete"].firstMatch
         XCTAssertTrue(delete2.waitForExistence(timeout: 10), "no Delete account from Home (\(lang))")
         delete2.tap()
         let alert2 = app.alerts.firstMatch
         XCTAssertTrue(alert2.waitForExistence(timeout: 5), "Delete account asked nothing from Home (\(lang))")
-        alert2.buttons[ar ? "حذف نهائي" : "Delete permanently"].tap()
+        alertButton(alert2, "xr-acct-delete-confirm", ar ? "حذف نهائي" : "Delete permanently").tap()
+        XCTAssertTrue(waitGone(el(app, "xr-acct-sheet"), 10), "the account sheet stayed after Delete account")
         assertWall(app, "after Delete account \(lang)", home: true)
         let notice = el(app, "xr-acct-notice")
         XCTAssertTrue(notice.waitForExistence(timeout: 10), "the wall does not say the account was deleted (\(lang))")
