@@ -8,14 +8,25 @@ final class ScanQuickActionUITests: XCTestCase {
 
     override func setUp() { continueAfterFailure = false }
 
+    /// Home with a local stored session (the account is required: AccountWallUITests covers the wall itself).
     private func launch(_ env: [String: String], lang: String = "en") -> XCUIApplication {
         let app = XCUIApplication()
         var e = env
         e["XR_HOME"] = "1"
+        e["XR_TEST_SESSION"] = "1"
         app.launchEnvironment = e
-        app.launchArguments = ["-xr.lang", lang, "-xr.welcomeShown", "YES"]
+        app.launchArguments = ["-xr.lang", lang]
         app.launch()
         return app
+    }
+
+    private func waitGone(_ e: XCUIElement, _ timeout: TimeInterval) -> Bool {
+        let end = Date().addingTimeInterval(timeout)
+        while Date() < end {
+            if !e.exists { return true }
+            usleep(300_000)
+        }
+        return !e.exists
     }
 
     /// The editor's title in its top bar, once the new file is open.
@@ -148,6 +159,22 @@ final class ScanQuickActionUITests: XCTestCase {
         XCTAssertEqual(found, [true, true, true, true], "the app icon does not list all four quick actions")
         springboard.buttons["New Spreadsheet"].tap()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15), "New Spreadsheet did not start the app")
+        // a launch from the icon carries no test session: the account wall comes first and the quick action waits
+        // behind it (no editor, no new file) until the user has signed in - here the app's local test session
+        let wall = app.descendants(matching: .any).matching(identifier: "xr-acct-wall").firstMatch
+        let walled = wall.waitForExistence(timeout: 20)
+        let early = app.staticTexts["xr-bar-title"].waitForExistence(timeout: 6)
+        print("XR springboard: account wall=\(walled) editor behind it=\(early)")
+        shot("springboard-account-wall")
+        XCTAssertTrue(walled, "no account wall on a launch without an account")
+        XCTAssertFalse(early, "the quick action opened an editor behind the account wall")
+        CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
+                                             CFNotificationName("com.xrero.office.autotest.session" as CFString), nil, nil, true)
+        if !waitGone(wall, 6) {
+            print("XR springboard: test session notification not seen, xrero-autotest://session")
+            XCUIDevice.shared.system.open(URL(string: "xrero-autotest://session")!)
+        }
+        XCTAssertTrue(waitGone(wall, 15), "the account wall stayed after sign-in")
         let title = editorTitle(app)
         print("XR springboard: New Spreadsheet opened title=\(title ?? "none")")
         shot("springboard-new-spreadsheet")

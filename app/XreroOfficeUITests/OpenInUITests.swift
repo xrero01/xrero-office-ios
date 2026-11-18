@@ -34,7 +34,8 @@ final class OpenInUITests: XCTestCase {
         // plan S2 (stage-6 merge): a handed-over Word file opens in reading view by default; this test types into it
         // at once, so the setting is off here (the reading view itself: EditorUITests.testReadingViewEditDoneThenType)
         app.launchArguments = ["-xr.lang", run.lang, "-xr.readingView", "NO"]
-        var env = ["XR_REAL": "1", "XR_INCOMING": run.file, "XR_INCOMING_MODE": run.mode]
+        // a local stored session: nothing opens without an account (AccountWallUITests holds an Open in at the wall)
+        var env = ["XR_REAL": "1", "XR_INCOMING": run.file, "XR_INCOMING_MODE": run.mode, "XR_TEST_SESSION": "1"]
         if run.clash { env["XR_INCOMING_CLASH"] = "1" }
         app.launchEnvironment = env
         app.launch()

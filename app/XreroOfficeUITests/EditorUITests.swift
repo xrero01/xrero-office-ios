@@ -736,7 +736,8 @@ final class EditorUITests: XCTestCase {
             let ar = run.lang == "ar"
             let app = XCUIApplication()
             app.launchArguments = ["-xr.lang", run.lang]
-            app.launchEnvironment = ["XR_REAL": "1", "XR_NEW_NAME": run.file]
+            // the real editor path opens nothing without an account (AccountWallUITests): a local stored session
+            app.launchEnvironment = ["XR_REAL": "1", "XR_NEW_NAME": run.file, "XR_TEST_SESSION": "1"]
             app.launch()
             let title = app.staticTexts["xr-bar-title"], status = app.staticTexts["xr-bar-status"]
             func statusNow() -> String { (try? status.firstMatch.snapshot())?.label ?? "(none)" }
@@ -918,7 +919,8 @@ final class EditorUITests: XCTestCase {
             let ar = lang == "ar"
             let app = XCUIApplication()
             app.launchArguments = ["-xr.lang", lang]
-            app.launchEnvironment = ["XR_REAL": "1", "XR_REAL_IDLE": "1", "XR_NEW_NAME": "xr-pick.docx"]
+            // the real editor path opens nothing without an account (AccountWallUITests): a local stored session
+            app.launchEnvironment = ["XR_REAL": "1", "XR_REAL_IDLE": "1", "XR_NEW_NAME": "xr-pick.docx", "XR_TEST_SESSION": "1"]
             app.launch()
             let listButton = app.buttons["xr-real-list"]
             XCTAssertTrue(listButton.waitForExistence(timeout: 30), "the harness did not start (\(lang))")
@@ -1213,7 +1215,8 @@ final class EditorUITests: XCTestCase {
         func launchReal(_ lang: String, _ file: String, _ bytes: String, setting: Bool = true) -> XCUIApplication {
             let app = XCUIApplication()
             app.launchArguments = ["-xr.lang", lang] + (setting ? [] : ["-xr.readingView", "NO"])
-            app.launchEnvironment = ["XR_REAL": "1", "XR_NEW_NAME": file, "XR_DOC_B64": bytes]
+            // the real editor path opens nothing without an account (AccountWallUITests): a local stored session
+            app.launchEnvironment = ["XR_REAL": "1", "XR_NEW_NAME": file, "XR_DOC_B64": bytes, "XR_TEST_SESSION": "1"]
             app.launch()
             return app
         }
@@ -3376,9 +3379,10 @@ final class EditorUITests: XCTestCase {
             }
             XCTAssertTrue(ok, msg)
         }
-        // scrolls the Home list by a slow drag on the list itself (app.swipeUp did not move it at AX5 on CI)
-        func scrollTo(_ app: XCUIApplication, _ e: XCUIElement) -> Bool {
-            let list = app.collectionViews["xr-home-list"].firstMatch
+        // scrolls the Home list (or the account wall) by a slow drag on the list itself (app.swipeUp did not move it
+        // at AX5 on CI)
+        func scrollTo(_ app: XCUIApplication, _ e: XCUIElement, list id: String = "xr-home-list") -> Bool {
+            let list = app.collectionViews[id].firstMatch
             for _ in 0..<12 {
                 if e.exists && e.isHittable { return true }
                 guard list.exists else { break }
@@ -3389,10 +3393,10 @@ final class EditorUITests: XCTestCase {
             return e.exists && e.isHittable
         }
         func check(_ app: XCUIApplication, _ id: String, _ where_: String, bar: Bool = false, hittable: Bool = true,
-                   lang: String) -> XCUIElement {
+                   lang: String, list: String = "xr-home-list") -> XCUIElement {
             var e = app.buttons[id].firstMatch
             if !e.exists { e = app.descendants(matching: .any)[id].firstMatch }
-            let found = (bar ? e.waitForExistence(timeout: 10) : scrollTo(app, e)) && e.exists
+            let found = (bar ? e.waitForExistence(timeout: 10) : scrollTo(app, e, list: list)) && e.exists
             let f = found ? e.frame : .zero
             let label = found ? e.label : ""
             let minH: CGFloat = bar ? 35.5 : 43.5
@@ -3411,18 +3415,30 @@ final class EditorUITests: XCTestCase {
             return e
         }
         for lang in ["en", "ar"] {
-            // Home (the real start screen; XR_HOME=1 in the Autotest build)
+            // the account wall (no stored account: the first thing a new user sees) - its tabs (stacked at AX5), the
+            // language switch, Continue (disabled until something is typed), Privacy Policy and About & Licences
+            let wall = XCUIApplication()
+            wall.launchEnvironment = ["XR_HOME": "1", "XR_NO_SESSION": "1"]
+            wall.launchArguments = ["-xr.lang", lang] + ax5
+            wall.launch()
+            must(wall.collectionViews["xr-acct-wall"].firstMatch.waitForExistence(timeout: 30), "no account wall (\(lang))")
+            sleep(1)
+            shot(wall, "59-a11y-wall-\(lang)-ax5")
+            for id in ["xr-acct-lang", "xr-acct-tab-in", "xr-acct-tab-new"] { _ = check(wall, id, "wall", lang: lang, list: "xr-acct-wall") }
+            _ = check(wall, "xr-acct-submit", "wall", hittable: false, lang: lang, list: "xr-acct-wall")
+            for id in ["xr-acct-privacy", "xr-acct-about"] { _ = check(wall, id, "wall", lang: lang, list: "xr-acct-wall") }
+            shot(wall, "59b-a11y-wall-\(lang)-ax5-scrolled")
+            wall.terminate()
+
+            // Home (the real start screen; XR_HOME=1 in the Autotest build) with a local stored session
             let home = XCUIApplication()
-            home.launchEnvironment = ["XR_HOME": "1"]
-            home.launchArguments = ["-xr.lang", lang, "-xr.welcomeShown", "NO"] + ax5
+            home.launchEnvironment = ["XR_HOME": "1", "XR_TEST_SESSION": "1"]
+            home.launchArguments = ["-xr.lang", lang] + ax5
             home.launch()
             must(home.descendants(matching: .any)["xr-home-list"].waitForExistence(timeout: 30), "Home did not open (\(lang))")
             sleep(1)
             shot(home, "60-a11y-home-\(lang)-ax5")
             _ = check(home, "xr-home-more", "home", bar: true, lang: lang)
-            // the account card's two buttons (stacked at AX5); not tapped, so nothing is stored in the simulator
-            _ = check(home, "xr-home-signin", "home", lang: lang)
-            _ = check(home, "xr-home-signin-later", "home", lang: lang)
             // at accessibility sizes the create tiles stack in one column: the large text really is applied
             // (one column = each tile about the window's width; in a row each is under a third of it)
             let word = check(home, "xr-home-word", "home", lang: lang)
@@ -3764,7 +3780,8 @@ final class EditorUITests: XCTestCase {
         }
         let app = XCUIApplication()
         app.launchArguments = ["-xr.lang", "en"]
-        app.launchEnvironment = ["XR_REAL": "1", "XR_NEW_NAME": "xr-window-real.docx", "XR_MENU_FILE": file]
+        // a local stored session: the real editor path opens nothing without an account (AccountWallUITests)
+        app.launchEnvironment = ["XR_REAL": "1", "XR_NEW_NAME": "xr-window-real.docx", "XR_MENU_FILE": file, "XR_TEST_SESSION": "1"]
         app.launch()
         let title = app.staticTexts["xr-bar-title"], status = app.staticTexts["xr-bar-status"]
         let reopen = app.buttons["xr-real-reopen"]

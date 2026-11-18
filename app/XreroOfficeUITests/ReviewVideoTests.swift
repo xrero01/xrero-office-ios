@@ -2,12 +2,15 @@ import XCTest
 
 /// App Review screen recording (review-video.yml records the simulator while this runs). Drives the REAL app (Debug/Release
 /// configuration: the system document picker + editor, no test overlay) the way a user does: Home screen -> tap the icon
-/// -> home screen (the optional account card: Sign in opens the account, Not now hides it) > New document -> type English +
-/// Arabic with Bold -> Save -> close -> Home's Recent (search, context menu, swipe) -> Open a PDF (the picker as a sheet,
-/// Cancel) -> open a spreadsheet and a presentation from Files (Browse files: the picker sheet, plan S9) -> switch the
-/// interface to Arabic in the editor's ⋯ > Language menu (Home follows) -> Settings > Xrero Office > Licences ->
-/// relaunch (no account card, still Arabic). Steps are best-effort (the recording
-/// matters more than any single step); every step leaves a screenshot and the element tree when something is missing.
+/// -> the account wall (the free Xrero account is required: Sign in / Create account, the privacy policy, no way past it;
+/// a made-up sign-in gets the server's answer) -> relaunch with the Debug build's LOCAL session (XR_TEST_SESSION=1: no
+/// account is created or used on xrero.com) -> home screen > New document -> type English + Arabic with Bold -> Save ->
+/// the account in ⋯ > Account (Sign out, Delete account; nothing tapped) -> close -> Home's Recent (search, context menu,
+/// swipe) -> Open a PDF (the picker as a sheet, Cancel) -> open a spreadsheet and a presentation from Files (Browse files:
+/// the picker sheet, plan S9) -> switch the interface to Arabic in the editor's ⋯ > Language menu (Home follows) ->
+/// Settings > Xrero Office > Licences -> relaunch (signed in: no wall, still Arabic). Steps are best-effort (the
+/// recording matters more than any single step); every step leaves a screenshot and the element tree when something is
+/// missing.
 final class ReviewVideoTests: XCTestCase {
 
     private let app = XCUIApplication()
@@ -166,26 +169,38 @@ final class ReviewVideoTests: XCTestCase {
         if launched { pause(1); app.activate() } else { dump("icon", springboard); app.launch() }
         pause(3)
         shot("01-launched")
-        // first launch: no sign-in wall. Home comes straight up with the optional account as an inline card, whose
-        // Sign in opens the account sheet and whose Not now hides it for good.
+        // first launch: the account wall - the free Xrero account is required (as on Windows and Mac). Sign in / Create
+        // account and the privacy policy; no skip, nothing to swipe away
+        let wall = app.descendants(matching: .any).matching(identifier: "xr-acct-wall").firstMatch
         let acctEmail = app.textFields.matching(identifier: "xr-acct-email").firstMatch
-        XCTAssertFalse(acctEmail.waitForExistence(timeout: 3), "an account sheet was presented by itself on first launch")
-        let card = app.descendants(matching: .any).matching(identifier: "xr-home-account-card").firstMatch
-        if card.waitForExistence(timeout: 15) {
-            shot("01a-account-card")
-            if let signIn = find(app.buttons, "identifier == 'xr-home-signin'", timeout: 3) {
-                signIn.tap()
-                XCTAssertTrue(acctEmail.waitForExistence(timeout: 10), "Sign in on the Home card did not open the account sheet")
-                shot("01a-account-sheet")
-                let done = app.buttons.matching(NSPredicate(format: "label == 'Done' OR label == 'تم'")).firstMatch
-                if done.exists { done.tap() } else { app.swipeDown() }
-                pause(1.5)
-            } else { XCTFail("no Sign in button on the account card"); dump("card-signin") }
-            if let later = find(app.buttons, "identifier == 'xr-home-signin-later'", timeout: 5) {
-                later.tap(); pause(1.5)
-            } else { XCTFail("no Not now button on the account card"); dump("card-later") }
-            XCTAssertFalse(card.exists, "the account card is still shown after Not now")
-        } else { XCTFail("no account card on Home at first launch"); dump("account-card") }
+        if wall.waitForExistence(timeout: 20) {
+            shot("01a-account-wall")
+            XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "xr-acct-skip").firstMatch.exists, "a skip on the wall")
+            XCTAssertTrue(app.buttons.matching(identifier: "xr-acct-tab-new").firstMatch.exists, "no Create account on the wall")
+            XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "xr-acct-privacy").firstMatch.exists, "no Privacy Policy on the wall")
+            app.swipeDown(); pause(1)
+            XCTAssertTrue(wall.exists, "the account wall went away on a swipe down")
+            // a made-up sign-in (never a real account): the server's answer, worded for people (no status codes)
+            if acctEmail.waitForExistence(timeout: 5) {
+                acctEmail.tap(); typeSlowly("review-check@example.com")
+                let pw = app.secureTextFields.matching(identifier: "xr-acct-password").firstMatch
+                pw.tap(); typeSlowly("not-a-real-password")
+                shot("01b-account-typed")
+                app.buttons.matching(identifier: "xr-acct-submit").firstMatch.tap()
+                let answer = app.descendants(matching: .any).matching(identifier: "xr-acct-error").firstMatch
+                XCTAssertTrue(answer.waitForExistence(timeout: 30), "no answer from the account server")
+                print("XR account answer:", answer.label)
+                XCTAssertFalse(answer.label.contains("HTTP"), "a raw status code reached the account wall: \(answer.label)")
+                shot("01c-account-answer")
+            } else { dump("account-email") }
+        } else { XCTFail("no account wall at first launch"); dump("account-wall") }
+
+        // the rest with the Debug build's LOCAL session (XreroAccount: never sent to xrero.com, no account created)
+        app.terminate()
+        app.launchEnvironment = ["XR_TEST_SESSION": "1"]
+        app.launch()
+        pause(3)
+        XCTAssertFalse(wall.exists, "the account wall over a signed-in Home")
 
         // 2. The home screen (plan M8): one row of create tiles, Browse files / Open a PDF, and the empty Recent state
         shot("01b-home")
@@ -237,27 +252,18 @@ final class ReviewVideoTests: XCTestCase {
         XCTAssertTrue(saveDocument(), "the top bar does not say Saved after Save (\(barStatus() ?? "no line"))")
         shot("03-saved")
 
-        // 3b. The top bar's ⋯ > Sign in -> the account screen; a wrong password shows the server's answer
+        // 3b. The top bar's ⋯ > Account -> the account: Sign out and Delete account (in the app, 5.1.1(v)); only looked at
         if barMenu("xr-nav-account") {
             pause(2)
-            let mail = app.textFields.matching(identifier: "xr-acct-email").firstMatch
-            if mail.waitForExistence(timeout: 10) {
-                mail.tap(); typeSlowly("review-check@example.com")
-                let pw = app.secureTextFields.matching(identifier: "xr-acct-password").firstMatch
-                pw.tap(); typeSlowly("not-a-real-password")
+            let signout = app.buttons.matching(identifier: "xr-acct-signout").firstMatch
+            if signout.waitForExistence(timeout: 10) {
+                XCTAssertTrue(app.buttons.matching(identifier: "xr-acct-delete").firstMatch.exists, "no Delete account in the app")
                 shot("03b-account")
-                app.buttons.matching(identifier: "xr-acct-submit").firstMatch.tap()
-                // the server's answer, worded for people (no status codes, plan M9b)
-                let answer = app.descendants(matching: .any).matching(identifier: "xr-acct-error").firstMatch
-                XCTAssertTrue(answer.waitForExistence(timeout: 30), "no answer from the account server")
-                print("XR account answer:", answer.label)
-                XCTAssertFalse(answer.label.contains("HTTP"), "a raw status code reached the account sheet: \(answer.label)")
-                shot("03c-account-answer")
                 let done = app.buttons.matching(NSPredicate(format: "label == 'Done' OR label == 'تم'")).firstMatch
                 if done.exists { done.tap() } else { app.swipeDown() }
                 pause(1.5)
             } else { dump("account-sheet") }
-        } else { dump("signin-button") }
+        } else { dump("account-button") }
 
         closeDocument()
         shot("04-home")
@@ -350,14 +356,13 @@ final class ReviewVideoTests: XCTestCase {
         } else { dump("licences", settings) }
         pause(1)
 
-        // 8. Back to Xrero Office after a fresh start: the account card answered with Not now stays away
+        // 8. Back to Xrero Office after a fresh start (the same local session): Home, no account wall
         app.terminate()
         app.launch()
         pause(3)
         XCTAssertTrue(app.buttons.matching(identifier: "xr-home-word").firstMatch.waitForExistence(timeout: 20), "no Home after relaunch")
-        XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "xr-home-account-card").firstMatch.exists,
-                       "the account card came back after Not now")
-        XCTAssertFalse(acctEmail.exists, "an account sheet was presented by itself after relaunch")
+        XCTAssertFalse(wall.exists, "the account wall came back with a stored account")
+        XCTAssertFalse(acctEmail.exists, "an account form was shown by itself after relaunch")
         // the Arabic choice made in the editor persists across a relaunch
         if arabic { XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label ==[c] 'الأخيرة'")).firstMatch.waitForExistence(timeout: 5),
                       "the interface language did not persist across a relaunch") }
